@@ -52,7 +52,7 @@ This MCP server analyzes your codebase to identify the most important files base
    ```json
    {
      "mcpServers": {
-       "file-rank-mcp": {
+       "FileScopeMCP": {
          "command": "node",
          "args": ["path/to/dist/mcp-server.js"],
          "transport": "stdio"

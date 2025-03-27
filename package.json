@@ -1,6 +1,6 @@
 {
-  "name": "file-rank-mcp",
-  "version": "1.0.0",
+  "name": "FileScopeMCP",
+  "version": "2.1.0",
   "description": "MCP server for file hierarchy and dependency tracking",
   "main": "dist/mcp-server.js",
   "scripts": {

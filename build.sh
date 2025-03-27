@@ -1,6 +1,6 @@
 #!/bin/bash
 # PATH: ./build.sh
-# MCP setup script for file-rank-mcp
+# MCP setup script for FileScopeMCP
 
 # Exit immediately on error
 set -e
@@ -13,7 +13,7 @@ RED='\033[1;31m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-APPNAME="file-rank-mcp"
+APPNAME="FileScopeMCP"
 LOGFILE="/tmp/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
 
 # Logging functions
