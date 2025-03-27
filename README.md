@@ -1,4 +1,4 @@
-# File Rank MCP (Model Context Protocol) Server
+# FileScopeMCP (Model Context Protocol) Server
 
 A TypeScript-based tool for ranking files in your codebase by importance, tracking dependencies, and providing summaries to help understand code structure.
 

@@ -54,7 +54,7 @@ print_detail() {
 }
 
 # Main script execution
-print_header "Starting MCP File Rank Setup"
+print_header "Starting FileScopeMCP Setup"
 
 # Check for Node.js
 print_action "Checking for Node.js..."

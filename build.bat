@@ -1,7 +1,7 @@
 @echo off
 SETLOCAL EnableDelayedExpansion
 
-echo === Starting MCP File Rank Setup ===
+echo === Starting MCP FileScopeMCP Setup ===
 
 :: Check for Node.js in Program Files
 set "NODE_EXE=C:\Program Files\nodejs\node.exe"
