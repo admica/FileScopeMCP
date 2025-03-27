@@ -40,11 +40,9 @@ This MCP server analyzes your codebase to identify the most important files base
 ## Installation
 
 1. Clone this repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Build the project:
+2. Build the project:
+
+   The build script will install all node dependencies and generate mcp.json for you.
 
    Windows:
    ```bash
@@ -55,7 +53,7 @@ This MCP server analyzes your codebase to identify the most important files base
    ```bash
    build.sh
    ```
-4. Copy the genereated mcp.json configuration to your project's `.cursor` directory:
+3. Copy the genereated mcp.json configuration to your project's `.cursor` directory:
    ```json
    {
      "mcpServers": {
