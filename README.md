@@ -45,16 +45,21 @@ This MCP server analyzes your codebase to identify the most important files base
    npm install
    ```
 3. Build the project:
+   * Windows:
    ```bash
-   npm run build
+   build.bat
    ```
-4. Create a Cursor MCP configuration in your project's `.cursor` directory:
+   * Linux:
+   ```bash
+   build.sh
+   ```
+4. Copy the genereated mcp.json configuration to your project's `.cursor` directory:
    ```json
    {
      "mcpServers": {
        "FileScopeMCP": {
          "command": "node",
-         "args": ["path/to/dist/mcp-server.js"],
+         "args": ["yourpath/to/dist/mcp-server.js"],
          "transport": "stdio"
        }
      }
