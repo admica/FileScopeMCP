@@ -21,6 +21,13 @@ This MCP server analyzes your codebase to identify the most important files base
   - Distinguish between local dependencies and package dependencies
   - Support for multiple languages including Python, JavaScript, TypeScript, C/C++, Rust, Lua, and Zig
 
+- **Visualization**
+  - Generate Mermaid diagrams to visualize file relationships
+  - Color-coded visualization based on importance scores
+  - Support for dependency graphs, directory trees, or hybrid views
+  - Optional HTML output with embedded rendering
+  - Customize diagram size and filtering options
+
 - **File Summaries**
   - Add human or AI-generated summaries to files
   - Retrieve stored summaries to quickly understand file purpose
