@@ -45,11 +45,13 @@ This MCP server analyzes your codebase to identify the most important files base
    npm install
    ```
 3. Build the project:
-   * Windows:
+
+   Windows:
    ```bash
    build.bat
    ```
-   * Linux:
+
+   Linux:
    ```bash
    build.sh
    ```
