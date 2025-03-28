@@ -79,30 +79,12 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
   return config;
 }
 
-// Test function to verify file writing
-async function testFileWrite() {
-  const testPath = path.join(process.cwd(), 'test-write.json');
-  console.error('Writing test file to:', testPath);
-  try {
-    fsSync.writeFileSync(testPath, JSON.stringify({ test: true }, null, 2), 'utf8');
-    console.error('Successfully wrote test file');
-    return true;
-  } catch (error) {
-    console.error('Failed to write test file:', error);
-    return false;
-  }
-}
-
 /**
  * Saves a file tree to disk
  */
 export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): Promise<void> {
   try {
     console.error('Save file tree called with config:', JSON.stringify(config, null, 2));
-    
-    // Test file writing first
-    const testResult = await testFileWrite();
-    console.error('Test write result:', testResult);
     
     // Save in the current working directory
     const filePath = path.join(process.cwd(), config.filename);
