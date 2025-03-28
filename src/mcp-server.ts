@@ -95,7 +95,7 @@ let currentConfig: FileTreeConfig | null = null;
 
 // Default config
 const DEFAULT_CONFIG: FileTreeConfig = {
-  filename: "file-tree.json",
+  filename: "FileScopeMCP-tree.json",
   baseDirectory: process.cwd(),
   lastUpdated: new Date()
 };

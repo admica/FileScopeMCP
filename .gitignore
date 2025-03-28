@@ -14,4 +14,4 @@ mcp.json
 *.tmp
 *.bak
 package-lock.json
-file-tree.json
+FileScopeMCP-tree.json
