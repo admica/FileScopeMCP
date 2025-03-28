@@ -31,6 +31,7 @@ export interface ToolResponse {
 export interface FileTreeConfig {
   filename: string;        // Name of the JSON file to store the file tree
   baseDirectory: string;   // Base directory to scan
+  projectRoot: string;     // Project root directory (where files will be stored)
   lastUpdated?: Date;      // When the file tree was last updated
 }
 

@@ -10,6 +10,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.7.0",
     "chokidar": "^3.6.0",
+    "mermaid": "^10.9.3",
+    "puppeteer": "^24.4.0",
+    "sharp": "^0.33.5",
     "zod": "^3.22.4"
   },
   "devDependencies": {

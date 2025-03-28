@@ -15,8 +15,8 @@ import {
 import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath } from "./file-utils.js";
 import { 
   createFileTreeConfig, 
-  saveFileTree, 
-  loadFileTree, 
+  saveFileTree,
+  loadFileTree,
   listSavedFileTrees,
   updateFileNode,
   getFileNode,
@@ -25,27 +25,92 @@ import {
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
 
-// Define and set the project root directory
-// This helps ensure we're working from the correct directory
-let projectRoot = process.cwd();
+const PROJECT_ROOT_MARKERS = [
+  '.cursor/mcp.json',  // Most reliable for Cursor projects
+  '.git',              // VCS marker
+  'package.json',      // Node.js
+  'Cargo.toml',        // Rust
+  'go.mod',           // Go
+  'build.gradle',     // Java/Android
+  'setup.py',         // Python
+  'build.zig',        // Zig
+  'Makefile',         // Make
+  'Gemfile',          // Ruby
+  'src'               // Source dir
+];
 
-// If we're in the dist or src directory, go up one level
-if (projectRoot.endsWith('dist') || projectRoot.endsWith('src')) {
-  projectRoot = path.resolve(projectRoot, '..');
+async function detectProjectRoot(startDir: string): Promise<string> {
+  let currentDir = startDir;
+  let levelsUp = 0;
+  const maxLevels = 3;
+  
+  console.error(`Starting project root detection from: ${currentDir}`);
+  
+  while (currentDir !== path.parse(currentDir).root && levelsUp <= maxLevels) {
+    console.error(`\nChecking directory (level ${levelsUp}): ${currentDir}`);
+    
+    for (const marker of PROJECT_ROOT_MARKERS) {
+      const markerPath = path.join(currentDir, marker);
+      try {
+        await fs.access(markerPath);
+        console.error(`✓ Found project marker: ${marker}`);
+        console.error(`✓ Project root identified: ${currentDir}`);
+        return currentDir;
+      } catch {
+        console.error(`✗ No ${marker} found`);
+      }
+    }
+    
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      console.error('! Reached root directory, using start directory');
+      return startDir;
+    }
+    
+    currentDir = parentDir;
+    levelsUp++;
+  }
+  
+  console.error(`! No project markers found within ${maxLevels} levels, using start directory`);
+  return startDir;
 }
 
-// Handle common patterns to detect we're in the wrong directory
-// Check if package.json exists to validate project root
-if (!fsSync.existsSync(path.join(projectRoot, 'package.json'))) {
-  // Try going up one level
-  const potentialRoot = path.resolve(projectRoot, '..');
-  if (fsSync.existsSync(path.join(potentialRoot, 'package.json'))) {
-    projectRoot = potentialRoot;
+// Initialize server state
+let projectRoot: string;
+let fileTree: FileNode | null = null;
+let currentConfig: FileTreeConfig | null = null;
+let DEFAULT_CONFIG: FileTreeConfig;
+
+// Server initialization
+async function initializeServer(): Promise<void> {
+  // Check for command line override first
+  const rootArg = process.argv.find(arg => arg.startsWith('--project-root='));
+  if (rootArg) {
+    projectRoot = rootArg.split('=')[1];
+    console.error(`Using provided project root: ${projectRoot}`);
+  } else {
+    // Auto-detect from current directory
+    projectRoot = await detectProjectRoot(process.cwd());
+  }
+  
+  console.error(`Final project root set to: ${projectRoot}`);
+  process.chdir(projectRoot);
+  
+  // Now we can safely set the default config
+  DEFAULT_CONFIG = {
+    filename: "FileScopeMCP-tree.json",
+    baseDirectory: projectRoot,
+    projectRoot: projectRoot,
+    lastUpdated: new Date()
+  };
+  
+  // Try to load the default file tree
+  try {
+    await buildFileTree(DEFAULT_CONFIG);
+  } catch (error) {
+    console.error("Failed to build default file tree:", error);
   }
 }
-
-console.error(`Setting project root to: ${projectRoot}`);
-process.chdir(projectRoot);
 
 /**
  * A simple implementation of the Transport interface for stdio
@@ -88,7 +153,10 @@ class StdioTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
-    process.stdout.write(serializeMessage(message));
+    // Ensure we only write valid JSON messages to stdout
+    const serialized = serializeMessage(message);
+    process.stderr.write(`Debug: Sending message: ${serialized}\n`);
+    process.stdout.write(serialized + '\n');  // Add newline for proper message separation
   }
 
   async close(): Promise<void> {
@@ -96,16 +164,40 @@ class StdioTransport implements Transport {
   }
 }
 
-// State
-let fileTree: FileNode | null = null;
-let currentConfig: FileTreeConfig | null = null;
+// Helper function to create MCP responses
+function createMcpResponse(content: any, isError = false): ToolResponse {
+  let formattedContent;
+  
+  if (Array.isArray(content) && content.every(item => 
+    typeof item === 'object' && 
+    ('type' in item) && 
+    (item.type === 'text' || item.type === 'image' || item.type === 'resource'))) {
+    // Content is already in correct format
+    formattedContent = content;
+  } else if (Array.isArray(content)) {
+    // For arrays of non-formatted items, convert each item to a proper object
+    formattedContent = content.map(item => ({
+      type: "text",
+      text: typeof item === 'string' ? item : JSON.stringify(item, null, 2)
+    }));
+  } else if (typeof content === 'string') {
+    formattedContent = [{
+      type: "text",
+      text: content
+    }];
+  } else {
+    // Convert objects or other types to string
+    formattedContent = [{
+      type: "text",
+      text: typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content)
+    }];
+  }
 
-// Default config
-const DEFAULT_CONFIG: FileTreeConfig = {
-  filename: "FileScopeMCP-tree.json",
-  baseDirectory: process.cwd(),
-  lastUpdated: new Date()
-};
+  return {
+    content: formattedContent,
+    isError
+  };
+}
 
 // Utility functions
 function findNode(node: FileNode, targetPath: string): FileNode | null {
@@ -252,12 +344,7 @@ const server = new McpServer(serverInfo, {
 // Register tools
 server.tool("list_saved_trees", "List all saved file trees", async () => {
   const trees = await listSavedFileTrees();
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify(trees, null, 2)
-    }]
-  };
+  return createMcpResponse(trees);
 });
 
 server.tool("delete_file_tree", "Delete a file tree configuration", {
@@ -273,27 +360,12 @@ server.tool("delete_file_tree", "Delete a file tree configuration", {
       fileTree = null;
     }
     
-    return {
-      content: [{
-        type: "text",
-        text: `Successfully deleted ${normalizedPath}`
-      }]
-    };
+    return createMcpResponse(`Successfully deleted ${normalizedPath}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return {
-        content: [{
-          type: "text",
-          text: `File tree ${params.filename} does not exist`
-        }]
-      };
+      return createMcpResponse(`File tree ${params.filename} does not exist`);
     }
-    return {
-      content: [{
-        type: "text",
-        text: `Failed to delete ${params.filename}: ${error}`
-      }]
-    };
+    return createMcpResponse(`Failed to delete ${params.filename}: ${error}`, true);
   }
 });
 
@@ -322,24 +394,13 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
     fileTree = tree;
     currentConfig = config;
     
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          message: `File tree created and stored in ${config.filename}`,
-          config
-        }, null, 2)
-      }]
-    };
+    return createMcpResponse({
+      message: `File tree created and stored in ${config.filename}`,
+      config
+    });
   } catch (error) {
     console.error('Error in create_file_tree:', error);
-    return {
-      content: [{
-        type: "text",
-        text: `Failed to create file tree: ${error}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`Failed to create file tree: ${error}`, true);
   }
 });
 
@@ -348,39 +409,23 @@ server.tool("select_file_tree", "Select an existing file tree to work with", {
 }, async (params: { filename: string }) => {
   const storage = await loadFileTree(params.filename);
   if (!storage) {
-    return {
-      content: [{
-        type: "text",
-        text: `File tree not found: ${params.filename}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`File tree not found: ${params.filename}`, true);
   }
   
   fileTree = storage.fileTree;
   currentConfig = storage.config;
   
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify({
-        message: `File tree loaded from ${params.filename}`,
-        config: currentConfig
-      }, null, 2)
-    }]
-  };
+  return createMcpResponse({
+    message: `File tree loaded from ${params.filename}`,
+    config: currentConfig
+  });
 });
 
 server.tool("list_files", "List all files in the project with their importance rankings", async () => {
   if (!fileTree) {
     await buildFileTree(DEFAULT_CONFIG);
   }
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify(fileTree, null, 2)
-    }]
-  };
+  return createMcpResponse(fileTree);
 });
 
 server.tool("get_file_importance", "Get the importance ranking of a specific file", {
@@ -408,36 +453,19 @@ server.tool("get_file_importance", "Get the importance ranking of a specific fil
     } : null);
     
     if (!node) {
-      return {
-        content: [{
-          type: "text",
-          text: `File not found: ${params.filepath}`
-        }],
-        isError: true
-      };
+      return createMcpResponse(`File not found: ${params.filepath}`, true);
     }
     
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          path: node.path,
-          importance: node.importance || 0,
-          dependencies: node.dependencies || [],
-          dependents: node.dependents || [],
-          summary: node.summary || null
-        }, null, 2)
-      }]
-    };
+    return createMcpResponse({
+      path: node.path,
+      importance: node.importance || 0,
+      dependencies: node.dependencies || [],
+      dependents: node.dependents || [],
+      summary: node.summary || null
+    });
   } catch (error) {
     console.error('Error in get_file_importance:', error);
-    return {
-      content: [{
-        type: "text",
-        text: `Failed to get file importance: ${error}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`Failed to get file importance: ${error}`, true);
   }
 });
 
@@ -468,12 +496,7 @@ server.tool("find_important_files", "Find the most important files in the projec
       hasSummary: !!file.summary
     }));
   
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify(importantFiles, null, 2)
-    }]
-  };
+  return createMcpResponse(importantFiles);
 });
 
 // New tool to get the summary of a file
@@ -488,33 +511,17 @@ server.tool("get_file_summary", "Get the summary of a specific file", {
   const node = getFileNode(fileTree!, normalizedPath);
   
   if (!node) {
-    return {
-      content: [{
-        type: "text",
-        text: `File not found: ${params.filepath}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`File not found: ${params.filepath}`, true);
   }
   
   if (!node.summary) {
-    return {
-      content: [{
-        type: "text",
-        text: `No summary available for ${params.filepath}`
-      }]
-    };
+    return createMcpResponse(`No summary available for ${params.filepath}`);
   }
   
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify({
-        path: node.path,
-        summary: node.summary
-      }, null, 2)
-    }]
-  };
+  return createMcpResponse({
+    path: node.path,
+    summary: node.summary
+  });
 });
 
 // New tool to set the summary of a file
@@ -532,28 +539,17 @@ server.tool("set_file_summary", "Set the summary of a specific file", {
   });
   
   if (!updated) {
-    return {
-      content: [{
-        type: "text",
-        text: `File not found: ${params.filepath}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`File not found: ${params.filepath}`, true);
   }
   
   // Save the updated tree
   await saveFileTree(currentConfig!, fileTree!);
   
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify({
-        message: `Summary updated for ${params.filepath}`,
-        path: normalizedPath,
-        summary: params.summary
-      }, null, 2)
-    }]
-  };
+  return createMcpResponse({
+    message: `Summary updated for ${params.filepath}`,
+    path: normalizedPath,
+    summary: params.summary
+  });
 });
 
 // New tool to read a file's content
@@ -563,20 +559,9 @@ server.tool("read_file_content", "Read the content of a specific file", {
   try {
     const content = await readFileContent(params.filepath);
     
-    return {
-      content: [{
-        type: "text",
-        text: content
-      }]
-    };
+    return createMcpResponse(content);
   } catch (error) {
-    return {
-      content: [{
-        type: "text",
-        text: `Failed to read file: ${params.filepath} - ${error}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`Failed to read file: ${params.filepath} - ${error}`, true);
   }
 });
 
@@ -620,38 +605,21 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
       
       if (!foundFile) {
         console.error('File not found by any method');
-        return {
-          content: [{
-            type: "text",
-            text: `File not found: ${params.filepath}`
-          }],
-          isError: true
-        };
+        return createMcpResponse(`File not found: ${params.filepath}`, true);
       }
     }
     
     // Save the updated tree
     await saveFileTree(currentConfig!, fileTree!);
     
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          message: `Importance updated for ${params.filepath}`,
-          path: params.filepath,
-          importance: params.importance
-        }, null, 2)
-      }]
-    };
+    return createMcpResponse({
+      message: `Importance updated for ${params.filepath}`,
+      path: params.filepath,
+      importance: params.importance
+    });
   } catch (error) {
     console.error('Error in set_file_importance:', error);
-    return {
-      content: [{
-        type: "text",
-        text: `Failed to set file importance: ${error}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`Failed to set file importance: ${error}`, true);
   }
 });
 
@@ -671,16 +639,11 @@ server.tool("recalculate_importance", "Recalculate importance values for all fil
   const allFiles = getAllFileNodes(fileTree!);
   const filesWithImportance = allFiles.filter(file => (file.importance || 0) > 0);
   
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify({
-        message: "Importance values recalculated",
-        totalFiles: allFiles.length,
-        filesWithImportance: filesWithImportance.length
-      }, null, 2)
-    }]
-  };
+  return createMcpResponse({
+    message: "Importance values recalculated",
+    totalFiles: allFiles.length,
+    filesWithImportance: filesWithImportance.length
+  });
 });
 
 // Add a debug tool to list all file paths
@@ -699,114 +662,236 @@ server.tool("debug_list_all_files", "List all file paths in the current file tre
     importance: file.importance || 0
   }));
   
-  return {
-    content: [{
-      type: "text",
-      text: JSON.stringify({
-        totalFiles: fileDetails.length,
-        files: fileDetails
-      }, null, 2)
-    }]
-  };
+  return createMcpResponse({
+    totalFiles: fileDetails.length,
+    files: fileDetails
+  });
 });
 
 // Add diagram generation tool
 server.tool("generate_diagram", "Generate a Mermaid diagram for the current file tree", {
-  maxDepth: z.number().min(1).max(10).optional().describe("Maximum depth for directory trees (1-10)"),
-  minImportance: z.number().min(0).max(10).optional().describe("Only show files above this importance (0-10)"),
-  showDependencies: z.boolean().optional().describe("Whether to show dependency relationships"),
-  style: z.enum(['default', 'dependency', 'directory', 'hybrid']).optional().describe("Diagram style"),
+  style: z.enum(['default', 'dependency', 'directory', 'hybrid']).describe('Diagram style'),
+  maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
+  minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
+  showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
+  outputFile: z.string().optional().describe('Optional output file name for the diagram'),
+  outputFormat: z.enum(['mmd', 'png']).optional().describe('Output format (mmd or png)'),
   layout: z.object({
     direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
     rankSpacing: z.number().min(10).max(100).optional(),
     nodeSpacing: z.number().min(10).max(100).optional()
-  }).optional().describe("Layout configuration"),
-  outputFile: z.string().optional().describe("Optional output file name for the diagram")
+  }).optional()
 }, async (params) => {
   try {
     if (!fileTree) {
-      return {
-        content: [{
-          type: "text",
-          text: "No file tree loaded. Please create or select a file tree first."
-        }],
-        isError: true
-      };
+      return createMcpResponse("No file tree loaded. Please create or select a file tree first.", true);
     }
 
-    // Validate and normalize parameters
-    const config: MermaidDiagramConfig = {
-      style: params.style || 'hybrid',
-      maxDepth: Math.min(Math.max(params.maxDepth || 5, 1), 10),
-      minImportance: Math.min(Math.max(params.minImportance || 0, 0), 10),
-      showDependencies: params.showDependencies ?? true,
-      layout: params.layout || {
-        direction: 'TB',
-        rankSpacing: 50,
-        nodeSpacing: 40
-      }
-    };
-
-    const generator = new MermaidGenerator(fileTree, config);
+    // Generate the diagram
+    const generator = new MermaidGenerator(fileTree, params);
     const diagram = generator.generate();
+    const mermaidContent = diagram.code;
 
-    // Format the Mermaid content
-    const mermaidContent = `---
-title: File Scope Diagram
----
-%%{init: {'theme': 'default'}}%%
-${diagram.code}`;
+    // Save diagram to file if requested
+    if (params.outputFile) {
+      const outputFormat = params.outputFormat || 'mmd';
+      const baseOutputPath = path.resolve(process.cwd(), params.outputFile);
+      const outputDir = path.dirname(baseOutputPath);
+      
+      process.stderr.write('Attempting to save diagram files:\n');
+      process.stderr.write(`- Base output path: ${baseOutputPath}\n`);
+      process.stderr.write(`- Output directory: ${outputDir}\n`);
+      
+      // Ensure output directory exists
+      try {
+        await fs.mkdir(outputDir, { recursive: true });
+        console.error('Created output directory:', outputDir);
+      } catch (err: any) {
+        if (err.code !== 'EEXIST') {
+          console.error('Error creating output directory:', err);
+          return createMcpResponse(`Failed to create output directory: ${err.message}`, true);
+        }
+      }
 
-    // Add validation warnings if any limits were adjusted
-    const warnings = [];
-    if (params.maxDepth && params.maxDepth !== config.maxDepth) {
-      warnings.push(`maxDepth adjusted to ${config.maxDepth} (valid range: 1-10)`);
-    }
-    if (params.minImportance && params.minImportance !== config.minImportance) {
-      warnings.push(`minImportance adjusted to ${config.minImportance} (valid range: 0-10)`);
-    }
+      // Save the Mermaid file
+      const mmdPath = baseOutputPath.endsWith('.mmd') ? baseOutputPath : baseOutputPath + '.mmd';
+      try {
+        await fs.writeFile(mmdPath, mermaidContent, 'utf8');
+        console.error('Successfully saved Mermaid file to:', mmdPath);
+      } catch (err: any) {
+        console.error('Error saving Mermaid file:', err);
+        return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
+      }
 
-    // Return the diagram content as a data URI resource
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            stats: diagram.stats,
-            style: diagram.style,
-            generated: diagram.timestamp,
-            warnings: warnings.length > 0 ? warnings : undefined
-          }, null, 2)
-        },
-        {
-          type: "resource" as const,
-          resource: {
-            uri: `data:text/x-mermaid;base64,${Buffer.from(mermaidContent).toString('base64')}`,
-            text: mermaidContent,
-            mimeType: "text/x-mermaid"
+      // If PNG output is requested, generate using Puppeteer
+      if (outputFormat === 'png') {
+        const pngPath = baseOutputPath.endsWith('.png') ? baseOutputPath : baseOutputPath + '.png';
+        console.error('Attempting to generate PNG:', pngPath);
+        
+        try {
+          const puppeteer = require('puppeteer');
+          process.stderr.write('Successfully required puppeteer\n');
+
+          // Launch browser with more explicit error handling
+          process.stderr.write('Launching browser with custom config...\n');
+          const browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+              '--no-sandbox',
+              '--disable-web-security',
+              '--disable-setuid-sandbox',
+              '--disable-gpu',
+              '--disable-dev-shm-usage'
+            ],
+            ignoreDefaultArgs: ['--disable-extensions'],
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            timeout: 30000
+          }).catch((err: Error) => {
+            process.stderr.write(`Failed to launch browser: ${err}\n`);
+            throw err;
+          });
+          process.stderr.write('Browser launched successfully\n');
+
+          const page = await browser.newPage().catch((err: Error) => {
+            process.stderr.write(`Failed to create new page: ${err}\n`);
+            throw err;
+          });
+          process.stderr.write('New page created\n');
+
+          // Set viewport size
+          await page.setViewport({
+            width: 1920,
+            height: 1080,
+            deviceScaleFactor: 1
+          });
+          process.stderr.write('Viewport set\n');
+
+          // Create HTML content with local Mermaid
+          const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js');
+          process.stderr.write(`Loading Mermaid from: ${mermaidPath}\n`);
+          const mermaidContent = await fs.readFile(mermaidPath, 'utf8');
+          process.stderr.write('Mermaid script loaded\n');
+          
+          const html = `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <script>${mermaidContent}</script>
+                <script>
+                  window.addEventListener('load', () => {
+                    process.stderr.write('Page loaded, initializing Mermaid...\n');
+                    mermaid.initialize({ 
+                      startOnLoad: true,
+                      theme: 'dark',
+                      logLevel: 'debug'
+                    });
+                  });
+                </script>
+                <style>
+                  body { 
+                    background: #2d3436;
+                    margin: 0;
+                    padding: 20px;
+                  }
+                  #container { 
+                    min-width: 800px;
+                    min-height: 600px;
+                  }
+                </style>
+              </head>
+              <body>
+                <div id="container">
+                  <div class="mermaid">
+                    ${diagram.code}
+                  </div>
+                </div>
+              </body>
+            </html>
+          `;
+
+          process.stderr.write('Setting page content...\n');
+          await page.setContent(html);
+          process.stderr.write('Page content set\n');
+
+          // Wait for Mermaid to render with increased timeout
+          process.stderr.write('Waiting for SVG element...\n');
+          await page.waitForSelector('svg', { timeout: 30000 });
+          process.stderr.write('SVG element found\n');
+
+          // Get the SVG element
+          const element = await page.$('svg');
+          if (!element) {
+            process.stderr.write('Failed to find SVG element after waiting\n');
+            throw new Error('Could not find SVG element');
+          }
+          process.stderr.write('Got SVG element handle\n');
+
+          // Get the bounding box
+          const box = await element.boundingBox();
+          if (!box) {
+            process.stderr.write('Failed to get SVG bounding box\n');
+            throw new Error('Could not get SVG bounding box');
+          }
+          process.stderr.write(`Got bounding box: ${JSON.stringify(box)}\n`);
+
+          // Take screenshot with padding
+          process.stderr.write(`Taking screenshot and saving to: ${pngPath}\n`);
+          const padding = 20;
+          await element.screenshot({
+            path: pngPath,
+            clip: {
+              x: box.x - padding,
+              y: box.y - padding,
+              width: box.width + (padding * 2),
+              height: box.height + (padding * 2)
+            },
+            omitBackground: true
+          });
+          process.stderr.write('Screenshot saved successfully\n');
+
+          await browser.close();
+          process.stderr.write('Browser closed\n');
+        } catch (err) {
+          process.stderr.write(`Error generating PNG: ${err}\n`);
+          if (err instanceof Error) {
+            return createMcpResponse(`Failed to generate PNG: ${err.message}`, true);
+          } else {
+            return createMcpResponse(`Failed to generate PNG: ${String(err)}`, true);
           }
         }
-      ]
-    };
+      }
+    }
+
+    // Return both the diagram content and file information
+    return createMcpResponse([
+      {
+        type: "text",
+        text: JSON.stringify({
+          stats: diagram.stats,
+          style: diagram.style,
+          generated: diagram.timestamp
+        }, null, 2)
+      },
+      {
+        type: "resource" as const,
+        resource: {
+          uri: `data:text/x-mermaid;base64,${Buffer.from(mermaidContent).toString('base64')}`,
+          text: mermaidContent,
+          mimeType: "text/x-mermaid"
+        }
+      }
+    ]);
   } catch (error) {
     console.error('Error generating diagram:', error);
-    return {
-      content: [{
-        type: "text",
-        text: `Failed to generate diagram: ${error}`
-      }],
-      isError: true
-    };
+    return createMcpResponse(`Failed to generate diagram: ${error}`, true);
   }
 });
 
 // Start the server
 (async () => {
   try {
-    // Try to load the default file tree in the background
-    buildFileTree(DEFAULT_CONFIG).catch(error => {
-      console.error("Failed to build default file tree:", error);
-    });
+    // Initialize server first
+    await initializeServer();
 
     // Connect to transport
     const transport = new StdioTransport();

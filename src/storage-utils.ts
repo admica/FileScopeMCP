@@ -9,8 +9,10 @@ const loadedTrees = new Map<string, FileTreeStorage>();
 /**
  * Normalizes paths to use forward slashes and handles URL encoding
  * Works with both relative and absolute paths on any platform
+ * @param inputPath The path to normalize
+ * @param baseDirectory Optional base directory to resolve relative paths against (defaults to process.cwd())
  */
-export function normalizeAndResolvePath(inputPath: string): string {
+export function normalizeAndResolvePath(inputPath: string, baseDirectory?: string): string {
   try {
     // Decode URL encoding if present
     const decoded = inputPath.includes('%') ? decodeURIComponent(inputPath) : inputPath;
@@ -18,15 +20,17 @@ export function normalizeAndResolvePath(inputPath: string): string {
     // Handle Windows paths with drive letters that may start with a slash
     const cleanPath = decoded.match(/^\/[a-zA-Z]:/) ? decoded.substring(1) : decoded;
     
-    // If it's already an absolute path, don't resolve it against process.cwd()
-    const isAbsolute = path.isAbsolute(cleanPath);
-    const fullPath = isAbsolute ? cleanPath : path.resolve(process.cwd(), cleanPath);
+    // If it's already an absolute path, normalize it directly
+    if (path.isAbsolute(cleanPath)) {
+      return cleanPath.replace(/\\/g, '/').replace(/\/+/g, '/');
+    }
     
-    // Normalize to forward slashes for consistency
-    const normalized = fullPath.replace(/\\/g, '/');
+    // For relative paths, resolve against the base directory
+    const base = baseDirectory || process.cwd();
+    const fullPath = path.resolve(base, cleanPath);
     
-    // Remove duplicate slashes
-    return normalized.replace(/\/+/g, '/');
+    // Normalize to forward slashes for consistency and remove duplicate slashes
+    return fullPath.replace(/\\/g, '/').replace(/\/+/g, '/');
   } catch (error) {
     console.error(`Failed to normalize path: ${inputPath}`, error);
     // Return the input as fallback
@@ -72,6 +76,7 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
   const config = {
     filename: cleanFilename,
     baseDirectory: normalizedBase,
+    projectRoot: normalizedBase,  // Use the normalized base as project root
     lastUpdated: new Date()
   };
   console.error('Created config:', config);
@@ -142,16 +147,16 @@ export async function loadFileTree(filename: string): Promise<FileTreeStorage> {
 /**
  * Gets a list of all saved file trees
  */
-export async function listSavedFileTrees(): Promise<string[]> {
+export async function listSavedFileTrees(): Promise<{type: "text", text: string}[]> {
   try {
     const files = await fs.readdir(process.cwd());
-    return files.filter(file => 
-      file.endsWith('.json') && 
-      !file.startsWith('package') && 
-      !file.startsWith('tsconfig')
-    );
+    const jsonFiles = files.filter(file => file.endsWith('.json'));
+    return jsonFiles.map(file => ({
+      type: 'text' as const,
+      text: file
+    }));
   } catch (error) {
-    console.error('Failed to list saved file trees:', error);
+    console.error('Error listing file trees:', error);
     return [];
   }
 }

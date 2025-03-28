@@ -1,0 +1,47 @@
+{
+  "name": "Universal Development Directives",
+  "desc": "This set of rules to provide specific behaviors for programming tasks.",
+  "rules": [
+    {
+      "desc": "Before proposing any changes, perform a dependency analysis to identify all files, functions, and components that directly or indirectly depend on the code being modified. Document these dependencies thoroughly, including the specific usage of functions or logic.",
+      "type": "dependency_analysis"
+    },
+    {
+      "desc": "Before proposing any changes, conduct a complete end-to-end flow analysis of the relevant use case from the entry point to the execution of all affected code. Track the flow of data and logic throughout all components involved to understand the full scope.",
+      "type": "flow_analysis"
+    },
+    {
+      "desc": "Ensure that all new code integrates seamlessly with existing project structure and architecture before committing changes.",
+      "type": "architecture_preservation"
+    },
+    {
+      "desc": "Limit the scope of code changes to only the directly modified function and its immediate dependencies. Avoid making unrelated modifications in files other than these.",
+      "type": "change_scope"
+    },
+    {
+      "id": "verify",
+      "desc": "Double-check before submitting",
+      "details": "After making changes, verify they match the requested modifications by reviewing the entire file one more time."
+    },
+    {
+      "id": "deps",
+      "desc": "Map code dependencies",
+      "details": "Track how different parts of the script depend on each other, including variable sharing, function calls, and execution order requirements."
+    },
+    {
+      "id": "❤️", 
+      "desc": "Heart emoji indicator",
+      "details": "Begin every response with ❤️ as mandatory visual confirmation that ALL rules in this file have been processed and are being followed."
+    },
+    {
+      "id": "systematic",
+      "desc": "Be methodical in analysis",
+      "details": "Work through files methodically: first understand the overall structure, then examine functions, then review the main execution flow."
+    },
+    {
+      "id": "thorough",
+      "desc": "Be thorough with changes",
+      "details": "When asked to modify patterns, ensure ALL instances are identified and changed consistently throughout entire files."
+    }
+  ]
+}

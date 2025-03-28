@@ -5,6 +5,7 @@ yarn-error.log
 dist/
 mcp.json
 .cursor/
+.cursorrules
 *.log
 .DS_Store
 *.swp
@@ -15,3 +16,4 @@ mcp.json
 *.bak
 package-lock.json
 FileScopeMCP-tree.json
+FileScopeMCP-diagram.json
