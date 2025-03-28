@@ -720,7 +720,8 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
     direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
     rankSpacing: z.number().min(10).max(100).optional(),
     nodeSpacing: z.number().min(10).max(100).optional()
-  }).optional().describe("Layout configuration")
+  }).optional().describe("Layout configuration"),
+  outputFile: z.string().optional().describe("Optional output file name for the diagram")
 }, async (params) => {
   try {
     if (!fileTree) {
@@ -749,6 +750,13 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
     const generator = new MermaidGenerator(fileTree, config);
     const diagram = generator.generate();
 
+    // Format the Mermaid content
+    const mermaidContent = `---
+title: File Scope Diagram
+---
+%%{init: {'theme': 'default'}}%%
+${diagram.code}`;
+
     // Add validation warnings if any limits were adjusted
     const warnings = [];
     if (params.maxDepth && params.maxDepth !== config.maxDepth) {
@@ -758,17 +766,27 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       warnings.push(`minImportance adjusted to ${config.minImportance} (valid range: 0-10)`);
     }
 
+    // Return the diagram content as a data URI resource
     return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          diagram: diagram.code,
-          stats: diagram.stats,
-          style: diagram.style,
-          generated: diagram.timestamp,
-          warnings: warnings.length > 0 ? warnings : undefined
-        }, null, 2)
-      }]
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            stats: diagram.stats,
+            style: diagram.style,
+            generated: diagram.timestamp,
+            warnings: warnings.length > 0 ? warnings : undefined
+          }, null, 2)
+        },
+        {
+          type: "resource" as const,
+          resource: {
+            uri: `data:text/x-mermaid;base64,${Buffer.from(mermaidContent).toString('base64')}`,
+            text: mermaidContent,
+            mimeType: "text/x-mermaid"
+          }
+        }
+      ]
     };
   } catch (error) {
     console.error('Error generating diagram:', error);
