@@ -1,7 +1,7 @@
 @echo off
 SETLOCAL EnableDelayedExpansion
 
-echo === Starting MCP FileScopeMCP Setup ===
+echo === Starting MCP file_scope_mcp Setup ===
 
 :: Check for Node.js in Program Files
 set "NODE_EXE=C:\Program Files\nodejs\node.exe"
@@ -68,7 +68,7 @@ set "NODE_EXE_ESCAPED=%NODE_EXE:\=\\%"
 
 echo { > mcp.json
 echo   "mcpServers": { >> mcp.json
-echo     "FileScopeMCP": { >> mcp.json
+echo     "file_scope_mcp": { >> mcp.json
 echo       "command": "%NODE_EXE_ESCAPED%", >> mcp.json
 echo       "args": ["%PROJECT_ROOT:\=\\%\\dist\\mcp-server.js"], >> mcp.json
 echo       "transport": "stdio" >> mcp.json
