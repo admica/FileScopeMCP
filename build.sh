@@ -1,6 +1,6 @@
 #!/bin/bash
 # PATH: ./build.sh
-# MCP setup script for FileScopeMCP
+# MCP setup script for file_scope_mcp
 
 # Exit immediately on error
 set -e
@@ -13,7 +13,7 @@ RED='\033[1;31m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-APPNAME="FileScopeMCP"
+APPNAME="file_scope_mcp"
 LOGFILE="/tmp/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
 
 # Logging functions
@@ -54,7 +54,7 @@ print_detail() {
 }
 
 # Main script execution
-print_header "Starting FileScopeMCP Setup"
+print_header "Starting file_scope_mcp Setup"
 
 # Check for Node.js
 print_action "Checking for Node.js..."
