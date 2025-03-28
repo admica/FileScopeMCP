@@ -64,7 +64,7 @@ This MCP server analyzes your codebase to identify the most important files base
    ```json
    {
      "mcpServers": {
-       "file_scope_mcp": {
+       "FileScopeMCP": {
          "command": "node",
          "args": ["yourpath/to/dist/mcp-server.js"],
          "transport": "stdio"

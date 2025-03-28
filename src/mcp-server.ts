@@ -230,7 +230,7 @@ async function readFileContent(filePath: string): Promise<string> {
 
 // Server implementation
 const serverInfo = {
-  name: "file_scope_mcp",
+  name: "FileScopeMCP",
   version: "1.0.0",
   description: "A tool for ranking files in your codebase by importance and providing summaries with dependency tracking"
 };
