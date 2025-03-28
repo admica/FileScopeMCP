@@ -5,7 +5,13 @@ import { ReadBuffer, deserializeMessage, serializeMessage } from "@modelcontextp
 import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { FileNode, ToolResponse, FileTreeConfig } from "./types.js";
+import { 
+  FileNode, 
+  ToolResponse, 
+  FileTreeConfig,
+  FileTreeStorage,
+  MermaidDiagramConfig
+} from "./types.js";
 import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath } from "./file-utils.js";
 import { 
   createFileTreeConfig, 
@@ -17,6 +23,7 @@ import {
   normalizeAndResolvePath
 } from "./storage-utils.js";
 import * as fsSync from "fs";
+import { MermaidGenerator } from "./mermaid-generator.js";
 
 // Define and set the project root directory
 // This helps ensure we're working from the correct directory
@@ -701,6 +708,78 @@ server.tool("debug_list_all_files", "List all file paths in the current file tre
       }, null, 2)
     }]
   };
+});
+
+// Add diagram generation tool
+server.tool("generate_diagram", "Generate a Mermaid diagram for the current file tree", {
+  maxDepth: z.number().min(1).max(10).optional().describe("Maximum depth for directory trees (1-10)"),
+  minImportance: z.number().min(0).max(10).optional().describe("Only show files above this importance (0-10)"),
+  showDependencies: z.boolean().optional().describe("Whether to show dependency relationships"),
+  style: z.enum(['default', 'dependency', 'directory', 'hybrid']).optional().describe("Diagram style"),
+  layout: z.object({
+    direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
+    rankSpacing: z.number().min(10).max(100).optional(),
+    nodeSpacing: z.number().min(10).max(100).optional()
+  }).optional().describe("Layout configuration")
+}, async (params) => {
+  try {
+    if (!fileTree) {
+      return {
+        content: [{
+          type: "text",
+          text: "No file tree loaded. Please create or select a file tree first."
+        }],
+        isError: true
+      };
+    }
+
+    // Validate and normalize parameters
+    const config: MermaidDiagramConfig = {
+      style: params.style || 'hybrid',
+      maxDepth: Math.min(Math.max(params.maxDepth || 5, 1), 10),
+      minImportance: Math.min(Math.max(params.minImportance || 0, 0), 10),
+      showDependencies: params.showDependencies ?? true,
+      layout: params.layout || {
+        direction: 'TB',
+        rankSpacing: 50,
+        nodeSpacing: 40
+      }
+    };
+
+    const generator = new MermaidGenerator(fileTree, config);
+    const diagram = generator.generate();
+
+    // Add validation warnings if any limits were adjusted
+    const warnings = [];
+    if (params.maxDepth && params.maxDepth !== config.maxDepth) {
+      warnings.push(`maxDepth adjusted to ${config.maxDepth} (valid range: 1-10)`);
+    }
+    if (params.minImportance && params.minImportance !== config.minImportance) {
+      warnings.push(`minImportance adjusted to ${config.minImportance} (valid range: 0-10)`);
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          diagram: diagram.code,
+          stats: diagram.stats,
+          style: diagram.style,
+          generated: diagram.timestamp,
+          warnings: warnings.length > 0 ? warnings : undefined
+        }, null, 2)
+      }]
+    };
+  } catch (error) {
+    console.error('Error generating diagram:', error);
+    return {
+      content: [{
+        type: "text",
+        text: `Failed to generate diagram: ${error}`
+      }],
+      isError: true
+    };
+  }
 });
 
 // Start the server
