@@ -69,8 +69,8 @@ set "NODE_EXE_ESCAPED=%NODE_EXE:\=\\%"
 echo { > mcp.json
 echo   "mcpServers": { >> mcp.json
 echo     "FileScopeMCP": { >> mcp.json
-echo       "command": "%NODE_EXE_ESCAPED%", >> mcp.json
-echo       "args": ["%PROJECT_ROOT:\=\\%\\dist\\mcp-server.js"], >> mcp.json
+echo       "command": "node", >> mcp.json
+echo       "args": ["%PROJECT_ROOT:\=/%/dist/mcp-server.js"], >> mcp.json
 echo       "transport": "stdio" >> mcp.json
 echo     } >> mcp.json
 echo   } >> mcp.json
