@@ -95,7 +95,7 @@ let currentConfig: FileTreeConfig | null = null;
 
 // Default config
 const DEFAULT_CONFIG: FileTreeConfig = {
-  filename: "file-tree.json",
+  filename: "FileScopeMCP-tree.json",
   baseDirectory: process.cwd(),
   lastUpdated: new Date()
 };
@@ -230,7 +230,7 @@ async function readFileContent(filePath: string): Promise<string> {
 
 // Server implementation
 const serverInfo = {
-  name: "file_scope_mcp",
+  name: "FileScopeMCP",
   version: "1.0.0",
   description: "A tool for ranking files in your codebase by importance and providing summaries with dependency tracking"
 };

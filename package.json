@@ -1,6 +1,6 @@
 {
-  "name": "file_scope_mcp",
-  "version": "2.1.0",
+  "name": "FileScopeMCP",
+  "version": "1.0.0",
   "description": "MCP server for file hierarchy and dependency tracking",
   "main": "dist/mcp-server.js",
   "scripts": {

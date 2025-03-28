@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "file_scope_mcp": {
+    "FileScopeMCP": {
       "command": "node",
       "args": ["{projectRoot}\\dist\\mcp-server.js"],
       "transport": "stdio"
