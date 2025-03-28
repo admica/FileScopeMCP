@@ -933,19 +933,9 @@ ${mermaidSyntax}
 // Start the server
 (async () => {
   try {
-    // Test file writing
-    const testPath = path.join(process.cwd(), 'init-test.json');
-    console.error('Writing test file during initialization:', testPath);
-    try {
-      fsSync.writeFileSync(testPath, JSON.stringify({ test: true }, null, 2), 'utf8');
-      console.error('Successfully wrote initialization test file');
-    } catch (error) {
-      console.error('Failed to write initialization test file:', error);
-    }
-
     // Try to load the default file tree in the background
     buildFileTree(DEFAULT_CONFIG).catch(error => {
-      console.error("Failed to build file tree:", error);
+      console.error("Failed to build default file tree:", error);
     });
 
     // Connect to transport
