@@ -81,20 +81,125 @@ let fileTree: FileNode | null = null;
 let currentConfig: FileTreeConfig | null = null;
 let DEFAULT_CONFIG: FileTreeConfig;
 
+// Check if we're running as an MCP server for Cursor
+function isRunningAsMcpServer(): boolean {
+  // Check if we were launched by Cursor's MCP client
+  const isMcpServerMode = process.argv.some(arg => 
+    arg.includes('mcp-server.js') || 
+    arg.includes('mcp.json')
+  );
+  
+  // Check if we're communicating over stdio
+  const isStdioMode = process.stdin.isTTY === false;
+  
+  return isMcpServerMode || isStdioMode;
+}
+
+// Find the actual FileScopeMCP project directory
+async function findFileScopeMcpDirectory(): Promise<string | null> {
+  // Try to extract it from command line arguments
+  const scriptPath = process.argv[1] || '';
+  console.error('Script path:', scriptPath);
+  
+  if (scriptPath.includes('FileScopeMCP')) {
+    // Extract the project directory from script path
+    const match = scriptPath.match(/(.+?FileScopeMCP)/i);
+    if (match && match[1]) {
+      const mcpDir = match[1];
+      try {
+        // Verify this directory by checking for package.json
+        const packageJsonPath = path.join(mcpDir, 'package.json');
+        await fs.access(packageJsonPath);
+        console.error(`Verified FileScopeMCP directory: ${mcpDir}`);
+        return mcpDir;
+      } catch (error) {
+        console.error(`Could not verify directory ${mcpDir}`);
+      }
+    }
+  }
+  
+  // Check environment variables (could be set by Cursor)
+  const envProjectDir = process.env.MCP_PROJECT_DIR;
+  if (envProjectDir) {
+    try {
+      await fs.access(envProjectDir);
+      console.error(`Found project directory from env: ${envProjectDir}`);
+      return envProjectDir;
+    } catch (error) {
+      console.error(`Invalid environment directory: ${envProjectDir}`);
+    }
+  }
+  
+  // Look for common development directories with FileScopeMCP in the path
+  const commonDevPaths = [
+    'C:/Users/Adrian/code/mcp/FileScopeMCP',
+    '/Users/Adrian/code/mcp/FileScopeMCP',
+    path.join(process.env.HOME || '', 'code/mcp/FileScopeMCP'),
+    path.join(process.env.USERPROFILE || '', 'code/mcp/FileScopeMCP')
+  ];
+  
+  for (const testPath of commonDevPaths) {
+    try {
+      await fs.access(testPath);
+      console.error(`Found project directory in common paths: ${testPath}`);
+      return testPath;
+    } catch (error) {
+      // Path doesn't exist, try next one
+    }
+  }
+  
+  return null;
+}
+
 // Server initialization
 async function initializeServer(): Promise<void> {
+  console.error('Starting FileScopeMCP server initialization');
+  console.error('Initial working directory:', process.cwd());
+  console.error('Command line args:', process.argv);
+  
+  // Check if we're running as an MCP server for Cursor
+  const isMcpServer = isRunningAsMcpServer();
+  console.error(`Running as MCP server for Cursor: ${isMcpServer}`);
+  
   // Check for command line override first
   const rootArg = process.argv.find(arg => arg.startsWith('--project-root='));
   if (rootArg) {
     projectRoot = rootArg.split('=')[1];
     console.error(`Using provided project root: ${projectRoot}`);
+  } else if (isMcpServer) {
+    // We're running as an MCP server, so try to find the FileScopeMCP directory
+    const mcpDir = await findFileScopeMcpDirectory();
+    if (mcpDir) {
+      projectRoot = mcpDir;
+      console.error(`Using FileScopeMCP directory: ${projectRoot}`);
+    } else {
+      // Fall back to auto-detection
+      projectRoot = await detectProjectRoot(process.cwd());
+      console.error(`Falling back to auto-detected project root: ${projectRoot}`);
+    }
   } else {
-    // Auto-detect from current directory
-    projectRoot = await detectProjectRoot(process.cwd());
+    // Running directly, use current directory
+    projectRoot = process.cwd();
+    console.error(`Running directly, using current directory: ${projectRoot}`);
   }
   
   console.error(`Final project root set to: ${projectRoot}`);
+  
+  // Special handling for Cursor IDE integration
+  // If we detect we're in Cursor's directory but want to operate on the FileScopeMCP project
+  if (projectRoot.includes('Cursor') || projectRoot.includes('cursor')) {
+    console.error('Detected we may be running from Cursor IDE directory');
+    
+    // Try to find the actual FileScopeMCP project directory
+    const mcpDir = await findFileScopeMcpDirectory();
+    if (mcpDir) {
+      projectRoot = mcpDir;
+      console.error(`Overriding with FileScopeMCP directory: ${projectRoot}`);
+    }
+  }
+  
   process.chdir(projectRoot);
+  console.error(`Changed working directory to: ${process.cwd()}`);
   
   // Now we can safely set the default config
   DEFAULT_CONFIG = {
@@ -392,8 +497,25 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
       ? path.relative(process.cwd(), params.filename) 
       : params.filename;
     console.error('Relative filename:', relativeFilename);
-      
-    const config = await createFileTreeConfig(relativeFilename, params.baseDirectory);
+    
+    // Handle special case for current directory
+    let baseDir = params.baseDirectory;
+    if (baseDir === '.' || baseDir === './') {
+      baseDir = process.cwd();
+      console.error('Resolved "." to current directory:', baseDir);
+    }
+    
+    // Check if the baseDir might be pointing to Cursor IDE directory
+    if (baseDir.includes('Cursor') || baseDir.includes('cursor')) {
+      console.error('Detected potential Cursor directory in baseDir, trying to find FileScopeMCP project');
+      const mcpDir = await findFileScopeMcpDirectory();
+      if (mcpDir) {
+        console.error(`Overriding baseDir to FileScopeMCP directory: ${mcpDir}`);
+        baseDir = mcpDir;
+      }
+    }
+    
+    const config = await createFileTreeConfig(relativeFilename, baseDir);
     console.error('Created config:', config);
     
     // Build the tree with the new config, not the default
@@ -684,7 +806,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
   maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
   minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
   showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
-  outputFile: z.string().optional().describe('Optional output file name for the diagram'),
+  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram files (.mmd and/or .png)'),
   outputFormat: z.enum(['mmd', 'png']).optional().describe('Output format (mmd or png)'),
   layout: z.object({
     direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
@@ -703,9 +825,9 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
     const mermaidContent = diagram.code;
 
     // Save diagram to file if requested
-    if (params.outputFile) {
+    if (params.outputPath) {
       const outputFormat = params.outputFormat || 'mmd';
-      const baseOutputPath = path.resolve(process.cwd(), params.outputFile);
+      const baseOutputPath = path.resolve(process.cwd(), params.outputPath);
       const outputDir = path.dirname(baseOutputPath);
       
       process.stderr.write('Attempting to save diagram files:\n');
@@ -739,13 +861,15 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
         console.error('Attempting to generate PNG:', pngPath);
         
         try {
-          const puppeteer = require('puppeteer');
-          process.stderr.write('Successfully required puppeteer\n');
+          // Replace require with dynamic import for ES module compatibility
+          const puppeteerModule = await import('puppeteer');
+          const puppeteer = puppeteerModule.default;
+          process.stderr.write('Successfully imported puppeteer\n');
 
           // Launch browser with more explicit error handling
           process.stderr.write('Launching browser with custom config...\n');
           const browser = await puppeteer.launch({
-            headless: 'new',
+            headless: 'new' as any,
             args: [
               '--no-sandbox',
               '--disable-web-security',
@@ -776,57 +900,54 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
           });
           process.stderr.write('Viewport set\n');
 
-          // Create HTML content with local Mermaid
-          const mermaidPath = require.resolve('mermaid/dist/mermaid.min.js');
-          process.stderr.write(`Loading Mermaid from: ${mermaidPath}\n`);
-          const mermaidContent = await fs.readFile(mermaidPath, 'utf8');
-          process.stderr.write('Mermaid script loaded\n');
-          
+          // Create a simpler, more reliable HTML content
           const html = `
             <!DOCTYPE html>
             <html>
               <head>
-                <script>${mermaidContent}</script>
-                <script>
-                  window.addEventListener('load', () => {
-                    process.stderr.write('Page loaded, initializing Mermaid...\n');
-                    mermaid.initialize({ 
-                      startOnLoad: true,
-                      theme: 'dark',
-                      logLevel: 'debug'
-                    });
-                  });
-                </script>
+                <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
                 <style>
                   body { 
-                    background: #2d3436;
-                    margin: 0;
-                    padding: 20px;
-                  }
-                  #container { 
-                    min-width: 800px;
-                    min-height: 600px;
+                    background: white;
+                    margin: 20px;
                   }
                 </style>
               </head>
               <body>
-                <div id="container">
-                  <div class="mermaid">
-                    ${diagram.code}
-                  </div>
+                <div class="mermaid">
+${diagram.code}
                 </div>
+                <script>
+                  mermaid.initialize({
+                    startOnLoad: true,
+                    theme: 'default'
+                  });
+                </script>
               </body>
             </html>
           `;
 
           process.stderr.write('Setting page content...\n');
           await page.setContent(html);
-          process.stderr.write('Page content set\n');
+          process.stderr.write('Page content set, waiting for rendering...\n');
 
-          // Wait for Mermaid to render with increased timeout
-          process.stderr.write('Waiting for SVG element...\n');
-          await page.waitForSelector('svg', { timeout: 30000 });
-          process.stderr.write('SVG element found\n');
+          // Give the page some time to render
+          process.stderr.write('Waiting for rendering to complete...\n');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          
+          // Try a different approach to find the SVG - more permissive
+          process.stderr.write('Waiting for SVG element using evaluate...\n');
+          const svgElement = await page.evaluate(() => {
+            const svg = document.querySelector('svg');
+            return !!svg;
+          });
+          
+          if (!svgElement) {
+            process.stderr.write('No SVG found in page after waiting\n');
+            throw new Error('No SVG element found after rendering');
+          }
+          
+          process.stderr.write('SVG element found, taking screenshot of entire page\n');
 
           // Get the SVG element
           const element = await page.$('svg');

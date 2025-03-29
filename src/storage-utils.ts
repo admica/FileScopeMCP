@@ -14,6 +14,11 @@ const loadedTrees = new Map<string, FileTreeStorage>();
  */
 export function normalizeAndResolvePath(inputPath: string, baseDirectory?: string): string {
   try {
+    // Handle special case for current directory
+    if (inputPath === '.' || inputPath === './') {
+      return process.cwd().replace(/\\/g, '/').replace(/\/+/g, '/');
+    }
+    
     // Decode URL encoding if present
     const decoded = inputPath.includes('%') ? decodeURIComponent(inputPath) : inputPath;
     
@@ -27,6 +32,7 @@ export function normalizeAndResolvePath(inputPath: string, baseDirectory?: strin
     
     // For relative paths, resolve against the base directory
     const base = baseDirectory || process.cwd();
+    console.error(`Resolving relative path ${cleanPath} against base ${base}`);
     const fullPath = path.resolve(base, cleanPath);
     
     // Normalize to forward slashes for consistency and remove duplicate slashes
@@ -59,6 +65,12 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
   console.error('Creating file tree config...');
   console.error('Input filename:', filename);
   console.error('Input baseDirectory:', baseDirectory);
+  
+  // Handle special case for current directory
+  if (baseDirectory === '.' || baseDirectory === './') {
+    baseDirectory = process.cwd();
+    console.error('Resolved "." to current directory:', baseDirectory);
+  }
   
   // Normalize paths
   const normalizedBase = normalizeAndResolvePath(baseDirectory);

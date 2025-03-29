@@ -75,11 +75,21 @@ export class MermaidGenerator {
   }
 
   private getNodeStyle(node: FileNode): string {
-    const color = node.isDirectory ? this.style.nodeColors.mediumImportance : this.style.nodeColors.lowImportance;
+    // Determine node color based on importance or directory status
+    let color = this.style.nodeColors.lowImportance; // Default for files
+    
+    if (node.isDirectory) {
+      color = this.style.nodeColors.mediumImportance;
+    } else if (node.importance && node.importance >= 8) {
+      color = this.style.nodeColors.highImportance;
+    } else if (node.importance && node.importance >= 5) {
+      color = this.style.nodeColors.mediumImportance;
+    }
+    
     return `style ${this.generateNodeId(node.path)} fill:${color},stroke:#2d3436`;
   }
-
-  private generateDirectoryStructure(node: FileNode, depth: number = 0): string[] {
+  
+  private generateAllNodes(node: FileNode, depth: number = 0): string[] {
     if (depth >= (this.config.maxDepth || 3)) return [];
     this.stats.maxDepth = Math.max(this.stats.maxDepth, depth);
 
@@ -91,6 +101,30 @@ export class MermaidGenerator {
     lines.push(this.getNodeStyle(node));
     this.stats.nodeCount++;
 
+    // Process children recursively
+    if (node.children) {
+      for (const child of node.children) {
+        // Skip files with low importance if minImportance is set
+        if (!child.isDirectory && 
+            this.config.minImportance && 
+            (child.importance || 0) < this.config.minImportance) {
+          continue;
+        }
+        
+        // Generate node for child
+        lines.push(...this.generateAllNodes(child, depth + 1));
+      }
+    }
+
+    return lines;
+  }
+  
+  private generateAllEdges(node: FileNode, depth: number = 0): string[] {
+    if (depth >= (this.config.maxDepth || 3)) return [];
+
+    const lines: string[] = [];
+    const nodeId = this.generateNodeId(node.path);
+    
     // Process children
     if (node.children) {
       for (const child of node.children) {
@@ -105,11 +139,32 @@ export class MermaidGenerator {
         const edgeKey = `${nodeId}-->${childId}`;
         
         if (!this.edges.has(edgeKey)) {
-          lines.push(...this.generateDirectoryStructure(child, depth + 1));
+          // Create edge from parent to child
           lines.push(`${nodeId} --> ${childId}`);
           lines.push(`linkStyle ${this.edges.size} stroke:${this.style.edgeColors.directory}`);
           this.edges.add(edgeKey);
           this.stats.edgeCount++;
+          
+          // Generate edges for child recursively
+          lines.push(...this.generateAllEdges(child, depth + 1));
+        }
+      }
+    }
+    
+    // Add dependency relationships if requested
+    if (this.config.showDependencies && !node.isDirectory && node.dependencies) {
+      for (const depPath of node.dependencies) {
+        if (this.nodes.has(depPath)) {
+          const depId = this.generateNodeId(depPath);
+          const edgeKey = `${nodeId}-->${depId}`;
+          
+          if (!this.edges.has(edgeKey)) {
+            lines.push(`${nodeId} --> ${depId}`);
+            lines.push(`linkStyle ${this.edges.size} stroke:${this.style.edgeColors.dependency}`);
+            this.edges.add(edgeKey);
+            this.stats.edgeCount++;
+            this.stats.importantFiles++;
+          }
         }
       }
     }
@@ -118,6 +173,17 @@ export class MermaidGenerator {
   }
 
   public generate(): MermaidDiagram {
+    // Reset counters
+    this.nodes = new Map();
+    this.edges = new Set();
+    this.stats = {
+      nodeCount: 0,
+      edgeCount: 0,
+      maxDepth: 0,
+      importantFiles: 0,
+      circularDeps: 0
+    };
+    
     const lines: string[] = [
       // Add graph direction and spacing
       `graph ${this.config.layout?.direction || 'TB'}`,
@@ -126,8 +192,11 @@ export class MermaidGenerator {
       ''
     ];
 
-    // Generate directory structure
-    lines.push(...this.generateDirectoryStructure(this.fileTree));
+    // Phase 1: Generate all node definitions first
+    lines.push(...this.generateAllNodes(this.fileTree));
+    
+    // Phase 2: Then create all edges
+    lines.push(...this.generateAllEdges(this.fileTree));
 
     return {
       code: lines.join('\n'),

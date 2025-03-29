@@ -170,6 +170,16 @@ function extractImportPath(importStatement: string): string | null {
 }
 
 export async function scanDirectory(baseDir: string, currentDir: string = baseDir): Promise<FileNode> {
+  // Handle special case for current directory
+  if (baseDir === '.' || baseDir === './') {
+    baseDir = process.cwd();
+    console.error(`Resolved scanDirectory baseDir "." to current directory: ${baseDir}`);
+  }
+  if (currentDir === '.' || currentDir === './') {
+    currentDir = process.cwd();
+    console.error(`Resolved scanDirectory currentDir "." to current directory: ${currentDir}`);
+  }
+  
   console.error(`Scanning directory: ${currentDir}`);
   const normalizedBaseDir = path.normalize(baseDir);
   const normalizedDirPath = path.normalize(currentDir);
