@@ -806,8 +806,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
   maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
   minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
   showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
-  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram files (.mmd and/or .png)'),
-  outputFormat: z.enum(['mmd', 'png']).optional().describe('Output format (mmd or png)'),
+  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd)'),
   layout: z.object({
     direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
     rankSpacing: z.number().min(10).max(100).optional(),
@@ -826,11 +825,10 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
 
     // Save diagram to file if requested
     if (params.outputPath) {
-      const outputFormat = params.outputFormat || 'mmd';
       const baseOutputPath = path.resolve(process.cwd(), params.outputPath);
       const outputDir = path.dirname(baseOutputPath);
       
-      process.stderr.write('Attempting to save diagram files:\n');
+      process.stderr.write('Attempting to save diagram file:\n');
       process.stderr.write(`- Base output path: ${baseOutputPath}\n`);
       process.stderr.write(`- Output directory: ${outputDir}\n`);
       
@@ -853,143 +851,6 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       } catch (err: any) {
         console.error('Error saving Mermaid file:', err);
         return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
-      }
-
-      // If PNG output is requested, generate using Puppeteer
-      if (outputFormat === 'png') {
-        const pngPath = baseOutputPath.endsWith('.png') ? baseOutputPath : baseOutputPath + '.png';
-        console.error('Attempting to generate PNG:', pngPath);
-        
-        try {
-          // Replace require with dynamic import for ES module compatibility
-          const puppeteerModule = await import('puppeteer');
-          const puppeteer = puppeteerModule.default;
-          process.stderr.write('Successfully imported puppeteer\n');
-
-          // Launch browser with more explicit error handling
-          process.stderr.write('Launching browser with custom config...\n');
-          const browser = await puppeteer.launch({
-            headless: 'new' as any,
-            args: [
-              '--no-sandbox',
-              '--disable-web-security',
-              '--disable-setuid-sandbox',
-              '--disable-gpu',
-              '--disable-dev-shm-usage'
-            ],
-            ignoreDefaultArgs: ['--disable-extensions'],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            timeout: 30000
-          }).catch((err: Error) => {
-            process.stderr.write(`Failed to launch browser: ${err}\n`);
-            throw err;
-          });
-          process.stderr.write('Browser launched successfully\n');
-
-          const page = await browser.newPage().catch((err: Error) => {
-            process.stderr.write(`Failed to create new page: ${err}\n`);
-            throw err;
-          });
-          process.stderr.write('New page created\n');
-
-          // Set viewport size
-          await page.setViewport({
-            width: 1920,
-            height: 1080,
-            deviceScaleFactor: 1
-          });
-          process.stderr.write('Viewport set\n');
-
-          // Create a simpler, more reliable HTML content
-          const html = `
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
-                <style>
-                  body { 
-                    background: white;
-                    margin: 20px;
-                  }
-                </style>
-              </head>
-              <body>
-                <div class="mermaid">
-${diagram.code}
-                </div>
-                <script>
-                  mermaid.initialize({
-                    startOnLoad: true,
-                    theme: 'default'
-                  });
-                </script>
-              </body>
-            </html>
-          `;
-
-          process.stderr.write('Setting page content...\n');
-          await page.setContent(html);
-          process.stderr.write('Page content set, waiting for rendering...\n');
-
-          // Give the page some time to render
-          process.stderr.write('Waiting for rendering to complete...\n');
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          
-          // Try a different approach to find the SVG - more permissive
-          process.stderr.write('Waiting for SVG element using evaluate...\n');
-          const svgElement = await page.evaluate(() => {
-            const svg = document.querySelector('svg');
-            return !!svg;
-          });
-          
-          if (!svgElement) {
-            process.stderr.write('No SVG found in page after waiting\n');
-            throw new Error('No SVG element found after rendering');
-          }
-          
-          process.stderr.write('SVG element found, taking screenshot of entire page\n');
-
-          // Get the SVG element
-          const element = await page.$('svg');
-          if (!element) {
-            process.stderr.write('Failed to find SVG element after waiting\n');
-            throw new Error('Could not find SVG element');
-          }
-          process.stderr.write('Got SVG element handle\n');
-
-          // Get the bounding box
-          const box = await element.boundingBox();
-          if (!box) {
-            process.stderr.write('Failed to get SVG bounding box\n');
-            throw new Error('Could not get SVG bounding box');
-          }
-          process.stderr.write(`Got bounding box: ${JSON.stringify(box)}\n`);
-
-          // Take screenshot with padding
-          process.stderr.write(`Taking screenshot and saving to: ${pngPath}\n`);
-          const padding = 20;
-          await element.screenshot({
-            path: pngPath,
-            clip: {
-              x: box.x - padding,
-              y: box.y - padding,
-              width: box.width + (padding * 2),
-              height: box.height + (padding * 2)
-            },
-            omitBackground: true
-          });
-          process.stderr.write('Screenshot saved successfully\n');
-
-          await browser.close();
-          process.stderr.write('Browser closed\n');
-        } catch (err) {
-          process.stderr.write(`Error generating PNG: ${err}\n`);
-          if (err instanceof Error) {
-            return createMcpResponse(`Failed to generate PNG: ${err.message}`, true);
-          } else {
-            return createMcpResponse(`Failed to generate PNG: ${String(err)}`, true);
-          }
-        }
       }
     }
 
