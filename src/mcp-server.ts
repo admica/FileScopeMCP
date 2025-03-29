@@ -155,8 +155,18 @@ class StdioTransport implements Transport {
   async send(message: JSONRPCMessage): Promise<void> {
     // Ensure we only write valid JSON messages to stdout
     const serialized = serializeMessage(message);
-    process.stderr.write(`Debug: Sending message: ${serialized}\n`);
-    process.stdout.write(serialized + '\n');  // Add newline for proper message separation
+    
+    // Only log a summary of the message to stderr, not the full content
+    // which could interfere with parsing or expose sensitive data
+    const isResponse = 'result' in message;
+    const msgType = isResponse ? 'response' : 'request';
+    const msgId = (message as any).id || 'none';
+    
+    process.stderr.write(`Sending ${msgType} message (id: ${msgId})\n`);
+    
+    // Write to stdout without adding an extra newline - the SDK's serializeMessage
+    // function handles proper formatting
+    process.stdout.write(serialized);
   }
 
   async close(): Promise<void> {

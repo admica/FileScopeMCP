@@ -1,7 +1,8 @@
-export interface FileNode {
-  path: string;
-  name: string;
-  isDirectory: boolean;
+// Define concrete classes rather than just interfaces to ensure proper compilation
+export class FileNode {
+  path: string = '';
+  name: string = '';
+  isDirectory: boolean = false;
   children?: FileNode[];
   dependencies?: string[];   // Outgoing dependencies (local files this file imports)
   packageDependencies?: string[]; // Outgoing dependencies (package files this file imports)
@@ -11,9 +12,9 @@ export interface FileNode {
   mermaidDiagram?: MermaidDiagram; // Optional Mermaid diagram for this node
 }
 
-export interface SimpleFileNode {
-  path: string;
-  isDirectory: boolean;
+export class SimpleFileNode {
+  path: string = '';
+  isDirectory: boolean = false;
   children?: SimpleFileNode[];
 }
 
@@ -28,38 +29,50 @@ export interface ToolResponse {
   [key: string]: unknown;
 }
 
-export interface FileTreeConfig {
-  filename: string;        // Name of the JSON file to store the file tree
-  baseDirectory: string;   // Base directory to scan
-  projectRoot: string;     // Project root directory (where files will be stored)
+export class FileTreeConfig {
+  filename: string = '';        // Name of the JSON file to store the file tree
+  baseDirectory: string = '';   // Base directory to scan
+  projectRoot: string = '';     // Project root directory (where files will be stored)
   lastUpdated?: Date;      // When the file tree was last updated
 }
 
-export interface FileTreeStorage {
-  config: FileTreeConfig;
-  fileTree: FileNode;
+export class FileTreeStorage {
+  config: FileTreeConfig = new FileTreeConfig();
+  fileTree: FileNode = new FileNode();
 }
 
-export interface MermaidDiagramStyle {
+export class MermaidDiagramStyle {
   nodeColors: {
     highImportance: string;    // Color for nodes with importance >= 8
     mediumImportance: string;  // Color for nodes with importance >= 5
     lowImportance: string;     // Color for nodes with importance < 5
+  } = {
+    highImportance: '',
+    mediumImportance: '',
+    lowImportance: ''
   };
   edgeColors: {
     dependency: string;        // Color for dependency relationships
     directory: string;        // Color for directory relationships
     circular: string;         // Color for circular dependencies
+  } = {
+    dependency: '',
+    directory: '',
+    circular: ''
   };
   nodeShapes: {
     file: string;            // Shape for file nodes
     directory: string;       // Shape for directory nodes
     important: string;       // Shape for high-importance nodes
+  } = {
+    file: '',
+    directory: '',
+    important: ''
   };
 }
 
-export interface MermaidDiagramConfig {
-  style: 'default' | 'dependency' | 'directory' | 'hybrid';
+export class MermaidDiagramConfig {
+  style: 'default' | 'dependency' | 'directory' | 'hybrid' = 'default';
   maxDepth?: number;         // Maximum depth for directory trees
   minImportance?: number;    // Only show files above this importance (0-10)
   showDependencies?: boolean; // Whether to show dependency relationships
@@ -72,17 +85,17 @@ export interface MermaidDiagramConfig {
   };
 }
 
-export interface MermaidDiagramStats {
-  nodeCount: number;         // Total number of nodes in diagram
-  edgeCount: number;         // Total number of edges
-  maxDepth: number;         // Maximum depth in the tree
-  importantFiles: number;   // Number of files with importance >= minImportance
-  circularDeps: number;     // Number of circular dependencies
+export class MermaidDiagramStats {
+  nodeCount: number = 0;         // Total number of nodes in diagram
+  edgeCount: number = 0;         // Total number of edges
+  maxDepth: number = 0;         // Maximum depth in the tree
+  importantFiles: number = 0;   // Number of files with importance >= minImportance
+  circularDeps: number = 0;     // Number of circular dependencies
 }
 
-export interface MermaidDiagram {
-  code: string;             // The Mermaid diagram code
-  style: MermaidDiagramStyle;
-  stats: MermaidDiagramStats;
-  timestamp: Date;          // When the diagram was generated
+export class MermaidDiagram {
+  code: string = '';             // The Mermaid diagram code
+  style: MermaidDiagramStyle = new MermaidDiagramStyle();
+  stats: MermaidDiagramStats = new MermaidDiagramStats();
+  timestamp: Date = new Date();  // When the diagram was generated
 }
