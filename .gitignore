@@ -17,3 +17,8 @@ mcp.json
 package-lock.json
 FileScopeMCP-tree.json
 FileScopeMCP-diagram.json
+diagrams
+*.png
+*.svg
+*.pdf
+*.csv
