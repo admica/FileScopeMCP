@@ -211,17 +211,9 @@ export class MermaidGenerator {
       `graph ${direction}`
     ];
 
-    // Add layout settings as separate lines - FIXED: proper Mermaid 9.4.3 directive format
-    if (this.config.layout?.nodeSpacing) {
-      lines.push(`  nodeSep ${this.config.layout.nodeSpacing}`);
-    }
-    if (this.config.layout?.rankSpacing) {
-      lines.push(`  rankSep ${this.config.layout.rankSpacing}`);
-    }
+    // Removed nodeSep and rankSep directives - these are not valid in Mermaid graph syntax
+    // These should be handled via Mermaid initialization configuration instead
     
-    // Add a blank line for readability
-    lines.push('');
-
     // PHASE 1: Collect all nodes and edges that will be in the diagram
     this.collectAllNodes(this.fileTree);
     

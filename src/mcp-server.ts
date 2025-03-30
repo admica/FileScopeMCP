@@ -920,7 +920,10 @@ ${mermaidCode}
       logLevel: 'error',
       flowchart: {
         htmlLabels: true,
-        curve: 'linear'
+        curve: 'linear',
+        // Apply layout settings here instead of in the graph code
+        nodeSpacing: 50,
+        rankSpacing: 70
       },
       fontFamily: 'monospace'
     });
@@ -969,7 +972,14 @@ ${mermaidCode}
       mermaid.initialize({
         startOnLoad: true,
         theme: isDarkMode ? 'dark' : 'default',
-        securityLevel: 'loose'
+        securityLevel: 'loose',
+        flowchart: {
+          htmlLabels: true,
+          curve: 'linear',
+          // Maintain layout settings when toggling theme
+          nodeSpacing: 50,
+          rankSpacing: 70
+        }
       });
       
       // Properly reinitialize Mermaid
@@ -1091,7 +1101,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
     return createMcpResponse(`Failed to generate diagram: ${error}`, true);
   }
 });
-
+  
 // Start the server
 (async () => {
   try {
