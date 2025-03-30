@@ -2,7 +2,7 @@ import fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import path from 'path';
 import * as fsSync from "fs";
-import { FileNode } from "./types.js";
+import { FileNode, PackageDependency } from "./types.js";
 import { normalizeAndResolvePath } from "./storage-utils.js";
 
 /**
@@ -45,9 +45,9 @@ export function toPlatformPath(normalizedPath: string): string {
 const SUPPORTED_EXTENSIONS = [".py", ".c", ".cpp", ".h", ".rs", ".lua", ".js", ".jsx", ".ts", ".tsx", ".zig"];
 const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.js': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
-  '.jsx': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
+  '.jsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
   '.ts': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
-  '.tsx': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
+  '.tsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
   '.py': /(?:import\s+[\w.]+|from\s+[\w.]+\s+import\s+[\w*]+)/g,
   '.c': /#include\s+["<][^">]+[">]/g,
   '.cpp': /#include\s+["<][^">]+[">]/g,
@@ -160,13 +160,50 @@ function extractImportPath(importStatement: string): string | null {
     return importMatch[1];
   }
   
-  // Try to match direct imports
+  // Try to match direct imports (like import 'firebase/auth')
   const directMatch = importStatement.match(/import\s+["']([^"']+)["']/);
   if (directMatch) {
     return directMatch[1];
   }
   
   return null;
+}
+
+// Helper to extract package version from package.json if available
+async function extractPackageVersion(packageName: string, baseDir: string): Promise<string | undefined> {
+  try {
+    // Handle scoped packages by getting the basic package name
+    let basicPackageName = packageName;
+    if (packageName.startsWith('@')) {
+      // For scoped packages like @supabase/supabase-js, extract the scope part
+      const parts = packageName.split('/');
+      if (parts.length > 1) {
+        // Keep the scoped name as is
+        basicPackageName = packageName;
+      }
+    } else if (packageName.includes('/')) {
+      // For imports like 'firebase/auth', extract the base package
+      basicPackageName = packageName.split('/')[0];
+    }
+    
+    const packageJsonPath = path.join(baseDir, 'package.json');
+    const content = await fsPromises.readFile(packageJsonPath, 'utf-8');
+    const packageData = JSON.parse(content);
+    
+    // Check both dependencies and devDependencies
+    if (packageData.dependencies && packageData.dependencies[basicPackageName]) {
+      return packageData.dependencies[basicPackageName];
+    }
+    
+    if (packageData.devDependencies && packageData.devDependencies[basicPackageName]) {
+      return packageData.devDependencies[basicPackageName];
+    }
+    
+    return undefined;
+  } catch (error) {
+    console.error(`Failed to extract package version for ${packageName}:`, error);
+    return undefined;
+  }
 }
 
 export async function scanDirectory(baseDir: string, currentDir: string = baseDir): Promise<FileNode> {
@@ -220,7 +257,7 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
       const ext = path.extname(entry.name);
       const importPattern = IMPORT_PATTERNS[ext];
       const dependencies: string[] = [];
-      const packageDependencies: string[] = [];
+      const packageDependencies: PackageDependency[] = [];
 
       if (importPattern) {
         try {
@@ -243,7 +280,49 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                   
                   // Handle package imports
                   if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
-                    packageDependencies.push(resolvedPath);
+                    // Create a package dependency object with more information
+                    const pkgDep = PackageDependency.fromPath(resolvedPath);
+                    
+                    // Set the package name directly from the import path if it's empty
+                    if (!pkgDep.name) {
+                      // For imports like '@scope/package'
+                      if (importPath.startsWith('@')) {
+                        const parts = importPath.split('/');
+                        if (parts.length >= 2) {
+                          pkgDep.scope = parts[0];
+                          pkgDep.name = `${parts[0]}/${parts[1]}`;
+                        }
+                      } 
+                      // For imports like 'package'
+                      else if (importPath.includes('/')) {
+                        pkgDep.name = importPath.split('/')[0];
+                      } else {
+                        pkgDep.name = importPath;
+                      }
+                    }
+                    
+                    // Try to extract version information
+                    if (pkgDep.name) {
+                      const version = await extractPackageVersion(pkgDep.name, normalizedBaseDir);
+                      if (version) {
+                        pkgDep.version = version;
+                      }
+                      
+                      // Check if it's a dev dependency
+                      try {
+                        const packageJsonPath = path.join(normalizedBaseDir, 'package.json');
+                        const content = await fsPromises.readFile(packageJsonPath, 'utf-8');
+                        const packageData = JSON.parse(content);
+                        
+                        if (packageData.devDependencies && packageData.devDependencies[pkgDep.name]) {
+                          pkgDep.isDevDependency = true;
+                        }
+                      } catch (error) {
+                        // Ignore package.json errors
+                      }
+                    }
+                    
+                    packageDependencies.push(pkgDep);
                     continue;
                   }
                   
@@ -351,8 +430,8 @@ export function calculateImportance(node: FileNode): void {
     // Add importance based on number of package dependencies
     if (node.packageDependencies && node.packageDependencies.length > 0) {
       // Add more importance for SDK dependencies
-      const sdkDeps = node.packageDependencies.filter(dep => dep.includes('@modelcontextprotocol/sdk'));
-      const otherDeps = node.packageDependencies.filter(dep => !dep.includes('@modelcontextprotocol/sdk'));
+      const sdkDeps = node.packageDependencies.filter(dep => dep.name && dep.name.includes('@modelcontextprotocol/sdk'));
+      const otherDeps = node.packageDependencies.filter(dep => dep.name && !dep.name.includes('@modelcontextprotocol/sdk'));
       
       importance += Math.min(sdkDeps.length, 2); // SDK dependencies are more important
       importance += Math.min(otherDeps.length, 1); // Other package dependencies

@@ -1021,16 +1021,21 @@ ${escapedMermaidCode}
 
 // Update the generate_diagram tool
 server.tool("generate_diagram", "Generate a Mermaid diagram for the current file tree", {
-  style: z.enum(['default', 'dependency', 'directory', 'hybrid']).describe('Diagram style'),
+  style: z.enum(['default', 'dependency', 'directory', 'hybrid', 'package-deps']).describe('Diagram style'),
   maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
   minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
   showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
+  showPackageDeps: z.boolean().optional().describe('Whether to show package dependencies'),
+  packageGrouping: z.boolean().optional().describe('Whether to group packages by scope'),
+  autoGroupThreshold: z.number().optional().describe("Auto-group nodes when parent has more than this many direct children (default: 8)"),
+  excludePackages: z.array(z.string()).optional().describe('Packages to exclude from diagram'),
+  includeOnlyPackages: z.array(z.string()).optional().describe('Only include these packages (if specified)'),
   outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd or .html)'),
   outputFormat: z.enum(['mmd', 'html']).optional().describe('Output format (mmd or html)'),
   layout: z.object({
-    direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
-    rankSpacing: z.number().min(10).max(100).optional(),
-    nodeSpacing: z.number().min(10).max(100).optional()
+    direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional().describe("Graph direction"),
+    rankSpacing: z.number().min(10).max(100).optional().describe("Space between ranks"),
+    nodeSpacing: z.number().min(10).max(100).optional().describe("Space between nodes")
   }).optional()
 }, async (params) => {
   try {
@@ -1038,10 +1043,50 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       return createMcpResponse("No file tree loaded. Please create or select a file tree first.", true);
     }
 
-    // Generate the diagram
-    const generator = new MermaidGenerator(fileTree, params);
+    // Use specialized config for package-deps style
+    if (params.style === 'package-deps') {
+      // Package-deps style should show package dependencies by default
+      params.showPackageDeps = params.showPackageDeps ?? true;
+      // Default to left-to-right layout for better readability of packages
+      if (!params.layout) {
+        params.layout = { direction: 'LR' };
+      } else if (!params.layout.direction) {
+        params.layout.direction = 'LR';
+      }
+    }
+
+    // Generate the diagram with added autoGroupThreshold parameter
+    const generator = new MermaidGenerator(fileTree, {
+      style: params.style,
+      maxDepth: params.maxDepth,
+      minImportance: params.minImportance,
+      showDependencies: params.showDependencies,
+      showPackageDeps: params.showPackageDeps,
+      packageGrouping: params.packageGrouping,
+      autoGroupThreshold: params.autoGroupThreshold,
+      excludePackages: params.excludePackages,
+      includeOnlyPackages: params.includeOnlyPackages,
+      layout: params.layout
+    });
     const diagram = generator.generate();
     const mermaidContent = diagram.code;
+
+    // Enhanced title based on diagram type
+    let titlePrefix = "File Scope Diagram";
+    switch (params.style) {
+      case 'package-deps':
+        titlePrefix = "Package Dependencies";
+        break;
+      case 'dependency':
+        titlePrefix = "Code Dependencies";
+        break;
+      case 'directory':
+        titlePrefix = "Directory Structure";
+        break;
+      case 'hybrid':
+        titlePrefix = "Hybrid View";
+        break;
+    }
 
     // Save diagram to file if requested
     if (params.outputPath) {
@@ -1075,7 +1120,8 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
           
           return createMcpResponse({
             message: `Successfully generated diagram in mmd format`,
-            filePath: mmdPath
+            filePath: mmdPath,
+            stats: diagram.stats
           });
         } catch (err: any) {
           console.error(`[${new Date().toISOString()}] Error saving Mermaid file:`, err);
@@ -1083,7 +1129,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
         }
       } else if (outputFormat === 'html') {
         // Generate HTML with embedded Mermaid
-        const title = `File Scope Diagram - ${path.basename(baseOutputPath)}`;
+        const title = `${titlePrefix} - ${path.basename(baseOutputPath)}`;
         const htmlContent = createMermaidHtml(mermaidContent, title);
         
         // Save HTML file
@@ -1094,7 +1140,8 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
           
           return createMcpResponse({
             message: `Successfully generated diagram in html format`,
-            filePath: htmlPath
+            filePath: htmlPath,
+            stats: diagram.stats
           });
         } catch (err: any) {
           console.error(`[${new Date().toISOString()}] Error saving HTML file:`, err);

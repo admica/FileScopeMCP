@@ -3,7 +3,8 @@ import {
   MermaidDiagram, 
   MermaidDiagramConfig, 
   MermaidDiagramStyle, 
-  MermaidDiagramStats 
+  MermaidDiagramStats,
+  PackageDependency
 } from './types.js';
 import path from 'path';
 
@@ -11,17 +12,22 @@ const DEFAULT_STYLE: MermaidDiagramStyle = {
   nodeColors: {
     highImportance: '#ff7675',    // Soft red for high importance
     mediumImportance: '#74b9ff',  // Soft blue for medium importance
-    lowImportance: '#81ecec'      // Soft cyan for low importance
+    lowImportance: '#81ecec',     // Soft cyan for low importance
+    package: '#a29bfe',           // Soft purple for packages
+    packageScope: '#ffeaa7'       // Soft yellow for package scopes
   },
   edgeColors: {
     dependency: '#636e72',        // Grey for dependencies
-    directory: '#dfe4ea',        // Light grey for directory structure
-    circular: '#e17055'          // Orange for circular dependencies
+    directory: '#dfe4ea',         // Light grey for directory structure
+    circular: '#e17055',          // Orange for circular dependencies
+    package: '#6c5ce7'            // Purple for package dependencies
   },
   nodeShapes: {
-    file: 'rect',               // Rectangle for files
-    directory: 'folder',        // Folder shape for directories
-    important: 'hexagon'        // Hexagon for important files
+    file: 'rect',                 // Rectangle for files
+    directory: 'folder',          // Folder shape for directories
+    important: 'hexagon',         // Hexagon for important files
+    package: 'ellipse',           // Ellipse for packages
+    packageScope: 'stadium'       // Stadium for package scopes
   }
 };
 
@@ -29,12 +35,14 @@ export class MermaidGenerator {
   private config: MermaidDiagramConfig;
   private fileTree: FileNode;
   private nodes: Map<string, string>; // path -> nodeId
-  private nodeInfo: Map<string, { label: string, color: string, isDefined: boolean }>; // nodeId -> info
+  private nodeInfo: Map<string, { label: string, color: string, shape: string, isDefined: boolean, isPackage: boolean, isPackageScope: boolean }>; // nodeId -> info
   private edges: Map<string, {source: string, target: string, type: string}>; // edgeKey -> edge info
   private edgeCount: number;
   private stats: MermaidDiagramStats;
   private style: MermaidDiagramStyle;
   private definedNodes: Set<string>; // Set of node IDs that have been defined
+  private packageScopes: Map<string, Set<string>>; // scope -> set of package names
+  private packageScopeNodes: Map<string, string>; // scope -> nodeId
 
   constructor(fileTree: FileNode, config?: Partial<MermaidDiagramConfig>) {
     this.fileTree = fileTree;
@@ -44,6 +52,10 @@ export class MermaidGenerator {
       minImportance: config?.minImportance || 0,
       showDependencies: config?.showDependencies ?? true,
       showPackageDeps: config?.showPackageDeps ?? false,
+      packageGrouping: config?.packageGrouping ?? true,
+      excludePackages: config?.excludePackages || [],
+      includeOnlyPackages: config?.includeOnlyPackages || [],
+      autoGroupThreshold: config?.autoGroupThreshold || 8,
       layout: {
         direction: config?.layout?.direction || 'TB',
         rankSpacing: config?.layout?.rankSpacing || 50,
@@ -56,17 +68,21 @@ export class MermaidGenerator {
     this.edges = new Map();
     this.edgeCount = 0;
     this.definedNodes = new Set();
+    this.packageScopes = new Map();
+    this.packageScopeNodes = new Map();
     this.stats = {
       nodeCount: 0,
       edgeCount: 0,
       maxDepth: 0,
       importantFiles: 0,
-      circularDeps: 0
+      circularDeps: 0,
+      packageCount: 0,
+      packageScopeCount: 0
     };
   }
 
   // Generate or retrieve a node ID for a given file path
-  private getNodeId(filePath: string): string {
+  private getNodeId(filePath: string, isPackage: boolean = false, isPackageScope: boolean = false): string {
     // If we already have an ID for this path, return it
     if (this.nodes.has(filePath)) {
       return this.nodes.get(filePath)!;
@@ -78,13 +94,49 @@ export class MermaidGenerator {
     
     // Initialize basic info for this node (will be refined later if it's a FileNode)
     const basename = path.basename(filePath);
+    const label = basename.length <= 20 ? basename : basename.substring(0, 17) + '...';
+    
+    // Set different styling based on node type
+    let color = this.style.nodeColors.lowImportance;
+    let shape = this.style.nodeShapes.file;
+    
+    if (isPackage) {
+      color = this.style.nodeColors.package;
+      shape = this.style.nodeShapes.package;
+    } else if (isPackageScope) {
+      color = this.style.nodeColors.packageScope;
+      shape = this.style.nodeShapes.packageScope;
+    }
+    
     this.nodeInfo.set(id, {
-      label: basename.length <= 20 ? basename : basename.substring(0, 17) + '...',
-      color: this.style.nodeColors.lowImportance,
-      isDefined: false // Not yet defined in output
+      label,
+      color,
+      shape,
+      isDefined: false, // Not yet defined in output
+      isPackage,
+      isPackageScope
     });
     
     return id;
+  }
+
+  // Get or create a package scope node
+  private getPackageScopeNodeId(scope: string): string {
+    if (this.packageScopeNodes.has(scope)) {
+      return this.packageScopeNodes.get(scope)!;
+    }
+    
+    const nodeId = this.getNodeId(`scope:${scope}`, false, true);
+    this.packageScopeNodes.set(scope, nodeId);
+    
+    // Update node info for the scope node
+    const info = this.nodeInfo.get(nodeId)!;
+    info.label = scope;
+    info.color = this.style.nodeColors.packageScope;
+    info.shape = this.style.nodeShapes.packageScope;
+    info.isPackageScope = true;
+    
+    return nodeId;
   }
 
   // Update node information based on the actual FileNode
@@ -98,8 +150,10 @@ export class MermaidGenerator {
     // Determine proper color based on importance
     if (node.isDirectory) {
       info.color = this.style.nodeColors.mediumImportance;
+      info.shape = this.style.nodeShapes.directory;
     } else if (node.importance && node.importance >= 8) {
       info.color = this.style.nodeColors.highImportance;
+      info.shape = this.style.nodeShapes.important;
     } else if (node.importance && node.importance >= 5) {
       info.color = this.style.nodeColors.mediumImportance;
     } else {
@@ -115,29 +169,166 @@ export class MermaidGenerator {
     return escapedName.length <= maxLength ? escapedName : escapedName.substring(0, maxLength - 3) + '...';
   }
 
+  // Create node for a package dependency
+  private addPackageNode(pkg: PackageDependency): string {
+    // Skip excluded packages
+    if (this.config.excludePackages && this.config.excludePackages.includes(pkg.name)) {
+      return '';
+    }
+    
+    // Only include specific packages if the filter is set
+    if (this.config.includeOnlyPackages && 
+        this.config.includeOnlyPackages.length > 0 && 
+        !this.config.includeOnlyPackages.includes(pkg.name)) {
+      return '';
+    }
+    
+    // Generate or get node id for this package
+    const nodeId = this.getNodeId(pkg.path, true);
+    const info = this.nodeInfo.get(nodeId)!;
+    
+    // Enhance the label with version if available
+    let label = pkg.name;
+    if (pkg.version) {
+      // Escape caret and parentheses in version strings
+      const escapedVersion = pkg.version.replace(/\^/g, '\\^').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+      label += ` v${escapedVersion}`;
+    }
+    if (pkg.isDevDependency) {
+      label += ' [dev]';
+    }
+    
+    // Escape special characters
+    label = label.replace(/"/g, '\\"').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+    info.label = label.length <= 30 ? label : label.substring(0, 27) + '...';
+    
+    // Track package in scope if it has one and grouping is enabled
+    if (pkg.scope && this.config.packageGrouping) {
+      if (!this.packageScopes.has(pkg.scope)) {
+        this.packageScopes.set(pkg.scope, new Set());
+        this.stats.packageScopeCount++;
+      }
+      this.packageScopes.get(pkg.scope)!.add(pkg.name);
+      
+      // Create edge from scope to package
+      const scopeNodeId = this.getPackageScopeNodeId(pkg.scope);
+      this.addEdge(scopeNodeId, nodeId, 'directory');
+    }
+    
+    this.stats.packageCount++;
+    return nodeId;
+  }
+
   // First pass: Collect all nodes that will be in the diagram
   private collectAllNodes(node: FileNode, depth: number = 0): void {
     if (depth >= (this.config.maxDepth || 3)) return;
+    
+    // Skip this node if it's for package dependencies diagram and not a file
+    if (this.config.style === 'package-deps' && node.isDirectory) {
+      // Still process children
+      if (node.children) {
+        for (const child of node.children) {
+          this.collectAllNodes(child, depth + 1);
+        }
+      }
+      return;
+    }
     
     // Register this node and update its info
     const nodeId = this.getNodeId(node.path);
     this.updateNodeInfo(node);
     
+    // Skip files with low importance if minImportance is set (except in package-deps mode)
+    if (!node.isDirectory && 
+        this.config.style !== 'package-deps' && 
+        this.config.minImportance && 
+        (node.importance || 0) < this.config.minImportance) {
+      return;
+    }
+    
     // Process children recursively to collect all nodes
     if (node.children) {
-      for (const child of node.children) {
-        // Skip files with low importance if minImportance is set
-        if (!child.isDirectory && 
-            this.config.minImportance && 
-            (child.importance || 0) < this.config.minImportance) {
-          continue;
+      // Check if we need to create subgroups for better layout
+      const threshold = this.config.autoGroupThreshold || 8;
+      let needsSubgrouping = node.children.length > threshold && 
+                            (this.config.style === 'directory' || this.config.style === 'default');
+      
+      // If we have too many children, group them by directory or file type
+      if (needsSubgrouping) {
+        // Group children by directory structure or type
+        const groups: Map<string, FileNode[]> = new Map();
+        
+        for (const child of node.children) {
+          if (!child.isDirectory && 
+              this.config.style !== 'package-deps' && 
+              this.config.minImportance && 
+              (child.importance || 0) < this.config.minImportance) {
+            continue;
+          }
+          
+          // Get grouping key - use directory name or file extension
+          let groupKey = '';
+          if (child.isDirectory) {
+            groupKey = 'Directories';
+          } else {
+            // Group by extension
+            const ext = path.extname(child.path);
+            if (ext) {
+              groupKey = ext.substring(1).toUpperCase(); // Remove the dot and uppercase
+            } else {
+              groupKey = 'Other';
+            }
+          }
+          
+          if (!groups.has(groupKey)) {
+            groups.set(groupKey, []);
+          }
+          groups.get(groupKey)!.push(child);
         }
         
-        // Add this child node and its descendants
-        this.collectAllNodes(child, depth + 1);
-        
-        // Also add an edge from parent to child
-        this.addEdge(node.path, child.path, 'directory');
+        // Now process each group separately
+        for (const [groupKey, groupChildren] of groups.entries()) {
+          // Create a subgraph for this group
+          const groupNodeId = this.getNodeId(`${node.path}_group_${groupKey}`, false, false);
+          const groupNode: FileNode = {
+            path: `${node.path}_group_${groupKey}`,
+            name: groupKey,
+            isDirectory: true,
+            children: groupChildren
+          };
+          
+          // Update node info for the group
+          const info = this.nodeInfo.get(groupNodeId)!;
+          info.label = groupKey;
+          
+          // Connect parent to this group
+          this.addEdge(node.path, groupNode.path, 'directory');
+          
+          // Process children within this group
+          for (const child of groupChildren) {
+            this.collectAllNodes(child, depth + 1);
+            this.addEdge(groupNode.path, child.path, 'directory');
+          }
+        }
+      } else {
+        // Standard processing when no grouping is needed
+        for (const child of node.children) {
+          // Skip files with low importance if minImportance is set
+          if (!child.isDirectory && 
+              this.config.style !== 'package-deps' && 
+              this.config.minImportance && 
+              (child.importance || 0) < this.config.minImportance) {
+            continue;
+          }
+          
+          // Add this child node and its descendants
+          this.collectAllNodes(child, depth + 1);
+          
+          // Add an edge from parent to child (except in package-deps mode)
+          if (this.config.style !== 'package-deps') {
+            this.addEdge(node.path, child.path, 'directory');
+          }
+        }
       }
     }
     
@@ -148,8 +339,24 @@ export class MermaidGenerator {
         // (even if we don't have a FileNode object for it)
         this.getNodeId(depPath);
         
-        // Add a dependency edge
-        this.addEdge(node.path, depPath, 'dependency');
+        // Add a dependency edge (except in package-deps mode)
+        if (this.config.style !== 'package-deps') {
+          this.addEdge(node.path, depPath, 'dependency');
+        }
+      }
+    }
+    
+    // Collect package dependencies
+    if (this.config.showPackageDeps && !node.isDirectory && node.packageDependencies) {
+      for (const pkgDep of node.packageDependencies) {
+        // Skip if package has no name
+        if (!pkgDep.name) continue;
+        
+        const packageNodeId = this.addPackageNode(pkgDep);
+        if (packageNodeId) {
+          // Add edge from file to package
+          this.addEdge(node.path, pkgDep.path, 'package');
+        }
       }
     }
   }
@@ -157,7 +364,16 @@ export class MermaidGenerator {
   // Add an edge between two nodes
   private addEdge(sourcePath: string, targetPath: string, type: string): void {
     const sourceId = this.getNodeId(sourcePath);
-    const targetId = this.getNodeId(targetPath);
+    let targetId;
+    
+    // Handle package nodes specially
+    if (type === 'package') {
+      targetId = this.nodes.get(targetPath);
+      if (!targetId) return; // Skip if package node doesn't exist (might be filtered)
+    } else {
+      targetId = this.getNodeId(targetPath);
+    }
+    
     const edgeKey = `${sourceId}-->${targetId}`;
     
     if (!this.edges.has(edgeKey)) {
@@ -178,14 +394,52 @@ export class MermaidGenerator {
     const info = this.nodeInfo.get(nodeId)!;
     const lines: string[] = [];
     
-    // Add node definition - remove quotes that break Mermaid 9.4.3 compatibility
+    // Add node definition with specified shape based on node type
     lines.push(`${nodeId}[${info.label}]`);
+    
+    // Add styling based on node type
     lines.push(`style ${nodeId} fill:${info.color},stroke:#2d3436`);
+    
+    // If the node is a package or package scope, apply special shape
+    if (info.isPackage || info.isPackageScope) {
+      lines.push(`class ${nodeId} ${info.isPackage ? 'package-node' : 'package-scope-node'}`);
+    }
     
     // Mark as defined in output
     this.definedNodes.add(nodeId);
     info.isDefined = true;
     this.stats.nodeCount++;
+    
+    return lines;
+  }
+
+  // Generate package dependency diagram
+  private generatePackageDepsView(): string[] {
+    const lines: string[] = [];
+    
+    // Add package scope subgraphs if grouping is enabled
+    if (this.config.packageGrouping) {
+      for (const [scope, nodeId] of this.packageScopeNodes.entries()) {
+        // Only include the scope if it has at least one package
+        const packagesInScope = this.packageScopes.get(scope);
+        if (packagesInScope && packagesInScope.size > 0) {
+          lines.push(`subgraph ${nodeId}[${scope}]`);
+          
+          // Add each package in this scope
+          for (const pkg of packagesInScope) {
+            for (const [path, id] of this.nodes.entries()) {
+              const info = this.nodeInfo.get(id);
+              if (info && info.isPackage && info.label.startsWith(pkg)) {
+                lines.push(`  ${id}`);
+              }
+            }
+          }
+          
+          lines.push(`end`);
+          lines.push(`style ${nodeId} fill:${this.style.nodeColors.packageScope},stroke:#2d3436,stroke-dasharray: 5 5`);
+        }
+      }
+    }
     
     return lines;
   }
@@ -197,27 +451,42 @@ export class MermaidGenerator {
     this.edges = new Map();
     this.edgeCount = 0;
     this.definedNodes = new Set();
+    this.packageScopes = new Map();
+    this.packageScopeNodes = new Map();
     this.stats = {
       nodeCount: 0,
       edgeCount: 0,
       maxDepth: 0,
       importantFiles: 0,
-      circularDeps: 0
+      circularDeps: 0,
+      packageCount: 0,
+      packageScopeCount: 0
     };
     
-    // Use a compatible Mermaid syntax format - FIXED: removed semicolon from graph declaration
+    // Use a compatible Mermaid syntax format
     const direction = this.config.layout?.direction || 'TB';
     const lines: string[] = [
       `graph ${direction}`
     ];
-
-    // Removed nodeSep and rankSep directives - these are not valid in Mermaid graph syntax
-    // These should be handled via Mermaid initialization configuration instead
+    
+    // Add CSS classes for package nodes
+    lines.push(`classDef package-node fill:${this.style.nodeColors.package},stroke:#2d3436,shape:${this.style.nodeShapes.package}`);
+    lines.push(`classDef package-scope-node fill:${this.style.nodeColors.packageScope},stroke:#2d3436,shape:${this.style.nodeShapes.packageScope}`);
+    lines.push(`classDef group-node fill:#f1c40f,stroke:#2d3436,opacity:0.2`);
     
     // PHASE 1: Collect all nodes and edges that will be in the diagram
     this.collectAllNodes(this.fileTree);
     
-    // PHASE 2: Generate all node definitions
+    // PHASE 2: Generate any package-specific subgraphs and groupings
+    if (this.config.style === 'package-deps' || this.config.showPackageDeps) {
+      lines.push(...this.generatePackageDepsView());
+    }
+    
+    // PHASE 2.5: Generate file group subgraphs
+    const groupSubgraphs = this.generateGroupSubgraphs();
+    lines.push(...groupSubgraphs);
+    
+    // PHASE 3: Generate all node definitions
     const allNodeIds = new Set<string>();
     
     // First, add all nodes that are sources or targets in edges
@@ -234,7 +503,7 @@ export class MermaidGenerator {
     
     lines.push(...nodeLines);
     
-    // PHASE 3: Generate all edges
+    // PHASE 4: Generate all edges
     this.edgeCount = 0;
     const edgeLines: string[] = [];
     
@@ -244,11 +513,29 @@ export class MermaidGenerator {
         edgeLines.push(`${edge.source} --> ${edge.target}`);
         
         // Choose edge color based on type
-        const color = edge.type === 'dependency' 
-          ? this.style.edgeColors.dependency 
-          : this.style.edgeColors.directory;
+        let color = this.style.edgeColors.dependency;
+        let strokeWidth = '1px';
+        
+        switch (edge.type) {
+          case 'dependency':
+            color = this.style.edgeColors.dependency;
+            strokeWidth = '2px';
+            break;
+          case 'directory':
+            color = this.style.edgeColors.directory;
+            strokeWidth = '2px';
+            break;
+          case 'circular':
+            color = this.style.edgeColors.circular;
+            strokeWidth = '2px';
+            break;
+          case 'package':
+            color = this.style.edgeColors.package;
+            strokeWidth = '1.5px';
+            break;
+        }
           
-        edgeLines.push(`linkStyle ${this.edgeCount} stroke:${color}`);
+        edgeLines.push(`linkStyle ${this.edgeCount} stroke:${color},stroke-width:${strokeWidth}`);
         this.edgeCount++;
         this.stats.edgeCount++;
         
@@ -266,5 +553,40 @@ export class MermaidGenerator {
       stats: this.stats,
       timestamp: new Date()
     };
+  }
+  
+  // Generate subgraphs for file type groups
+  private generateGroupSubgraphs(): string[] {
+    const lines: string[] = [];
+    const groupNodeIds = new Set<string>();
+    
+    // Find all group nodes
+    for (const [path, nodeId] of this.nodes.entries()) {
+      if (path.includes('_group_')) {
+        groupNodeIds.add(nodeId);
+      }
+    }
+    
+    // Generate subgraph for each group
+    for (const nodeId of groupNodeIds) {
+      const info = this.nodeInfo.get(nodeId);
+      if (info) {
+        // Create subgraph with styling
+        lines.push(`subgraph ${nodeId}[${info.label}]`);
+        
+        // Find all nodes connected to this group
+        for (const edge of this.edges.values()) {
+          if (edge.source === nodeId) {
+            lines.push(`  ${edge.target}`);
+          }
+        }
+        
+        lines.push(`end`);
+        lines.push(`style ${nodeId} fill:#f8f9fa,stroke:#2d3436,stroke-dasharray: 5 5`);
+        lines.push(`class ${nodeId} group-node`);
+      }
+    }
+    
+    return lines;
   }
 } 
