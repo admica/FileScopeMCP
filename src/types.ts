@@ -30,10 +30,10 @@ export interface ToolResponse {
 }
 
 export class FileTreeConfig {
-  filename: string = '';        // Name of the JSON file to store the file tree
-  baseDirectory: string = '';   // Base directory to scan
-  projectRoot: string = '';     // Project root directory (where files will be stored)
-  lastUpdated?: Date;      // When the file tree was last updated
+  filename: string = 'default-tree.json'; // Safe default filename
+  baseDirectory: string = process.cwd();  // Current directory as fallback
+  projectRoot: string = process.cwd();    // Consistent with baseDirectory
+  lastUpdated?: Date = new Date();        // Current time as default
 }
 
 export class FileTreeStorage {

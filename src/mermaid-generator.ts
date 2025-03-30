@@ -110,7 +110,9 @@ export class MermaidGenerator {
   private getNodeLabel(node: FileNode): string {
     const maxLength = 20;
     const name = node.name;
-    return name.length <= maxLength ? name : name.substring(0, maxLength - 3) + '...';
+    // Escape quotes and special characters to prevent Mermaid syntax errors
+    const escapedName = name.replace(/"/g, '\\"').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+    return escapedName.length <= maxLength ? escapedName : escapedName.substring(0, maxLength - 3) + '...';
   }
 
   // First pass: Collect all nodes that will be in the diagram
@@ -176,8 +178,8 @@ export class MermaidGenerator {
     const info = this.nodeInfo.get(nodeId)!;
     const lines: string[] = [];
     
-    // Add node definition
-    lines.push(`${nodeId}["${info.label}"]`);
+    // Add node definition - remove quotes that break Mermaid 9.4.3 compatibility
+    lines.push(`${nodeId}[${info.label}]`);
     lines.push(`style ${nodeId} fill:${info.color},stroke:#2d3436`);
     
     // Mark as defined in output
@@ -203,28 +205,27 @@ export class MermaidGenerator {
       circularDeps: 0
     };
     
+    // Use a compatible Mermaid syntax format - FIXED: removed semicolon from graph declaration
+    const direction = this.config.layout?.direction || 'TB';
     const lines: string[] = [
-      // Add graph direction with semicolon
-      `graph ${this.config.layout?.direction || 'TB'};`
+      `graph ${direction}`
     ];
 
-    // Optional layout settings with semicolons
+    // Add layout settings as separate lines - FIXED: proper Mermaid 9.4.3 directive format
     if (this.config.layout?.nodeSpacing) {
-      lines.push(`  nodeSep ${this.config.layout.nodeSpacing};`);
+      lines.push(`  nodeSep ${this.config.layout.nodeSpacing}`);
     }
     if (this.config.layout?.rankSpacing) {
-      lines.push(`  rankSep ${this.config.layout.rankSpacing};`);
+      lines.push(`  rankSep ${this.config.layout.rankSpacing}`);
     }
     
-    // Add a blank line
+    // Add a blank line for readability
     lines.push('');
 
     // PHASE 1: Collect all nodes and edges that will be in the diagram
-    // This registers all node IDs and collects all edges
     this.collectAllNodes(this.fileTree);
     
     // PHASE 2: Generate all node definitions
-    // We need to define ALL nodes before any edges
     const allNodeIds = new Set<string>();
     
     // First, add all nodes that are sources or targets in edges

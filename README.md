@@ -25,8 +25,8 @@ This MCP server analyzes your codebase to identify the most important files base
   - Generate Mermaid diagrams to visualize file relationships
   - Color-coded visualization based on importance scores
   - Support for dependency graphs, directory trees, or hybrid views
-  - Optional HTML output with embedded rendering
-  - Customize diagram size and filtering options
+  - HTML output with embedded rendering including theme toggle and responsive design
+  - Customize diagram depth, filter by importance, and adjust layout options
 
 - **File Summaries**
   - Add human or AI-generated summaries to files
@@ -60,7 +60,7 @@ This MCP server analyzes your codebase to identify the most important files base
    ```bash
    build.sh
    ```
-3. Copy the genereated mcp.json configuration to your project's `.cursor` directory:
+3. Copy the generated mcp.json configuration to your project's `.cursor` directory:
    ```json
    {
      "mcpServers": {
@@ -82,6 +82,7 @@ The MCP server exposes the following tools:
 - **list_saved_trees**: List all saved file trees
 - **create_file_tree**: Create a new file tree configuration for a specific directory
 - **select_file_tree**: Select an existing file tree to work with
+- **delete_file_tree**: Delete a file tree configuration
 
 ### File Analysis
 
@@ -89,11 +90,20 @@ The MCP server exposes the following tools:
 - **get_file_importance**: Get detailed information about a specific file, including dependencies and dependents
 - **find_important_files**: Find the most important files in the project based on configurable criteria
 - **read_file_content**: Read the content of a specific file
+- **recalculate_importance**: Recalculate importance values for all files based on dependencies
 
 ### File Summaries
 
 - **get_file_summary**: Get the stored summary of a specific file
 - **set_file_summary**: Set or update the summary of a specific file
+
+### Diagram Generation
+
+- **generate_diagram**: Create Mermaid diagrams with customizable options
+  - Output formats: Mermaid text (`.mmd`) or HTML with embedded rendering
+  - Diagram styles: default, dependency, directory, or hybrid views
+  - Filter options: max depth, minimum importance threshold
+  - Layout options: direction (TB, BT, LR, RL), node spacing, rank spacing
 
 ## Usage Examples
 
@@ -131,6 +141,23 @@ The MCP server exposes the following tools:
    get_file_summary(filepath: "/path/to/project/src/main.ts")
    ```
 
+### Generating Diagrams
+
+1. Create a basic project structure diagram:
+   ```
+   generate_diagram(style: "directory", maxDepth: 3, outputPath: "diagrams/project-structure", outputFormat: "mmd")
+   ```
+
+2. Generate an HTML diagram with dependency relationships:
+   ```
+   generate_diagram(style: "hybrid", maxDepth: 2, minImportance: 5, showDependencies: true, outputPath: "diagrams/important-files", outputFormat: "html")
+   ```
+
+3. Customize the diagram layout:
+   ```
+   generate_diagram(style: "dependency", layout: { direction: "LR", nodeSpacing: 50, rankSpacing: 70 }, outputPath: "diagrams/dependencies", outputFormat: "html")
+   ```
+
 ## How It Works
 
 ### Dependency Detection
@@ -154,6 +181,19 @@ Files are assigned importance scores (0-10) based on a weighted formula that con
 
 A file that is central to the codebase (imported by many files) will have a higher score.
 
+### Diagram Generation
+
+The system uses a three-phase approach to generate valid Mermaid syntax:
+1. Collection Phase: Register all nodes and relationships
+2. Node Definition Phase: Generate definitions for all nodes before any references
+3. Edge Generation Phase: Create edges between defined nodes
+
+This ensures all diagrams have valid syntax and render correctly. HTML output includes:
+- Responsive design that works on any device
+- Light/dark theme toggle with system preference detection
+- Client-side Mermaid rendering for optimal performance
+- Timestamp of generation
+
 ### Path Normalization
 
 The system handles various path formats to ensure consistent file identification:
@@ -172,6 +212,7 @@ All file tree data is stored in JSON files with the following structure:
 
 - **TypeScript/Node.js**: Built with TypeScript for type safety and modern JavaScript features
 - **Model Context Protocol**: Implements the MCP specification for integration with Cursor
+- **Mermaid.js**: Uses Mermaid syntax for diagram generation
 - **JSON Storage**: Uses simple JSON files for persistence
 - **Path Normalization**: Cross-platform path handling to support Windows and Unix
 - **Caching**: Implements caching for faster repeated operations
@@ -180,9 +221,9 @@ All file tree data is stored in JSON files with the following structure:
 
 - Add support for more programming languages
 - Implement real-time file system monitoring
-- Add visualization tools for dependency graphs
-- Integrate with version control systems to track importance over time
 - Add more sophisticated importance calculation algorithms
+- Enhance diagram customization options
+- Support for exporting diagrams to additional formats
 
 ## License
 
