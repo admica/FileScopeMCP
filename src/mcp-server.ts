@@ -806,149 +806,187 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
   const now = new Date();
   const timestamp = `${now.toDateString()} ${now.toLocaleTimeString()}`;
   
+  // Create a properly escaped version of the mermaid code for JS
+  const escapedMermaidCode = mermaidCode.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+  
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <title>${title}</title>
-  <!-- Using a specific Mermaid version known to work well -->
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@9.4.3/dist/mermaid.min.js"></script>
+  <!-- Load Mermaid from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.5s ease;
+    }
+    .dark-mode {
+      background: linear-gradient(135deg, #1e1e2f 0%, #1d2426 100%);
+    }
+    .light-mode {
+      background: linear-gradient(135deg, #f5f6fa 0%, #dcdde1 100%);
+    }
+    header {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      text-align: left;
+    }
+    #theme-toggle {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 50px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #diagram-container {
+      width: 90%;
+      max-width: 1200px;
+      margin: 75px 0;
+      padding: 25px;
+      border-radius: 15px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      transition: all 0.5s ease;
+      position: relative;
+    }
+    #mermaid-graph {
+      overflow: auto;
+      max-height: 70vh;
+    }
+    #error-message {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      display: none;
+    }
+  </style>
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; line-height: 1.6; padding: 20px; transition: background-color 0.3s ease, color 0.3s ease; background-color: #2d3436; color: #f5f5f5;" class="dark-mode">
-  <h1 style="margin-bottom: 10px;">${title}</h1>
-  <div style="font-size: 0.9em; color: #a4b0be; margin-bottom: 20px;">Generated on ${timestamp}</div>
-  
-  <!-- Improved toggle button with inline CSS -->
-  <button style="background-color: #0984e3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background-color 0.3s ease;" onmouseover="this.style.backgroundColor='#0876c9'" onmouseout="this.style.backgroundColor='#0984e3'" onclick="toggleTheme()">Switch to Light Mode</button>
-  
-  <div id="diagram-container" style="margin: 30px 0; overflow: auto;">
-    <!-- Mermaid diagram with inline container styling -->
-    <pre class="mermaid" style="background-color: #1e272e; padding: 15px; border-radius: 5px; overflow: auto;">
-${mermaidCode}
-    </pre>
-    <!-- Error message with inline CSS -->
-    <div id="error-message" style="color: #ff7675; padding: 10px; background-color: #2d3436; border: 1px solid #ff7675; border-radius: 4px; margin-top: 10px; display: none;"></div>
-    <!-- Raw code with inline CSS -->
-    <pre id="raw-code" style="font-family: monospace; white-space: pre; background-color: #2c3e50; color: #f5f5f5; padding: 15px; border-radius: 5px; overflow: auto; display: none; max-height: 400px; margin-top: 20px; border: 1px solid #4d6c8d;">
-${mermaidCode}
+<body class="dark-mode">
+  <!-- Header -->
+  <header style="color: #ffffff;">
+    <h1 style="margin: 0; font-size: 28px;">${title}</h1>
+    <div style="font-size: 14px; margin-top: 5px;">Generated on ${timestamp}</div>
+  </header>
+
+  <!-- Theme Toggle Button -->
+  <button id="theme-toggle" style="background: #2d3436; color: #ffffff;">Switch to Light Mode</button>
+
+  <!-- Diagram Container -->
+  <div id="diagram-container" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);">
+    <div id="mermaid-graph"></div>
+    <div id="error-message" style="background: rgba(45, 52, 54, 0.9); color: #ff7675;"></div>
+    <!-- Mermaid Code -->
+    <pre id="raw-code" style="display: none;">
+${escapedMermaidCode}
     </pre>
   </div>
-  
+
   <script>
-    // Configure Mermaid settings
+    // Unique render ID counter
+    let renderCount = 0;
+
+    // Initialize Mermaid
     mermaid.initialize({
-      startOnLoad: true,
-      theme: 'dark', // Default to dark theme
+      startOnLoad: false,
+      theme: 'dark',
       securityLevel: 'loose',
-      logLevel: 'error',
       flowchart: {
         htmlLabels: true,
-        curve: 'linear',
-        nodeSpacing: 50,
-        rankSpacing: 70
-      },
-      fontFamily: 'monospace'
-    });
-
-    // Check for rendering errors after load
-    document.addEventListener('DOMContentLoaded', function() {
-      setTimeout(checkForRenderingErrors, 1000);
-    });
-
-    function checkForRenderingErrors() {
-      const mermaidDiv = document.querySelector('.mermaid');
-      const errorDiv = document.getElementById('error-message');
-      const rawCodeDiv = document.getElementById('raw-code');
-      if (mermaidDiv.innerHTML.includes('Syntax error') || !mermaidDiv.getAttribute('data-processed')) {
-        errorDiv.style.display = 'block';
-        errorDiv.innerHTML = 'Error rendering Mermaid diagram. Raw code below:';
-        rawCodeDiv.style.display = 'block';
+        curve: 'basis',
+        nodeSpacing: 42,
+        rankSpacing: 60,
+        useMaxWidth: true
       }
+    });
+
+    // Render on DOM load
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof mermaid === 'undefined') {
+        console.error('Mermaid library failed to load. Check network or CDN URL.');
+        document.getElementById('error-message').style.display = 'block';
+        document.getElementById('error-message').textContent = 'Error: Mermaid library not loaded';
+        return;
+      }
+      renderMermaid();
+    });
+
+    // Render Mermaid diagram
+    function renderMermaid() {
+      const mermaidDiv = document.getElementById('mermaid-graph');
+      const errorDiv = document.getElementById('error-message');
+      const rawCode = document.getElementById('raw-code').textContent.trim();
+      const uniqueId = \`mermaid-svg-\${Date.now()}-\${renderCount++}\`;
+
+      // Clear previous content
+      mermaidDiv.innerHTML = '';
+      errorDiv.style.display = 'none';
+
+      // Render using promise
+      mermaid.render(uniqueId, rawCode)
+        .then(({ svg }) => {
+          mermaidDiv.innerHTML = svg;
+        })
+        .catch(error => {
+          console.error('Mermaid rendering failed:', error);
+          errorDiv.style.display = 'block';
+          errorDiv.textContent = \`Error: \${error.message}\`;
+          mermaidDiv.innerHTML = \`<pre style="color: #ff7675;">\${rawCode}</pre>\`;
+        });
     }
 
+    // Theme toggle function
     function toggleTheme() {
       const body = document.body;
-      const mermaidDiv = document.querySelector('.mermaid');
-      const errorDiv = document.getElementById('error-message');
-      const rawCodeDiv = document.getElementById('raw-code');
-      const toggleBtn = document.querySelector('button');
+      const toggleBtn = document.getElementById('theme-toggle');
+      const diagramContainer = document.getElementById('diagram-container');
+      const header = document.querySelector('header');
       const isDarkMode = body.classList.contains('dark-mode');
-      
-      // Toggle classes and inline styles
+
       if (isDarkMode) {
-        // Switch to light mode
+        // Switch to Light Mode
         body.classList.remove('dark-mode');
         body.classList.add('light-mode');
-        body.style.backgroundColor = '#fff';
-        body.style.color = '#333';
-        mermaidDiv.style.backgroundColor = '#fff';
-        document.querySelector('div[style*="color: #a4b0be"]').style.color = '#636e72';
-        
-        // Update error styles
-        errorDiv.style.color = '#e74c3c';
-        errorDiv.style.backgroundColor = '#fadbd8';
-        errorDiv.style.border = 'none';
-        
-        // Update raw code styles
-        rawCodeDiv.style.backgroundColor = '#f8f9fa';
-        rawCodeDiv.style.color = '#333';
-        rawCodeDiv.style.borderColor = '#ddd';
-        
-        // Update button text
         toggleBtn.textContent = 'Switch to Dark Mode';
+        toggleBtn.style.background = '#dcdde1';
+        toggleBtn.style.color = '#2d3436';
+        diagramContainer.style.background = 'rgba(255, 255, 255, 0.8)';
+        diagramContainer.style.border = '1px solid rgba(0, 0, 0, 0.1)';
+        header.style.color = '#2d3436';
+        mermaid.initialize({ theme: 'default' });
       } else {
-        // Switch to dark mode
+        // Switch to Dark Mode
         body.classList.remove('light-mode');
         body.classList.add('dark-mode');
-        body.style.backgroundColor = '#2d3436';
-        body.style.color = '#f5f5f5';
-        mermaidDiv.style.backgroundColor = '#1e272e';
-        document.querySelector('div[style*="color: #636e72"]').style.color = '#a4b0be';
-        
-        // Update error styles
-        errorDiv.style.color = '#ff7675';
-        errorDiv.style.backgroundColor = '#2d3436';
-        errorDiv.style.border = '1px solid #ff7675';
-        
-        // Update raw code styles
-        rawCodeDiv.style.backgroundColor = '#2c3e50';
-        rawCodeDiv.style.color = '#f5f5f5';
-        rawCodeDiv.style.borderColor = '#4d6c8d';
-        
-        // Update button text
         toggleBtn.textContent = 'Switch to Light Mode';
+        toggleBtn.style.background = '#2d3436';
+        toggleBtn.style.color = '#ffffff';
+        diagramContainer.style.background = 'rgba(255, 255, 255, 0.05)';
+        diagramContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        header.style.color = '#ffffff';
+        mermaid.initialize({ theme: 'dark' });
       }
 
-      // Store original Mermaid code and reset the container
-      const mermaidCode = document.getElementById('raw-code').textContent.trim();
-      mermaidDiv.textContent = mermaidCode; // Use textContent to avoid encoding issues
-      mermaidDiv.removeAttribute('data-processed');
-
-      // Re-initialize Mermaid with updated theme
-      mermaid.initialize({
-        startOnLoad: true,
-        theme: isDarkMode ? 'default' : 'dark',
-        securityLevel: 'loose',
-        flowchart: {
-          htmlLabels: true,
-          curve: 'linear',
-          nodeSpacing: 50,
-          rankSpacing: 70
-        }
-      });
-      
-      // Re-render the diagram
-      try {
-        mermaid.init(undefined, '.mermaid');
-        // Re-check for errors
-        setTimeout(checkForRenderingErrors, 1000);
-      } catch (e) {
-        console.error('Failed to render diagram:', e);
-        errorDiv.style.display = 'block';
-        errorDiv.innerHTML = 'Error rendering diagram: ' + e.message;
-        rawCodeDiv.style.display = 'block';
-      }
+      // Re-render diagram after theme change
+      renderMermaid();
     }
+
+    // Attach theme toggle event
+    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
   </script>
 </body>
 </html>`;
