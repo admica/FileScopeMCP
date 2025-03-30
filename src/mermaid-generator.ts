@@ -28,10 +28,13 @@ const DEFAULT_STYLE: MermaidDiagramStyle = {
 export class MermaidGenerator {
   private config: MermaidDiagramConfig;
   private fileTree: FileNode;
-  private nodes: Map<string, string>;
-  private edges: Set<string>;
+  private nodes: Map<string, string>; // path -> nodeId
+  private nodeInfo: Map<string, { label: string, color: string, isDefined: boolean }>; // nodeId -> info
+  private edges: Map<string, {source: string, target: string, type: string}>; // edgeKey -> edge info
+  private edgeCount: number;
   private stats: MermaidDiagramStats;
   private style: MermaidDiagramStyle;
+  private definedNodes: Set<string>; // Set of node IDs that have been defined
 
   constructor(fileTree: FileNode, config?: Partial<MermaidDiagramConfig>) {
     this.fileTree = fileTree;
@@ -49,7 +52,10 @@ export class MermaidGenerator {
     };
     this.style = DEFAULT_STYLE;
     this.nodes = new Map();
-    this.edges = new Set();
+    this.nodeInfo = new Map();
+    this.edges = new Map();
+    this.edgeCount = 0;
+    this.definedNodes = new Set();
     this.stats = {
       nodeCount: 0,
       edgeCount: 0,
@@ -59,13 +65,46 @@ export class MermaidGenerator {
     };
   }
 
-  private generateNodeId(filePath: string): string {
+  // Generate or retrieve a node ID for a given file path
+  private getNodeId(filePath: string): string {
+    // If we already have an ID for this path, return it
     if (this.nodes.has(filePath)) {
       return this.nodes.get(filePath)!;
     }
+    
+    // Otherwise, generate a new ID and store it
     const id = `node${this.nodes.size}`;
     this.nodes.set(filePath, id);
+    
+    // Initialize basic info for this node (will be refined later if it's a FileNode)
+    const basename = path.basename(filePath);
+    this.nodeInfo.set(id, {
+      label: basename.length <= 20 ? basename : basename.substring(0, 17) + '...',
+      color: this.style.nodeColors.lowImportance,
+      isDefined: false // Not yet defined in output
+    });
+    
     return id;
+  }
+
+  // Update node information based on the actual FileNode
+  private updateNodeInfo(node: FileNode): void {
+    const nodeId = this.getNodeId(node.path);
+    const info = this.nodeInfo.get(nodeId)!;
+    
+    // Update the label to the proper node label
+    info.label = this.getNodeLabel(node);
+    
+    // Determine proper color based on importance
+    if (node.isDirectory) {
+      info.color = this.style.nodeColors.mediumImportance;
+    } else if (node.importance && node.importance >= 8) {
+      info.color = this.style.nodeColors.highImportance;
+    } else if (node.importance && node.importance >= 5) {
+      info.color = this.style.nodeColors.mediumImportance;
+    } else {
+      info.color = this.style.nodeColors.lowImportance;
+    }
   }
 
   private getNodeLabel(node: FileNode): string {
@@ -74,34 +113,15 @@ export class MermaidGenerator {
     return name.length <= maxLength ? name : name.substring(0, maxLength - 3) + '...';
   }
 
-  private getNodeStyle(node: FileNode): string {
-    // Determine node color based on importance or directory status
-    let color = this.style.nodeColors.lowImportance; // Default for files
+  // First pass: Collect all nodes that will be in the diagram
+  private collectAllNodes(node: FileNode, depth: number = 0): void {
+    if (depth >= (this.config.maxDepth || 3)) return;
     
-    if (node.isDirectory) {
-      color = this.style.nodeColors.mediumImportance;
-    } else if (node.importance && node.importance >= 8) {
-      color = this.style.nodeColors.highImportance;
-    } else if (node.importance && node.importance >= 5) {
-      color = this.style.nodeColors.mediumImportance;
-    }
+    // Register this node and update its info
+    const nodeId = this.getNodeId(node.path);
+    this.updateNodeInfo(node);
     
-    return `style ${this.generateNodeId(node.path)} fill:${color},stroke:#2d3436`;
-  }
-  
-  private generateAllNodes(node: FileNode, depth: number = 0): string[] {
-    if (depth >= (this.config.maxDepth || 3)) return [];
-    this.stats.maxDepth = Math.max(this.stats.maxDepth, depth);
-
-    const lines: string[] = [];
-    const nodeId = this.generateNodeId(node.path);
-    
-    // Add node definition
-    lines.push(`${nodeId}["${this.getNodeLabel(node)}"]`);
-    lines.push(this.getNodeStyle(node));
-    this.stats.nodeCount++;
-
-    // Process children recursively
+    // Process children recursively to collect all nodes
     if (node.children) {
       for (const child of node.children) {
         // Skip files with low importance if minImportance is set
@@ -111,71 +131,70 @@ export class MermaidGenerator {
           continue;
         }
         
-        // Generate node for child
-        lines.push(...this.generateAllNodes(child, depth + 1));
-      }
-    }
-
-    return lines;
-  }
-  
-  private generateAllEdges(node: FileNode, depth: number = 0): string[] {
-    if (depth >= (this.config.maxDepth || 3)) return [];
-
-    const lines: string[] = [];
-    const nodeId = this.generateNodeId(node.path);
-    
-    // Process children
-    if (node.children) {
-      for (const child of node.children) {
-        // Skip files with low importance if minImportance is set
-        if (!child.isDirectory && 
-            this.config.minImportance && 
-            (child.importance || 0) < this.config.minImportance) {
-          continue;
-        }
-
-        const childId = this.generateNodeId(child.path);
-        const edgeKey = `${nodeId}-->${childId}`;
+        // Add this child node and its descendants
+        this.collectAllNodes(child, depth + 1);
         
-        if (!this.edges.has(edgeKey)) {
-          // Create edge from parent to child
-          lines.push(`${nodeId} --> ${childId}`);
-          lines.push(`linkStyle ${this.edges.size} stroke:${this.style.edgeColors.directory}`);
-          this.edges.add(edgeKey);
-          this.stats.edgeCount++;
-          
-          // Generate edges for child recursively
-          lines.push(...this.generateAllEdges(child, depth + 1));
-        }
+        // Also add an edge from parent to child
+        this.addEdge(node.path, child.path, 'directory');
       }
     }
     
-    // Add dependency relationships if requested
+    // Collect dependency nodes
     if (this.config.showDependencies && !node.isDirectory && node.dependencies) {
       for (const depPath of node.dependencies) {
-        if (this.nodes.has(depPath)) {
-          const depId = this.generateNodeId(depPath);
-          const edgeKey = `${nodeId}-->${depId}`;
-          
-          if (!this.edges.has(edgeKey)) {
-            lines.push(`${nodeId} --> ${depId}`);
-            lines.push(`linkStyle ${this.edges.size} stroke:${this.style.edgeColors.dependency}`);
-            this.edges.add(edgeKey);
-            this.stats.edgeCount++;
-            this.stats.importantFiles++;
-          }
-        }
+        // Just register the dependency path to get a node ID
+        // (even if we don't have a FileNode object for it)
+        this.getNodeId(depPath);
+        
+        // Add a dependency edge
+        this.addEdge(node.path, depPath, 'dependency');
       }
     }
-
+  }
+  
+  // Add an edge between two nodes
+  private addEdge(sourcePath: string, targetPath: string, type: string): void {
+    const sourceId = this.getNodeId(sourcePath);
+    const targetId = this.getNodeId(targetPath);
+    const edgeKey = `${sourceId}-->${targetId}`;
+    
+    if (!this.edges.has(edgeKey)) {
+      this.edges.set(edgeKey, {
+        source: sourceId,
+        target: targetId,
+        type: type
+      });
+    }
+  }
+  
+  // Generate the node definition lines for the diagram
+  private generateNodeDefinition(nodeId: string): string[] {
+    if (this.definedNodes.has(nodeId)) {
+      return []; // Already defined
+    }
+    
+    const info = this.nodeInfo.get(nodeId)!;
+    const lines: string[] = [];
+    
+    // Add node definition
+    lines.push(`${nodeId}["${info.label}"]`);
+    lines.push(`style ${nodeId} fill:${info.color},stroke:#2d3436`);
+    
+    // Mark as defined in output
+    this.definedNodes.add(nodeId);
+    info.isDefined = true;
+    this.stats.nodeCount++;
+    
     return lines;
   }
 
   public generate(): MermaidDiagram {
-    // Reset counters
+    // Reset state for a clean generation
     this.nodes = new Map();
-    this.edges = new Set();
+    this.nodeInfo = new Map();
+    this.edges = new Map();
+    this.edgeCount = 0;
+    this.definedNodes = new Set();
     this.stats = {
       nodeCount: 0,
       edgeCount: 0,
@@ -200,12 +219,52 @@ export class MermaidGenerator {
     // Add a blank line
     lines.push('');
 
-    // Phase 1: Generate all node definitions first
-    const nodeLines = this.generateAllNodes(this.fileTree);
+    // PHASE 1: Collect all nodes and edges that will be in the diagram
+    // This registers all node IDs and collects all edges
+    this.collectAllNodes(this.fileTree);
+    
+    // PHASE 2: Generate all node definitions
+    // We need to define ALL nodes before any edges
+    const allNodeIds = new Set<string>();
+    
+    // First, add all nodes that are sources or targets in edges
+    for (const edge of this.edges.values()) {
+      allNodeIds.add(edge.source);
+      allNodeIds.add(edge.target);
+    }
+    
+    // Generate definitions for all nodes
+    const nodeLines: string[] = [];
+    for (const nodeId of allNodeIds) {
+      nodeLines.push(...this.generateNodeDefinition(nodeId));
+    }
+    
     lines.push(...nodeLines);
     
-    // Phase 2: Then create all edges
-    const edgeLines = this.generateAllEdges(this.fileTree);
+    // PHASE 3: Generate all edges
+    this.edgeCount = 0;
+    const edgeLines: string[] = [];
+    
+    for (const edge of this.edges.values()) {
+      // Only include edges where both nodes exist
+      if (this.nodeInfo.has(edge.source) && this.nodeInfo.has(edge.target)) {
+        edgeLines.push(`${edge.source} --> ${edge.target}`);
+        
+        // Choose edge color based on type
+        const color = edge.type === 'dependency' 
+          ? this.style.edgeColors.dependency 
+          : this.style.edgeColors.directory;
+          
+        edgeLines.push(`linkStyle ${this.edgeCount} stroke:${color}`);
+        this.edgeCount++;
+        this.stats.edgeCount++;
+        
+        if (edge.type === 'dependency') {
+          this.stats.importantFiles++;
+        }
+      }
+    }
+    
     lines.push(...edgeLines);
 
     return {
