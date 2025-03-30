@@ -900,7 +900,7 @@ ${escapedMermaidCode}
     // Unique render ID counter
     let renderCount = 0;
 
-    // Initialize Mermaid
+    // Initialize Mermaid with dark theme by default
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
@@ -911,6 +911,13 @@ ${escapedMermaidCode}
         nodeSpacing: 42,
         rankSpacing: 60,
         useMaxWidth: true
+      },
+      themeVariables: {
+        // Make node text bright white in dark mode for better readability
+        nodeBorder: "#2d3436",
+        mainBkg: "#1e272e",
+        nodeTextColor: "#ffffff", 
+        fontSize: "16px"
       }
     });
 
@@ -967,7 +974,17 @@ ${escapedMermaidCode}
         diagramContainer.style.background = 'rgba(255, 255, 255, 0.8)';
         diagramContainer.style.border = '1px solid rgba(0, 0, 0, 0.1)';
         header.style.color = '#2d3436';
-        mermaid.initialize({ theme: 'default' });
+        
+        // Update Mermaid theme to light with dark text
+        mermaid.initialize({
+          theme: 'default',
+          themeVariables: {
+            nodeBorder: "#2d3436",
+            mainBkg: "#f8f9fa",
+            nodeTextColor: "#333333",
+            fontSize: "16px"
+          }
+        });
       } else {
         // Switch to Dark Mode
         body.classList.remove('light-mode');
@@ -978,7 +995,17 @@ ${escapedMermaidCode}
         diagramContainer.style.background = 'rgba(255, 255, 255, 0.05)';
         diagramContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
         header.style.color = '#ffffff';
-        mermaid.initialize({ theme: 'dark' });
+        
+        // Update Mermaid theme to dark with bright white text
+        mermaid.initialize({
+          theme: 'dark',
+          themeVariables: {
+            nodeBorder: "#2d3436",
+            mainBkg: "#1e272e",
+            nodeTextColor: "#ffffff",
+            fontSize: "16px"
+          }
+        });
       }
 
       // Re-render diagram after theme change
