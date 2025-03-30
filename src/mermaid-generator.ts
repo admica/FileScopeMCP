@@ -185,18 +185,28 @@ export class MermaidGenerator {
     };
     
     const lines: string[] = [
-      // Add graph direction and spacing
-      `graph ${this.config.layout?.direction || 'TB'}`,
-      `  nodeSep ${this.config.layout?.nodeSpacing || 40}`,
-      `  rankSep ${this.config.layout?.rankSpacing || 50}`,
-      ''
+      // Add graph direction with semicolon
+      `graph ${this.config.layout?.direction || 'TB'};`
     ];
 
+    // Optional layout settings with semicolons
+    if (this.config.layout?.nodeSpacing) {
+      lines.push(`  nodeSep ${this.config.layout.nodeSpacing};`);
+    }
+    if (this.config.layout?.rankSpacing) {
+      lines.push(`  rankSep ${this.config.layout.rankSpacing};`);
+    }
+    
+    // Add a blank line
+    lines.push('');
+
     // Phase 1: Generate all node definitions first
-    lines.push(...this.generateAllNodes(this.fileTree));
+    const nodeLines = this.generateAllNodes(this.fileTree);
+    lines.push(...nodeLines);
     
     // Phase 2: Then create all edges
-    lines.push(...this.generateAllEdges(this.fileTree));
+    const edgeLines = this.generateAllEdges(this.fileTree);
+    lines.push(...edgeLines);
 
     return {
       code: lines.join('\n'),

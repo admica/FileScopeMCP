@@ -24,6 +24,8 @@ import {
 } from "./storage-utils.js";
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 const PROJECT_ROOT_MARKERS = [
   '.cursor/mcp.json',  // Most reliable for Cursor projects
@@ -38,6 +40,9 @@ const PROJECT_ROOT_MARKERS = [
   'Gemfile',          // Ruby
   'src'               // Source dir
 ];
+
+// Define the promisified exec function
+const execAsync = promisify(exec);
 
 async function detectProjectRoot(startDir: string): Promise<string> {
   let currentDir = startDir;
@@ -806,7 +811,8 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
   maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
   minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
   showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
-  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd)'),
+  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd and/or .png)'),
+  outputFormat: z.enum(['mmd', 'png']).optional().describe('Output format (mmd or png)'),
   layout: z.object({
     direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
     rankSpacing: z.number().min(10).max(100).optional(),
@@ -825,20 +831,22 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
 
     // Save diagram to file if requested
     if (params.outputPath) {
+      const outputFormat = params.outputFormat || 'mmd';
       const baseOutputPath = path.resolve(process.cwd(), params.outputPath);
       const outputDir = path.dirname(baseOutputPath);
       
-      process.stderr.write('Attempting to save diagram file:\n');
-      process.stderr.write(`- Base output path: ${baseOutputPath}\n`);
-      process.stderr.write(`- Output directory: ${outputDir}\n`);
+      process.stderr.write(`[${new Date().toISOString()}] Attempting to save diagram file(s):\n`);
+      process.stderr.write(`[${new Date().toISOString()}] - Base output path: ${baseOutputPath}\n`);
+      process.stderr.write(`[${new Date().toISOString()}] - Output directory: ${outputDir}\n`);
+      process.stderr.write(`[${new Date().toISOString()}] - Output format: ${outputFormat}\n`);
       
       // Ensure output directory exists
       try {
         await fs.mkdir(outputDir, { recursive: true });
-        console.error('Created output directory:', outputDir);
+        console.error(`[${new Date().toISOString()}] Created output directory: ${outputDir}`);
       } catch (err: any) {
         if (err.code !== 'EEXIST') {
-          console.error('Error creating output directory:', err);
+          console.error(`[${new Date().toISOString()}] Error creating output directory:`, err);
           return createMcpResponse(`Failed to create output directory: ${err.message}`, true);
         }
       }
@@ -847,10 +855,84 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       const mmdPath = baseOutputPath.endsWith('.mmd') ? baseOutputPath : baseOutputPath + '.mmd';
       try {
         await fs.writeFile(mmdPath, mermaidContent, 'utf8');
-        console.error('Successfully saved Mermaid file to:', mmdPath);
+        console.error(`[${new Date().toISOString()}] Successfully saved Mermaid file to: ${mmdPath}`);
       } catch (err: any) {
-        console.error('Error saving Mermaid file:', err);
+        console.error(`[${new Date().toISOString()}] Error saving Mermaid file:`, err);
         return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
+      }
+
+      // If PNG output is requested, generate using mermaid-cli
+      if (outputFormat === 'png') {
+        const pngPath = baseOutputPath.endsWith('.png') ? baseOutputPath : baseOutputPath + '.png';
+        
+        // Sanitize file paths for command execution (prevent command injection)
+        const sanitizedMmdPath = mmdPath.replace(/"/g, '\\"');
+        const sanitizedPngPath = pngPath.replace(/"/g, '\\"');
+        
+        process.stderr.write(`[${new Date().toISOString()}] Generating PNG diagram using mermaid-cli:\n`);
+        process.stderr.write(`[${new Date().toISOString()}] - Source .mmd: ${sanitizedMmdPath}\n`);
+        process.stderr.write(`[${new Date().toISOString()}] - Target .png: ${sanitizedPngPath}\n`);
+        
+        try {
+          // Construct the command with reasonable defaults and safety measures
+          // Using npx to ensure we run the locally installed version
+          const command = `npx @mermaid-js/mermaid-cli -i "${sanitizedMmdPath}" -o "${sanitizedPngPath}" --backgroundColor transparent --width 1200`;
+          
+          process.stderr.write(`[${new Date().toISOString()}] Executing command: ${command}\n`);
+          
+          // Execute mermaid-cli as a child process with timeout
+          const { stdout, stderr } = await execAsync(command, { 
+            timeout: 30000, // 30 second timeout 
+            windowsHide: true
+          });
+          
+          if (stderr && stderr.trim().length > 0) {
+            process.stderr.write(`[${new Date().toISOString()}] Warning from mermaid-cli: ${stderr}\n`);
+          }
+          
+          if (stdout && stdout.trim().length > 0) {
+            process.stderr.write(`[${new Date().toISOString()}] Output from mermaid-cli: ${stdout}\n`);
+          }
+          
+          // Verify the file was created
+          try {
+            const stats = await fs.stat(pngPath);
+            if (stats.size === 0) {
+              throw new Error('Generated PNG file is empty');
+            }
+            process.stderr.write(`[${new Date().toISOString()}] Successfully generated PNG at: ${pngPath} (${stats.size} bytes)\n`);
+          } catch (statErr: any) {
+            throw new Error(`Failed to verify PNG file: ${statErr.message}`);
+          }
+        } catch (err) {
+          process.stderr.write(`[${new Date().toISOString()}] Error generating PNG: ${err}\n`);
+          if (err instanceof Error) {
+            process.stderr.write(`[${new Date().toISOString()}] Error stack: ${err.stack}\n`);
+            
+            // Even if PNG generation fails, we've still got the MMD file,
+            // so return a partial success response
+            return createMcpResponse({
+              message: `Failed to generate PNG but MMD file was created: ${err.message}`,
+              mmdPath,
+              error: true
+            });
+          } else {
+            return createMcpResponse(`Failed to generate PNG: ${String(err)}`, true);
+          }
+        }
+        
+        // Return information about the generated files
+        return createMcpResponse({
+          message: `Successfully generated diagram in ${outputFormat} format`,
+          mmdPath,
+          pngPath
+        });
+      } else {
+        // Return information about the generated MMD file
+        return createMcpResponse({
+          message: `Successfully generated diagram in ${outputFormat} format`,
+          mmdPath
+        });
       }
     }
 
