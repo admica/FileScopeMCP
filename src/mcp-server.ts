@@ -24,8 +24,6 @@ import {
 } from "./storage-utils.js";
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
-import { exec } from 'child_process';
-import { promisify } from 'util';
 
 const PROJECT_ROOT_MARKERS = [
   '.cursor/mcp.json',  // Most reliable for Cursor projects
@@ -40,9 +38,6 @@ const PROJECT_ROOT_MARKERS = [
   'Gemfile',          // Ruby
   'src'               // Source dir
 ];
-
-// Define the promisified exec function
-const execAsync = promisify(exec);
 
 async function detectProjectRoot(startDir: string): Promise<string> {
   let currentDir = startDir;
@@ -805,14 +800,156 @@ server.tool("debug_list_all_files", "List all file paths in the current file tre
   });
 });
 
-// Add diagram generation tool
+// Add a function to create the HTML wrapper for a Mermaid diagram
+function createMermaidHtml(mermaidCode: string, title: string = 'Mermaid Diagram'): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --background-color: #ffffff;
+      --text-color: #333333;
+      --border-color: #e0e0e0;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background-color: #1e1e1e;
+        --text-color: #f0f0f0;
+        --border-color: #444444;
+      }
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      line-height: 1.6;
+      color: var(--text-color);
+      background-color: var(--background-color);
+      margin: 0;
+      padding: 20px;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .mermaid-container {
+      background-color: var(--background-color);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      overflow: auto;
+    }
+    
+    .theme-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background-color: #4a6cf7;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    }
+    
+    .theme-toggle:hover {
+      background-color: #3a5ce6;
+    }
+    
+    .dark-mode {
+      --background-color: #1e1e1e;
+      --text-color: #f0f0f0;
+      --border-color: #444444;
+    }
+    
+    .light-mode {
+      --background-color: #ffffff;
+      --text-color: #333333;
+      --border-color: #e0e0e0;
+    }
+    
+    .timestamp {
+      text-align: center;
+      font-size: 12px;
+      color: #777;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
+  <div class="container">
+    <h1>${title}</h1>
+    <div class="mermaid-container">
+      <div class="mermaid">
+${mermaidCode}
+      </div>
+    </div>
+    <div class="timestamp">Generated on: ${new Date().toLocaleString()}</div>
+  </div>
+  
+  <script>
+    // Initialize Mermaid with higher security level for local files
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+      securityLevel: 'loose',
+      fontFamily: 'Arial',
+      fontSize: 14
+    });
+    
+    // Toggle between light and dark themes
+    function toggleTheme() {
+      const body = document.body;
+      if (body.classList.contains('dark-mode')) {
+        body.classList.remove('dark-mode');
+        body.classList.add('light-mode');
+        mermaid.initialize({ theme: 'default' });
+      } else if (body.classList.contains('light-mode')) {
+        body.classList.remove('light-mode');
+        body.classList.add('dark-mode');
+        mermaid.initialize({ theme: 'dark' });
+      } else {
+        // First time toggle based on current appearance
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          body.classList.add('light-mode');
+          mermaid.initialize({ theme: 'default' });
+        } else {
+          body.classList.add('dark-mode');
+          mermaid.initialize({ theme: 'dark' });
+        }
+      }
+      // Re-render all diagrams with new theme
+      mermaid.init();
+    }
+  </script>
+</body>
+</html>`;
+}
+
+// Update the generate_diagram tool
 server.tool("generate_diagram", "Generate a Mermaid diagram for the current file tree", {
   style: z.enum(['default', 'dependency', 'directory', 'hybrid']).describe('Diagram style'),
   maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
   minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
   showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
-  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd and/or .png)'),
-  outputFormat: z.enum(['mmd', 'png']).optional().describe('Output format (mmd or png)'),
+  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd or .html)'),
+  outputFormat: z.enum(['mmd', 'html']).optional().describe('Output format (mmd or html)'),
   layout: z.object({
     direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional(),
     rankSpacing: z.number().min(10).max(100).optional(),
@@ -851,88 +988,41 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
         }
       }
 
-      // Save the Mermaid file
-      const mmdPath = baseOutputPath.endsWith('.mmd') ? baseOutputPath : baseOutputPath + '.mmd';
-      try {
-        await fs.writeFile(mmdPath, mermaidContent, 'utf8');
-        console.error(`[${new Date().toISOString()}] Successfully saved Mermaid file to: ${mmdPath}`);
-      } catch (err: any) {
-        console.error(`[${new Date().toISOString()}] Error saving Mermaid file:`, err);
-        return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
-      }
-
-      // If PNG output is requested, generate using mermaid-cli
-      if (outputFormat === 'png') {
-        const pngPath = baseOutputPath.endsWith('.png') ? baseOutputPath : baseOutputPath + '.png';
-        
-        // Sanitize file paths for command execution (prevent command injection)
-        const sanitizedMmdPath = mmdPath.replace(/"/g, '\\"');
-        const sanitizedPngPath = pngPath.replace(/"/g, '\\"');
-        
-        process.stderr.write(`[${new Date().toISOString()}] Generating PNG diagram using mermaid-cli:\n`);
-        process.stderr.write(`[${new Date().toISOString()}] - Source .mmd: ${sanitizedMmdPath}\n`);
-        process.stderr.write(`[${new Date().toISOString()}] - Target .png: ${sanitizedPngPath}\n`);
-        
+      // Save the appropriate file based on format
+      if (outputFormat === 'mmd') {
+        // Save Mermaid file
+        const mmdPath = baseOutputPath.endsWith('.mmd') ? baseOutputPath : baseOutputPath + '.mmd';
         try {
-          // Construct the command with reasonable defaults and safety measures
-          // Using npx to ensure we run the locally installed version
-          const command = `npx @mermaid-js/mermaid-cli -i "${sanitizedMmdPath}" -o "${sanitizedPngPath}" --backgroundColor transparent --width 1200`;
+          await fs.writeFile(mmdPath, mermaidContent, 'utf8');
+          console.error(`[${new Date().toISOString()}] Successfully saved Mermaid file to: ${mmdPath}`);
           
-          process.stderr.write(`[${new Date().toISOString()}] Executing command: ${command}\n`);
-          
-          // Execute mermaid-cli as a child process with timeout
-          const { stdout, stderr } = await execAsync(command, { 
-            timeout: 30000, // 30 second timeout 
-            windowsHide: true
+          return createMcpResponse({
+            message: `Successfully generated diagram in mmd format`,
+            filePath: mmdPath
           });
-          
-          if (stderr && stderr.trim().length > 0) {
-            process.stderr.write(`[${new Date().toISOString()}] Warning from mermaid-cli: ${stderr}\n`);
-          }
-          
-          if (stdout && stdout.trim().length > 0) {
-            process.stderr.write(`[${new Date().toISOString()}] Output from mermaid-cli: ${stdout}\n`);
-          }
-          
-          // Verify the file was created
-          try {
-            const stats = await fs.stat(pngPath);
-            if (stats.size === 0) {
-              throw new Error('Generated PNG file is empty');
-            }
-            process.stderr.write(`[${new Date().toISOString()}] Successfully generated PNG at: ${pngPath} (${stats.size} bytes)\n`);
-          } catch (statErr: any) {
-            throw new Error(`Failed to verify PNG file: ${statErr.message}`);
-          }
-        } catch (err) {
-          process.stderr.write(`[${new Date().toISOString()}] Error generating PNG: ${err}\n`);
-          if (err instanceof Error) {
-            process.stderr.write(`[${new Date().toISOString()}] Error stack: ${err.stack}\n`);
-            
-            // Even if PNG generation fails, we've still got the MMD file,
-            // so return a partial success response
-            return createMcpResponse({
-              message: `Failed to generate PNG but MMD file was created: ${err.message}`,
-              mmdPath,
-              error: true
-            });
-          } else {
-            return createMcpResponse(`Failed to generate PNG: ${String(err)}`, true);
-          }
+        } catch (err: any) {
+          console.error(`[${new Date().toISOString()}] Error saving Mermaid file:`, err);
+          return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
         }
+      } else if (outputFormat === 'html') {
+        // Generate HTML with embedded Mermaid
+        const title = `File Scope Diagram - ${path.basename(baseOutputPath)}`;
+        const htmlContent = createMermaidHtml(mermaidContent, title);
         
-        // Return information about the generated files
-        return createMcpResponse({
-          message: `Successfully generated diagram in ${outputFormat} format`,
-          mmdPath,
-          pngPath
-        });
-      } else {
-        // Return information about the generated MMD file
-        return createMcpResponse({
-          message: `Successfully generated diagram in ${outputFormat} format`,
-          mmdPath
-        });
+        // Save HTML file
+        const htmlPath = baseOutputPath.endsWith('.html') ? baseOutputPath : baseOutputPath + '.html';
+        try {
+          await fs.writeFile(htmlPath, htmlContent, 'utf8');
+          console.error(`[${new Date().toISOString()}] Successfully saved HTML file to: ${htmlPath}`);
+          
+          return createMcpResponse({
+            message: `Successfully generated diagram in html format`,
+            filePath: htmlPath
+          });
+        } catch (err: any) {
+          console.error(`[${new Date().toISOString()}] Error saving HTML file:`, err);
+          return createMcpResponse(`Failed to save HTML file: ${err.message}`, true);
+        }
       }
     }
 

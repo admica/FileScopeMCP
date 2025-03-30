@@ -9,7 +9,6 @@
     "start": "node dist/mcp-server.js"
   },
   "dependencies": {
-    "@mermaid-js/mermaid-cli": "^10.6.1",
     "@modelcontextprotocol/sdk": "1.7.0",
     "chokidar": "^3.6.0",
     "mermaid": "^10.9.3",
