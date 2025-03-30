@@ -258,6 +258,8 @@ export class MermaidGenerator {
         // Group children by directory structure or type
         const groups: Map<string, FileNode[]> = new Map();
         
+        // First, collect all the children that pass the filter
+        const validChildren: FileNode[] = [];
         for (const child of node.children) {
           if (!child.isDirectory && 
               this.config.style !== 'package-deps' && 
@@ -265,29 +267,84 @@ export class MermaidGenerator {
               (child.importance || 0) < this.config.minImportance) {
             continue;
           }
-          
-          // Get grouping key - use directory name or file extension
+          validChildren.push(child);
+        }
+        
+        // Process directories first
+        const directories: FileNode[] = validChildren.filter(child => child.isDirectory);
+        if (directories.length > 0 && directories.length <= threshold / 2) {
+          // If we have a reasonable number of directories, don't group them
+          for (const dir of directories) {
+            this.collectAllNodes(dir, depth + 1);
+            this.addEdge(node.path, dir.path, 'directory');
+          }
+        } else if (directories.length > 0) {
+          // Group directories if there are many
+          groups.set('Directories', directories);
+        }
+        
+        // Then process files by their purpose/type
+        const files: FileNode[] = validChildren.filter(child => !child.isDirectory);
+        
+        // Group files by their purpose or type
+        for (const file of files) {
+          const ext = path.extname(file.path).toLowerCase();
           let groupKey = '';
-          if (child.isDirectory) {
-            groupKey = 'Directories';
-          } else {
-            // Group by extension
-            const ext = path.extname(child.path);
-            if (ext) {
-              groupKey = ext.substring(1).toUpperCase(); // Remove the dot and uppercase
+          
+          // Check file name and extension to determine purpose
+          const fileName = path.basename(file.path).toLowerCase();
+          
+          // Config files
+          if (fileName.includes('config') || fileName.includes('.json') || 
+              fileName.includes('.yml') || fileName.includes('.yaml') ||
+              fileName.includes('.ini') || fileName.includes('.env')) {
+            groupKey = 'Configuration';
+          } 
+          // Source code
+          else if (['.ts', '.js', '.tsx', '.jsx'].includes(ext)) {
+            // Further categorize source files
+            if (fileName.includes('utils') || fileName.includes('helper') || fileName.includes('common')) {
+              groupKey = 'Utilities';
+            } else if (fileName.includes('test') || fileName.includes('spec')) {
+              groupKey = 'Tests';
+            } else if (fileName.includes('types') || fileName.includes('interface') || fileName.includes('model')) {
+              groupKey = 'Types';
+            } else if (fileName.includes('component') || fileName.includes('view') || fileName.includes('page')) {
+              groupKey = 'UI Components';
+            } else if (fileName.includes('server') || fileName.includes('api') || fileName.includes('service')) {
+              groupKey = 'Services';
             } else {
-              groupKey = 'Other';
+              groupKey = ext.substring(1).toUpperCase() + ' Files'; // e.g., "TS Files"
             }
+          }
+          // Documentation
+          else if (['.md', '.txt', '.pdf', '.doc'].includes(ext)) {
+            groupKey = 'Documentation';
+          }
+          // Default: group by extension
+          else {
+            groupKey = ext ? ext.substring(1).toUpperCase() + ' Files' : 'Other Files';
           }
           
           if (!groups.has(groupKey)) {
             groups.set(groupKey, []);
           }
-          groups.get(groupKey)!.push(child);
+          groups.get(groupKey)!.push(file);
         }
         
         // Now process each group separately
         for (const [groupKey, groupChildren] of groups.entries()) {
+          // Skip empty groups
+          if (groupChildren.length === 0) continue;
+          
+          // If a group only has one item, don't create a subgroup
+          if (groupChildren.length === 1) {
+            const child = groupChildren[0];
+            this.collectAllNodes(child, depth + 1);
+            this.addEdge(node.path, child.path, 'directory');
+            continue;
+          }
+          
           // Create a subgraph for this group
           const groupNodeId = this.getNodeId(`${node.path}_group_${groupKey}`, false, false);
           const groupNode: FileNode = {
@@ -463,8 +520,39 @@ export class MermaidGenerator {
       packageScopeCount: 0
     };
     
+    // PHASE 1: Collect all nodes and edges that will be in the diagram
+    this.collectAllNodes(this.fileTree);
+    
+    // Auto-select layout direction based on diagram structure
+    let direction = this.config.layout?.direction || 'TB';
+    
+    // Check if we should auto-switch to LR based on tree structure
+    // For directory style diagrams with many top-level nodes, LR is often better
+    const rootNodeId = this.nodes.get(this.fileTree.path);
+    if (rootNodeId && !this.config.layout?.direction) {
+      let directChildCount = 0;
+      
+      // Count direct children of root
+      for (const edge of this.edges.values()) {
+        if (edge.source === rootNodeId && edge.type === 'directory') {
+          directChildCount++;
+        }
+      }
+      
+      // If many direct children or many grouped nodes, switch to LR layout
+      const groupNodeCount = Array.from(this.nodes.keys()).filter(path => path.includes('_group_')).length;
+      if (directChildCount > 6 || groupNodeCount > 2) {
+        direction = 'LR';
+        
+        // Also increase node spacing for better readability
+        if (!this.config.layout?.nodeSpacing) {
+          this.config.layout = this.config.layout || {};
+          this.config.layout.nodeSpacing = 60;
+        }
+      }
+    }
+    
     // Use a compatible Mermaid syntax format
-    const direction = this.config.layout?.direction || 'TB';
     const lines: string[] = [
       `graph ${direction}`
     ];
@@ -472,10 +560,7 @@ export class MermaidGenerator {
     // Add CSS classes for package nodes
     lines.push(`classDef package-node fill:${this.style.nodeColors.package},stroke:#2d3436,shape:${this.style.nodeShapes.package}`);
     lines.push(`classDef package-scope-node fill:${this.style.nodeColors.packageScope},stroke:#2d3436,shape:${this.style.nodeShapes.packageScope}`);
-    lines.push(`classDef group-node fill:#f1c40f,stroke:#2d3436,opacity:0.2`);
-    
-    // PHASE 1: Collect all nodes and edges that will be in the diagram
-    this.collectAllNodes(this.fileTree);
+    lines.push(`classDef group-node fill:#f8f9fa30,stroke:#2d3436,stroke-width:2px,stroke-dasharray:5 5,color:#333,rx:5,ry:5`);
     
     // PHASE 2: Generate any package-specific subgraphs and groupings
     if (this.config.style === 'package-deps' || this.config.showPackageDeps) {
@@ -572,7 +657,7 @@ export class MermaidGenerator {
       const info = this.nodeInfo.get(nodeId);
       if (info) {
         // Create subgraph with styling
-        lines.push(`subgraph ${nodeId}[${info.label}]`);
+        lines.push(`subgraph ${nodeId}["${info.label} Group"]`);
         
         // Find all nodes connected to this group
         for (const edge of this.edges.values()) {
@@ -582,7 +667,7 @@ export class MermaidGenerator {
         }
         
         lines.push(`end`);
-        lines.push(`style ${nodeId} fill:#f8f9fa,stroke:#2d3436,stroke-dasharray: 5 5`);
+        lines.push(`style ${nodeId} fill:#f8f9fa30,stroke:#2d3436,stroke-width:2px,stroke-dasharray:5 5`);
         lines.push(`class ${nodeId} group-node`);
       }
     }
