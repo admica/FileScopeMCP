@@ -94,6 +94,7 @@ export class MermaidGenerator {
   private getNodeId(filePath: string, isPackage: boolean = false, isPackageScope: boolean = false): string {
     // If we already have an ID for this path, return it
     if (this.nodes.has(filePath)) {
+      console.error(`[MermaidGenerator] Reusing existing node ID for path: ${filePath} -> ${this.nodes.get(filePath)}`);
       return this.nodes.get(filePath)!;
     }
     
@@ -112,9 +113,13 @@ export class MermaidGenerator {
     if (isPackage) {
       color = this.style.nodeColors.package;
       shape = this.style.nodeShapes.package;
+      console.error(`[MermaidGenerator] Created package node ID: ${id} for ${filePath} (${label})`);
     } else if (isPackageScope) {
       color = this.style.nodeColors.packageScope;
       shape = this.style.nodeShapes.packageScope;
+      console.error(`[MermaidGenerator] Created package scope node ID: ${id} for ${filePath} (${label})`);
+    } else {
+      console.error(`[MermaidGenerator] Created file node ID: ${id} for ${filePath} (${label})`);
     }
     
     this.nodeInfo.set(id, {
@@ -180,8 +185,11 @@ export class MermaidGenerator {
 
   // Create node for a package dependency
   private addPackageNode(pkg: PackageDependency): string {
+    console.error(`[MermaidGenerator] Processing package dependency: ${pkg.name} (${pkg.path})`);
+    
     // Skip excluded packages
     if (this.config.excludePackages && this.config.excludePackages.includes(pkg.name)) {
+      console.error(`[MermaidGenerator] Skipping excluded package: ${pkg.name}`);
       return '';
     }
     
@@ -189,6 +197,7 @@ export class MermaidGenerator {
     if (this.config.includeOnlyPackages && 
         this.config.includeOnlyPackages.length > 0 && 
         !this.config.includeOnlyPackages.includes(pkg.name)) {
+      console.error(`[MermaidGenerator] Skipping non-included package: ${pkg.name}`);
       return '';
     }
     
@@ -213,6 +222,7 @@ export class MermaidGenerator {
     
     // Track package in scope if it has one and grouping is enabled
     if (pkg.scope && this.config.packageGrouping) {
+      console.error(`[MermaidGenerator] Adding package ${pkg.name} to scope ${pkg.scope}`);
       if (!this.packageScopes.has(pkg.scope)) {
         this.packageScopes.set(pkg.scope, new Set());
         this.stats.packageScopeCount++;
@@ -234,6 +244,7 @@ export class MermaidGenerator {
     
     // Skip this node if it's for package dependencies diagram and not a file
     if (this.config.style === 'package-deps' && node.isDirectory) {
+      console.error(`[MermaidGenerator] Skipping directory node in package-deps mode: ${node.path}`);
       // Still process children
       if (node.children) {
         for (const child of node.children) {
@@ -252,168 +263,14 @@ export class MermaidGenerator {
         this.config.style !== 'package-deps' && 
         this.config.minImportance && 
         (node.importance || 0) < this.config.minImportance) {
+      console.error(`[MermaidGenerator] Skipping low importance file: ${node.path} (${node.importance})`);
       return;
-    }
-    
-    // Process children recursively to collect all nodes
-    if (node.children) {
-      // Check if we need to create subgroups for better layout
-      const threshold = this.config.autoGroupThreshold || 8;
-      let needsSubgrouping = node.children.length > threshold && 
-                            (this.config.style === 'directory' || this.config.style === 'default');
-      
-      // If we have too many children, group them by directory or file type
-      if (needsSubgrouping) {
-        // Group children by directory structure or type
-        const groups: Map<string, FileNode[]> = new Map();
-        
-        // First, collect all the children that pass the filter
-        const validChildren: FileNode[] = [];
-        for (const child of node.children) {
-          if (!child.isDirectory && 
-              this.config.style !== 'package-deps' && 
-              this.config.minImportance && 
-              (child.importance || 0) < this.config.minImportance) {
-            continue;
-          }
-          validChildren.push(child);
-        }
-        
-        // Process directories first
-        const directories: FileNode[] = validChildren.filter(child => child.isDirectory);
-        if (directories.length > 0 && directories.length <= threshold / 2) {
-          // If we have a reasonable number of directories, don't group them
-          for (const dir of directories) {
-            this.collectAllNodes(dir, depth + 1);
-            this.addEdge(node.path, dir.path, 'directory');
-          }
-        } else if (directories.length > 0) {
-          // Group directories if there are many
-          groups.set('Directories', directories);
-        }
-        
-        // Then process files by their purpose/type
-        const files: FileNode[] = validChildren.filter(child => !child.isDirectory);
-        
-        // Group files by their purpose or type
-        for (const file of files) {
-          const ext = path.extname(file.path).toLowerCase();
-          let groupKey = '';
-          
-          // Check file name and extension to determine purpose
-          const fileName = path.basename(file.path).toLowerCase();
-          
-          // Config files
-          if (fileName.includes('config') || fileName.includes('.json') || 
-              fileName.includes('.yml') || fileName.includes('.yaml') ||
-              fileName.includes('.ini') || fileName.includes('.env')) {
-            groupKey = 'Configuration';
-          } 
-          // Source code
-          else if (['.ts', '.js', '.tsx', '.jsx'].includes(ext)) {
-            // Further categorize source files
-            if (fileName.includes('utils') || fileName.includes('helper') || fileName.includes('common')) {
-              groupKey = 'Utilities';
-            } else if (fileName.includes('test') || fileName.includes('spec')) {
-              groupKey = 'Tests';
-            } else if (fileName.includes('types') || fileName.includes('interface') || fileName.includes('model')) {
-              groupKey = 'Types';
-            } else if (fileName.includes('component') || fileName.includes('view') || fileName.includes('page')) {
-              groupKey = 'UI Components';
-            } else if (fileName.includes('server') || fileName.includes('api') || fileName.includes('service')) {
-              groupKey = 'Services';
-            } else {
-              groupKey = ext.substring(1).toUpperCase() + ' Files'; // e.g., "TS Files"
-            }
-          }
-          // Documentation
-          else if (['.md', '.txt', '.pdf', '.doc'].includes(ext)) {
-            groupKey = 'Documentation';
-          }
-          // Default: group by extension
-          else {
-            groupKey = ext ? ext.substring(1).toUpperCase() + ' Files' : 'Other Files';
-          }
-          
-          if (!groups.has(groupKey)) {
-            groups.set(groupKey, []);
-          }
-          groups.get(groupKey)!.push(file);
-        }
-        
-        // Now process each group separately
-        for (const [groupKey, groupChildren] of groups.entries()) {
-          // Skip empty groups
-          if (groupChildren.length === 0) continue;
-          
-          // If a group only has one item, don't create a subgroup
-          if (groupChildren.length === 1) {
-            const child = groupChildren[0];
-            this.collectAllNodes(child, depth + 1);
-            this.addEdge(node.path, child.path, 'directory');
-            continue;
-          }
-          
-          // Create a subgraph for this group
-          const groupNodeId = this.getNodeId(`${node.path}_group_${groupKey}`, false, false);
-          const groupNode: FileNode = {
-            path: `${node.path}_group_${groupKey}`,
-            name: groupKey,
-            isDirectory: true,
-            children: groupChildren
-          };
-          
-          // Update node info for the group
-          const info = this.nodeInfo.get(groupNodeId)!;
-          info.label = groupKey;
-          
-          // Connect parent to this group
-          this.addEdge(node.path, groupNode.path, 'directory');
-          
-          // Process children within this group
-          for (const child of groupChildren) {
-            this.collectAllNodes(child, depth + 1);
-            this.addEdge(groupNode.path, child.path, 'directory');
-          }
-        }
-      } else {
-        // Standard processing when no grouping is needed
-        for (const child of node.children) {
-          // Skip files with low importance if minImportance is set
-          if (!child.isDirectory && 
-              this.config.style !== 'package-deps' && 
-              this.config.minImportance && 
-              (child.importance || 0) < this.config.minImportance) {
-            continue;
-          }
-          
-          // Add this child node and its descendants
-          this.collectAllNodes(child, depth + 1);
-          
-          // Add an edge from parent to child (except in package-deps mode)
-          if (this.config.style !== 'package-deps') {
-            this.addEdge(node.path, child.path, 'directory');
-          }
-        }
-      }
-    }
-    
-    // Collect dependency nodes
-    if (this.config.showDependencies && !node.isDirectory && node.dependencies) {
-      for (const depPath of node.dependencies) {
-        // Just register the dependency path to get a node ID
-        // (even if we don't have a FileNode object for it)
-        this.getNodeId(depPath);
-        
-        // Add a dependency edge (except in package-deps mode)
-        if (this.config.style !== 'package-deps') {
-          this.addEdge(node.path, depPath, 'dependency');
-        }
-      }
     }
     
     // Collect package dependencies
     if (this.config.showPackageDeps && !node.isDirectory && node.packageDependencies) {
+      console.error(`[MermaidGenerator] Processing package dependencies for file: ${node.path}`);
+      console.error(`[MermaidGenerator] Found ${node.packageDependencies.length} package dependencies`);
       for (const pkgDep of node.packageDependencies) {
         // Skip if package has no name
         if (!pkgDep.name) continue;
@@ -421,6 +278,7 @@ export class MermaidGenerator {
         const packageNodeId = this.addPackageNode(pkgDep);
         if (packageNodeId) {
           // Add edge from file to package
+          console.error(`[MermaidGenerator] Adding edge from ${node.path} to package ${pkgDep.name}`);
           this.addEdge(node.path, pkgDep.path, 'package');
         }
       }
