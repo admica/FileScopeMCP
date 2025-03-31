@@ -205,3 +205,13 @@ export class MermaidDiagram {
   stats: MermaidDiagramStats = new MermaidDiagramStats();
   timestamp: Date = new Date();  // When the diagram was generated
 }
+
+export type GroupingRuleType = 'directory' | 'package' | 'dependency' | 'custom';
+
+export interface GroupingRule {
+  type: GroupingRuleType;
+  condition: (nodes: FileNode[]) => boolean;
+  groupBy: (nodes: FileNode[]) => Map<string, FileNode[]>;
+  threshold: number;
+  description: string;  // For debugging and logging
+}
