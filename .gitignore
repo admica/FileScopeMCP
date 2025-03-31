@@ -16,6 +16,9 @@ mcp.json
 *.bak
 package-lock.json
 diagrams
+FileScopeMCP-diagram.png
+FileScopeMCP-tree.json
+*.png
 *.svg
 *.pdf
 *.csv
