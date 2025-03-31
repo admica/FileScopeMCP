@@ -744,11 +744,10 @@ server.tool("debug_list_all_files", "List all file paths in the current file tre
 
 // Add a function to create the HTML wrapper for a Mermaid diagram
 function createMermaidHtml(mermaidCode: string, title: string): string {
-  // Format the timestamp
   const now = new Date();
   const timestamp = `${now.toDateString()} ${now.toLocaleTimeString()}`;
   
-  // Create a properly escaped version of the mermaid code for JS
+  // Re-add escaping for backticks and dollar signs
   const escapedMermaidCode = mermaidCode.replace(/`/g, '\\`').replace(/\$/g, '\\$');
   
   return `<!DOCTYPE html>
@@ -792,20 +791,6 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
       font-size: 14px;
       cursor: pointer;
       transition: all 0.3s ease;
-    }
-    #expand-all-btn, #collapse-all-btn {
-      position: absolute;
-      top: 60px;
-      right: 20px;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 50px;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-    }
-    #collapse-all-btn {
-      top: 100px;
     }
     #diagram-container {
       width: 90%;
@@ -858,9 +843,6 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
 
   <!-- Theme Toggle Button -->
   <button id="theme-toggle" style="background: #2d3436; color: #ffffff;">Switch to Light Mode</button>
-  <!-- Expand/Collapse All Buttons -->
-  <button id="expand-all-btn" style="background: #2d3436; color: #ffffff;">Expand All</button>
-  <button id="collapse-all-btn" style="background: #2d3436; color: #ffffff;">Collapse All</button>
 
   <!-- Diagram Container -->
   <div id="diagram-container" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);">
@@ -927,21 +909,7 @@ ${escapedMermaidCode}
       renderMermaid();
     };
 
-    // Expand all groups
-    document.getElementById('expand-all-btn').addEventListener('click', () => {
-      collapsedGroups.clear();
-      expandedGroups = new Set(Object.keys(collapsibleGroups));
-      renderMermaid();
-    });
-
-    // Collapse all groups
-    document.getElementById('collapse-all-btn').addEventListener('click', () => {
-      expandedGroups.clear();
-      collapsedGroups = new Set(Object.keys(collapsibleGroups));
-      renderMermaid();
-    });
-
-    // Process Mermaid SVG after rendering
+    // Re-add processMermaidSvg function
     function processMermaidSvg(svgElement) {
       // Process click events on nodes
       const clickables = svgElement.querySelectorAll('[id^="flowchart-"]');
@@ -958,7 +926,7 @@ ${escapedMermaidCode}
             // Add a + sign for collapsed groups
             const currentText = textElement.textContent || '';
             if (!currentText.includes('[+]')) {
-              textElement.textContent = '\${currentText} [+]';
+              textElement.textContent = currentText + ' [+]';
             }
             
             // Add a class for styling
@@ -970,11 +938,11 @@ ${escapedMermaidCode}
           
           // Add the children count to the label
           const childCount = collapsibleGroups[nodeId].length;
-          const childLabel = '(\${childCount} items)';
+          const childLabel = '(' + childCount + ' items)';
           const label = node.querySelector('text');
           
           if (label && !label.textContent.includes(childLabel)) {
-            label.textContent += ' \${childLabel}';
+            label.textContent += ' ' + childLabel;
           }
         }
       });
@@ -983,7 +951,7 @@ ${escapedMermaidCode}
       collapsedGroups.forEach(groupId => {
         const children = collapsibleGroups[groupId] || [];
         children.forEach(childId => {
-          const childElement = svgElement.querySelector('#flowchart-\${childId}');
+          const childElement = svgElement.querySelector('#flowchart-' + childId);
           if (childElement) {
             childElement.style.display = 'none';
             
@@ -1000,26 +968,29 @@ ${escapedMermaidCode}
       });
     }
 
-    // Detect collapsible groups in the diagram by looking for click handlers
+    // Re-add detectCollapsibleGroups function
     function detectCollapsibleGroups(mermaidCode) {
       // Reset the collapsible groups
       Object.keys(collapsibleGroups).forEach(key => delete collapsibleGroups[key]);
 
       // Look for click handler definitions like 'click node1 toggleGroup "node1"'
-      const clickHandlerRegex = /click\s+(\w+)\s+toggleGroup\s+"([^"]+)"/g;
+      // Ensure backslashes for regex characters and quotes are properly escaped for the final HTML
+      const clickHandlerRegex = /click\\s+(\\w+)\\s+toggleGroup\\s+\"([^\"]+)\"/g;
       let match;
       
       while ((match = clickHandlerRegex.exec(mermaidCode)) !== null) {
         const nodeId = match[1];
         
         // Now find children of this group in the subgraph definition
-        const subgraphRegex = new RegExp('subgraph\\\\s+' + nodeId + '.*?\\\\n([\\\\s\\\\S]*?)\\\\nend', 'g');
+        // Ensure backslashes for regex characters are properly escaped for the final HTML
+        const subgraphRegex = new RegExp('subgraph\\s+' + nodeId + '.*?\\n([\\s\\S]*?)\\nend', 'g');
         const subgraphMatch = subgraphRegex.exec(mermaidCode);
         
         if (subgraphMatch) {
           const subgraphContent = subgraphMatch[1];
           // Extract node IDs from the subgraph
-          const nodeRegex = /\s+(\w+)/g;
+          // Ensure backslashes for regex characters are properly escaped for the final HTML
+          const nodeRegex = /\\s+(\\w+)/g;
           const children = [];
           let nodeMatch;
           
@@ -1069,8 +1040,16 @@ ${escapedMermaidCode}
         .catch(error => {
           console.error('Mermaid rendering failed:', error);
           errorDiv.style.display = 'block';
-          errorDiv.textContent = \`Error: \${error.message}\`;
-          mermaidDiv.innerHTML = \`<pre style="color: #ff7675;">\${rawCode}</pre>\`;
+          errorDiv.textContent = error.message;
+          
+          // Create a <pre> element and set its text content safely
+          const preElement = document.createElement('pre');
+          preElement.style.color = '#ff7675'; // Apply style directly
+          preElement.textContent = rawCode; // Use textContent for safety
+          
+          // Clear mermaidDiv and append the new <pre> element
+          mermaidDiv.innerHTML = ''; // Clear previous attempts
+          mermaidDiv.appendChild(preElement);
         });
     }
 
@@ -1078,8 +1057,6 @@ ${escapedMermaidCode}
     function toggleTheme() {
       const body = document.body;
       const toggleBtn = document.getElementById('theme-toggle');
-      const expandAllBtn = document.getElementById('expand-all-btn');
-      const collapseAllBtn = document.getElementById('collapse-all-btn');
       const diagramContainer = document.getElementById('diagram-container');
       const header = document.querySelector('header');
       const isDarkMode = body.classList.contains('dark-mode');
@@ -1091,10 +1068,6 @@ ${escapedMermaidCode}
         toggleBtn.textContent = 'Switch to Dark Mode';
         toggleBtn.style.background = '#dcdde1';
         toggleBtn.style.color = '#2d3436';
-        expandAllBtn.style.background = '#dcdde1';
-        expandAllBtn.style.color = '#2d3436';
-        collapseAllBtn.style.background = '#dcdde1';
-        collapseAllBtn.style.color = '#2d3436';
         diagramContainer.style.background = 'rgba(255, 255, 255, 0.8)';
         diagramContainer.style.border = '1px solid rgba(0, 0, 0, 0.1)';
         header.style.color = '#2d3436';
@@ -1116,10 +1089,6 @@ ${escapedMermaidCode}
         toggleBtn.textContent = 'Switch to Light Mode';
         toggleBtn.style.background = '#2d3436';
         toggleBtn.style.color = '#ffffff';
-        expandAllBtn.style.background = '#2d3436';
-        expandAllBtn.style.color = '#ffffff';
-        collapseAllBtn.style.background = '#2d3436';
-        collapseAllBtn.style.color = '#ffffff';
         diagramContainer.style.background = 'rgba(255, 255, 255, 0.05)';
         diagramContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
         header.style.color = '#ffffff';
