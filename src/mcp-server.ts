@@ -26,56 +26,6 @@ import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
 import { setProjectRoot, getProjectRoot } from './global-state.js';
 
-const PROJECT_ROOT_MARKERS = [
-  '.cursor/mcp.json',  // Most reliable for Cursor projects
-  '.git',              // VCS marker
-  'package.json',      // Node.js
-  'Cargo.toml',        // Rust
-  'go.mod',           // Go
-  'build.gradle',     // Java/Android
-  'setup.py',         // Python
-  'build.zig',        // Zig
-  'Makefile',         // Make
-  'Gemfile',          // Ruby
-  'src'               // Source dir
-];
-
-async function detectProjectRoot(startDir: string): Promise<string> {
-  let currentDir = startDir;
-  let levelsUp = 0;
-  const maxLevels = 3;
-  
-  console.error(`Starting project root detection from: ${currentDir}`);
-  
-  while (currentDir !== path.parse(currentDir).root && levelsUp <= maxLevels) {
-    console.error(`\nChecking directory (level ${levelsUp}): ${currentDir}`);
-    
-    for (const marker of PROJECT_ROOT_MARKERS) {
-      const markerPath = path.join(currentDir, marker);
-      try {
-        await fs.access(markerPath);
-        console.error(`✓ Found project marker: ${marker}`);
-        console.error(`✓ Project root identified: ${currentDir}`);
-        return currentDir;
-      } catch {
-        console.error(`✗ No ${marker} found`);
-      }
-    }
-    
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      console.error('! Reached root directory, using start directory');
-      return startDir;
-    }
-    
-    currentDir = parentDir;
-    levelsUp++;
-  }
-  
-  console.error(`! No project markers found within ${maxLevels} levels, using start directory`);
-  return startDir;
-}
-
 // Initialize server state
 let fileTree: FileNode | null = null;
 let currentConfig: FileTreeConfig | null = null;
@@ -157,40 +107,16 @@ async function initializeServer(): Promise<void> {
   console.error('Initial working directory:', process.cwd());
   console.error('Command line args:', process.argv);
   
-  // Check if we're running as an MCP server for Cursor
-  const isMcpServer = isRunningAsMcpServer();
-  console.error(`Running as MCP server for Cursor: ${isMcpServer}`);
-  
-  // Set project root from various sources in order of preference
-  let projectRoot: string;
-  
-  // 1. Try to get from --base-dir parameter
+  // Require --base-dir parameter
   const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
-  if (baseDirArg) {
-    projectRoot = baseDirArg.split('=')[1];
-    console.error(`Using provided base directory: ${projectRoot}`);
-  } else {
-    // 2. Try to detect from current working directory
-    projectRoot = await detectProjectRoot(process.cwd());
-    console.error(`Detected project root from working directory: ${projectRoot}`);
-    
-    // 3. If that didn't work, try to find the FileScopeMCP directory
-    if (!projectRoot || projectRoot === process.cwd()) {
-      const mcpDir = await findFileScopeMcpDirectory();
-      if (mcpDir) {
-        projectRoot = mcpDir;
-        console.error(`Using FileScopeMCP directory as project root: ${projectRoot}`);
-      } else {
-        // 4. Last resort: use current directory
-        projectRoot = process.cwd();
-        console.error(`Using current directory as project root: ${projectRoot}`);
-      }
-    }
+  if (!baseDirArg) {
+    console.error('Error: --base-dir parameter is required');
+    process.exit(1);
   }
   
-  // Normalize the project root
-  projectRoot = normalizeAndResolvePath(projectRoot);
-  console.error(`Normalized project root: ${projectRoot}`);
+  // Extract and normalize the project root path
+  const projectRoot = normalizeAndResolvePath(baseDirArg.split('=')[1]);
+  console.error(`Using base directory: ${projectRoot}`);
   
   // Set the global project root
   setProjectRoot(projectRoot);
@@ -226,6 +152,7 @@ async function initializeServer(): Promise<void> {
  * A simple implementation of the Transport interface for stdio
  */
 class StdioTransport implements Transport {
+  private readonly MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB limit
   private buffer = new ReadBuffer();
   onclose?: () => void;
   onerror?: (error: Error) => void;
@@ -235,9 +162,16 @@ class StdioTransport implements Transport {
   constructor() {}
 
   async start(): Promise<void> {
-    // Set up stdin to handle messages
     process.stdin.on('data', (chunk) => {
       try {
+        // Check buffer size before appending
+        if (this.buffer.size + chunk.length > this.MAX_BUFFER_SIZE) {
+          console.error(`Buffer overflow: size would exceed ${this.MAX_BUFFER_SIZE} bytes`);
+          this.onerror?.(new Error('Buffer overflow: maximum size exceeded'));
+          this.buffer.clear(); // Clear buffer to prevent memory issues
+          return;
+        }
+
         this.buffer.append(chunk);
         let message: JSONRPCMessage | null;
         while ((message = this.buffer.readMessage())) {
@@ -246,9 +180,11 @@ class StdioTransport implements Transport {
           }
         }
       } catch (error) {
+        console.error('Error processing message:', error);
         if (this.onerror) {
           this.onerror(error instanceof Error ? error : new Error(String(error)));
         }
+        this.buffer.clear(); // Clear buffer on error
       }
     });
 
@@ -258,7 +194,6 @@ class StdioTransport implements Transport {
       }
     });
 
-    // Keep stdin open
     process.stdin.resume();
   }
 
@@ -266,21 +201,59 @@ class StdioTransport implements Transport {
     // Ensure we only write valid JSON messages to stdout
     const serialized = serializeMessage(message);
     
+    // Check message size
+    if (serialized.length > this.MAX_BUFFER_SIZE) {
+      console.error(`Message too large: ${serialized.length} bytes`);
+      throw new Error('Message exceeds maximum size limit');
+    }
+    
     // Only log a summary of the message to stderr, not the full content
-    // which could interfere with parsing or expose sensitive data
     const isResponse = 'result' in message;
     const msgType = isResponse ? 'response' : 'request';
     const msgId = (message as any).id || 'none';
     
     process.stderr.write(`Sending ${msgType} message (id: ${msgId})\n`);
     
-    // Write to stdout without adding an extra newline - the SDK's serializeMessage
-    // function handles proper formatting
+    // Write to stdout without adding an extra newline
     process.stdout.write(serialized);
   }
 
   async close(): Promise<void> {
+    this.buffer.clear();
     process.stdin.pause();
+  }
+}
+
+class ReadBuffer {
+  private data = '';
+  
+  get size(): number {
+    return this.data.length;
+  }
+
+  append(chunk: Buffer): void {
+    this.data += chunk.toString();
+  }
+
+  clear(): void {
+    this.data = '';
+  }
+
+  readMessage(): JSONRPCMessage | null {
+    const newlineIndex = this.data.indexOf('\n');
+    if (newlineIndex === -1) {
+      return null;
+    }
+
+    const message = this.data.slice(0, newlineIndex);
+    this.data = this.data.slice(newlineIndex + 1);
+    
+    try {
+      return deserializeMessage(message);
+    } catch (error) {
+      console.error('Failed to parse message:', message);
+      throw error;
+    }
   }
 }
 

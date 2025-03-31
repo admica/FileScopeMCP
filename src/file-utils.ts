@@ -535,60 +535,24 @@ export function getFileImportance(fileTree: FileNode, targetPath: string): FileN
   const normalizedInputPath = normalizePath(targetPath);
   console.error(`Looking for file: ${normalizedInputPath}`);
   
-  function findNode(node: FileNode): FileNode | null {
-    const normalizedNodePath = normalizePath(node.path);
-    console.error(`Checking node: ${normalizedNodePath}`);
-    
-    // Try exact match
-    if (normalizedNodePath === normalizedInputPath) {
-      console.error(`Found exact match for: ${normalizedInputPath}`);
-      if (node.importance === undefined) {
-        calculateImportance(node);
-      }
+  function findNode(node: FileNode, targetPath: string): FileNode | null {
+    // Normalize paths to handle both forward and backward slashes
+    const normalizedTargetPath = path.normalize(targetPath).toLowerCase();
+    const normalizedNodePath = path.normalize(node.path).toLowerCase();
+
+    if (normalizedNodePath === normalizedTargetPath) {
       return node;
     }
-    
-    // Try case-insensitive match for Windows compatibility
-    if (normalizedNodePath.toLowerCase() === normalizedInputPath.toLowerCase()) {
-      console.error(`Found case-insensitive match for: ${normalizedInputPath}`);
-      if (node.importance === undefined) {
-        calculateImportance(node);
-      }
-      return node;
-    }
-    
-    // Check if the path ends with our target (to handle relative vs absolute paths)
-    if (normalizedInputPath.endsWith(normalizedNodePath) || normalizedNodePath.endsWith(normalizedInputPath)) {
-      console.error(`Found path suffix match for: ${normalizedInputPath}`);
-      if (node.importance === undefined) {
-        calculateImportance(node);
-      }
-      return node;
-    }
-    
-    // Try with basename
-    const inputBasename = normalizedInputPath.split('/').pop() || '';
-    const nodeBasename = normalizedNodePath.split('/').pop() || '';
-    if (nodeBasename === inputBasename && nodeBasename !== '') {
-      console.error(`Found basename match for: ${inputBasename}`);
-      if (node.importance === undefined) {
-        calculateImportance(node);
-      }
-      return node;
-    }
-    
-    // If this is a directory, check children
-    if (node.isDirectory && node.children) {
+
+    if (node.children) {
       for (const child of node.children) {
-        const found = findNode(child);
-        if (found) {
-          return found;
-        }
+        const found = findNode(child, targetPath);
+        if (found) return found;
       }
     }
-    
+
     return null;
   }
   
-  return findNode(fileTree);
+  return findNode(fileTree, normalizedInputPath);
 }
