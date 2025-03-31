@@ -834,18 +834,18 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
     }
   </style>
 </head>
-<body class="dark-mode">
+<body class="light-mode">
   <!-- Header -->
-  <header style="color: #ffffff;">
+  <header style="color: #2d3436;">
     <h1 style="margin: 0; font-size: 28px;">${title}</h1>
     <div style="font-size: 14px; margin-top: 5px;">Generated on ${timestamp}</div>
   </header>
 
-  <!-- Theme Toggle Button -->
-  <button id="theme-toggle" style="background: #2d3436; color: #ffffff;">Switch to Light Mode</button>
+  <!-- Theme Toggle Button - Initial state for light mode -->
+  <button id="theme-toggle" style="background: #dcdde1; color: #2d3436;">Switch to Dark Mode</button>
 
-  <!-- Diagram Container -->
-  <div id="diagram-container" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);">
+  <!-- Diagram Container - Initial state for light mode -->
+  <div id="diagram-container" style="background: rgba(255, 255, 255, 0.8); border: 1px solid rgba(0, 0, 0, 0.1);">
     <div id="mermaid-graph"></div>
     <div id="error-message" style="background: rgba(45, 52, 54, 0.9); color: #ff7675;"></div>
     <!-- Mermaid Code -->
@@ -863,10 +863,10 @@ ${escapedMermaidCode}
     let expandedGroups = new Set();
     let collapsedGroups = new Set();
 
-    // Initialize Mermaid with dark theme by default
+    // Initialize Mermaid with light theme by default
     mermaid.initialize({
       startOnLoad: false,
-      theme: 'dark',
+      theme: 'default',
       securityLevel: 'loose',
       flowchart: {
         htmlLabels: true,
@@ -876,10 +876,10 @@ ${escapedMermaidCode}
         useMaxWidth: true
       },
       themeVariables: {
-        // Make node text bright white in dark mode for better readability
+        // Default light theme variables (adjust if needed)
         nodeBorder: "#2d3436",
-        mainBkg: "#1e272e",
-        nodeTextColor: "#ffffff", 
+        mainBkg: "#f8f9fa",    // Light background
+        nodeTextColor: "#333333", // Dark text
         fontSize: "16px"
       }
     });
