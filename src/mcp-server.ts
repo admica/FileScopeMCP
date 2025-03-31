@@ -165,10 +165,11 @@ class StdioTransport implements Transport {
     process.stdin.on('data', (chunk) => {
       try {
         // Check buffer size before appending
-        if (this.buffer.size + chunk.length > this.MAX_BUFFER_SIZE) {
+        const currentSize = this.buffer.toString().length;
+        if (currentSize + chunk.length > this.MAX_BUFFER_SIZE) {
           console.error(`Buffer overflow: size would exceed ${this.MAX_BUFFER_SIZE} bytes`);
           this.onerror?.(new Error('Buffer overflow: maximum size exceeded'));
-          this.buffer.clear(); // Clear buffer to prevent memory issues
+          this.buffer = new ReadBuffer(); // Reset buffer to prevent memory issues
           return;
         }
 
@@ -184,7 +185,7 @@ class StdioTransport implements Transport {
         if (this.onerror) {
           this.onerror(error instanceof Error ? error : new Error(String(error)));
         }
-        this.buffer.clear(); // Clear buffer on error
+        this.buffer = new ReadBuffer(); // Reset buffer on error
       }
     });
 
@@ -219,41 +220,8 @@ class StdioTransport implements Transport {
   }
 
   async close(): Promise<void> {
-    this.buffer.clear();
+    this.buffer = new ReadBuffer(); // Reset buffer
     process.stdin.pause();
-  }
-}
-
-class ReadBuffer {
-  private data = '';
-  
-  get size(): number {
-    return this.data.length;
-  }
-
-  append(chunk: Buffer): void {
-    this.data += chunk.toString();
-  }
-
-  clear(): void {
-    this.data = '';
-  }
-
-  readMessage(): JSONRPCMessage | null {
-    const newlineIndex = this.data.indexOf('\n');
-    if (newlineIndex === -1) {
-      return null;
-    }
-
-    const message = this.data.slice(0, newlineIndex);
-    this.data = this.data.slice(newlineIndex + 1);
-    
-    try {
-      return deserializeMessage(message);
-    } catch (error) {
-      console.error('Failed to parse message:', message);
-      throw error;
-    }
   }
 }
 
