@@ -70,7 +70,7 @@ echo { > mcp.json
 echo   "mcpServers": { >> mcp.json
 echo     "FileScopeMCP": { >> mcp.json
 echo       "command": "node", >> mcp.json
-echo       "args": ["%PROJECT_ROOT:\=/%/dist/mcp-server.js"], >> mcp.json
+echo       "args": ["%PROJECT_ROOT:\=/%/dist/mcp-server.js","--base-dir=%PROJECT_ROOT:\=/%"], >> mcp.json
 echo       "transport": "stdio" >> mcp.json
 echo     } >> mcp.json
 echo   } >> mcp.json
