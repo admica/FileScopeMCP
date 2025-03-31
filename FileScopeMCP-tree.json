@@ -1,0 +1,216 @@
+{
+  "config": {
+    "filename": "project.json",
+    "baseDirectory": "c:/Users/admica/code/mcp/FileScopeMCP/src",
+    "projectRoot": "C:/Users/admica/code/mcp/FileScopeMCP",
+    "lastUpdated": "2025-03-31T20:52:43.329Z"
+  },
+  "fileTree": {
+    "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src",
+    "name": "src",
+    "isDirectory": true,
+    "children": [
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
+        "name": "file-utils.ts",
+        "isDirectory": false,
+        "importance": 7,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts"
+        ],
+        "packageDependencies": [
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs"
+          },
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs\\promises"
+          },
+          {
+            "name": "path",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\path"
+          },
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs"
+          },
+          {
+            "name": "firebase",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\firebase\\auth"
+          }
+        ],
+        "dependents": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+        ],
+        "summary": "Core file system utilities that handle file scanning, dependency detection, and importance calculation. Features sophisticated import detection for multiple languages, smart package dependency resolution, and cross-platform path normalization. Implements intelligent importance scoring based on file type, location, dependencies, and manual overrides."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
+        "name": "global-state.ts",
+        "isDirectory": false,
+        "importance": 6,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+        ],
+        "summary": "Simple global state management module that maintains the project's root directory path. Provides getter and setter functions for the project root with logging capabilities."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\grouping-rules.ts",
+        "name": "grouping-rules.ts",
+        "isDirectory": false,
+        "importance": 5,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+        ],
+        "packageDependencies": [
+          {
+            "name": "path",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\path"
+          }
+        ],
+        "dependents": [],
+        "summary": "Implements intelligent file grouping strategies for better visualization organization. Provides rules for grouping files by directory structure, package boundaries, and dependency relationships. Features smart detection of complex dependencies and package hierarchies with configurable thresholds."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\layout-engine.ts",
+        "name": "layout-engine.ts",
+        "isDirectory": false,
+        "importance": 4,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+        ],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Advanced layout engine for optimizing diagram visualization. Analyzes graph metrics like width, depth, and density to determine optimal layout strategies. Features automatic direction selection, dynamic spacing calculations, and intelligent node level organization based on dependencies."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
+        "name": "mcp-server.ts",
+        "isDirectory": false,
+        "importance": 8,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts"
+        ],
+        "packageDependencies": [
+          {
+            "name": "@modelcontextprotocol/sdk",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\@modelcontextprotocol\\sdk\\server\\mcp.ts",
+            "scope": "@modelcontextprotocol"
+          },
+          {
+            "name": "@modelcontextprotocol/sdk",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\@modelcontextprotocol\\sdk\\types.ts",
+            "scope": "@modelcontextprotocol"
+          },
+          {
+            "name": "@modelcontextprotocol/sdk",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\@modelcontextprotocol\\sdk\\shared\\transport.ts",
+            "scope": "@modelcontextprotocol"
+          },
+          {
+            "name": "@modelcontextprotocol/sdk",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\@modelcontextprotocol\\sdk\\shared\\stdio.ts",
+            "scope": "@modelcontextprotocol"
+          },
+          {
+            "name": "zod",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\zod"
+          },
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs\\promises"
+          },
+          {
+            "name": "path",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\path"
+          },
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs"
+          }
+        ],
+        "dependents": [],
+        "summary": "Main MCP server implementation that handles all tool requests and responses. Implements the Model Context Protocol server with tools for file tree management, importance calculation, dependency tracking, and diagram generation. Includes a custom stdio transport implementation and comprehensive error handling."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
+        "name": "mermaid-generator.ts",
+        "isDirectory": false,
+        "importance": 6,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+        ],
+        "packageDependencies": [
+          {
+            "name": "path",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\path"
+          }
+        ],
+        "dependents": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+        ],
+        "summary": "Sophisticated Mermaid diagram generator that creates visual representations of file dependencies and project structure. Features include customizable node styling based on importance, package dependency visualization, automatic layout optimization, collapsible groups, and interactive HTML output with dark/light theme support."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
+        "name": "storage-utils.ts",
+        "isDirectory": false,
+        "importance": 8,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts"
+        ],
+        "packageDependencies": [
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs\\promises"
+          },
+          {
+            "name": "path",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\path"
+          },
+          {
+            "name": "fs",
+            "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\node_modules\\fs"
+          }
+        ],
+        "dependents": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+        ],
+        "summary": "Handles all file system operations and persistence for the FileScopeMCP server. Provides utilities for path normalization, file tree storage/loading with caching, and file node operations. Features robust cross-platform path handling, error handling, and efficient caching of loaded file trees."
+      },
+      {
+        "path": "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
+        "name": "types.ts",
+        "isDirectory": false,
+        "importance": 9,
+        "dependencies": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts"
+        ],
+        "packageDependencies": [],
+        "dependents": [
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\grouping-rules.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\layout-engine.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
+          "c:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts"
+        ],
+        "summary": "Core type definitions for the FileScopeMCP server. Defines comprehensive class structures for file nodes, package dependencies, file tree configuration, and Mermaid diagram generation. Includes smart package name extraction logic and extensive configuration options for visualization styles and layouts."
+      }
+    ]
+  }
+}
