@@ -1,3 +1,5 @@
+import { getProjectRoot } from './global-state.js';
+
 // Define concrete classes rather than just interfaces to ensure proper compilation
 export class FileNode {
   path: string = '';
@@ -118,10 +120,10 @@ export interface ToolResponse {
 }
 
 export class FileTreeConfig {
-  filename: string = 'default-tree.json'; // Safe default filename
-  baseDirectory: string = process.cwd();  // Current directory as fallback
-  projectRoot: string = process.cwd();    // Consistent with baseDirectory
-  lastUpdated?: Date = new Date();        // Current time as default
+  filename: string = 'default-tree.json';  // Safe default filename
+  baseDirectory: string = getProjectRoot();  // Use project root as fallback
+  projectRoot: string = getProjectRoot();    // Always use project root
+  lastUpdated?: Date = new Date();         // Current time as default
 }
 
 export class FileTreeStorage {

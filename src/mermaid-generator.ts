@@ -35,7 +35,16 @@ export class MermaidGenerator {
   private config: MermaidDiagramConfig;
   private fileTree: FileNode;
   private nodes: Map<string, string>; // path -> nodeId
-  private nodeInfo: Map<string, { label: string, color: string, shape: string, isDefined: boolean, isPackage: boolean, isPackageScope: boolean }>; // nodeId -> info
+  private nodeInfo: Map<string, { 
+    label: string, 
+    color: string, 
+    shape: string, 
+    isDefined: boolean, 
+    isPackage: boolean, 
+    isPackageScope: boolean,
+    childNodes?: string[],
+    isCollapsible?: boolean
+  }>; // nodeId -> info
   private edges: Map<string, {source: string, target: string, type: string}>; // edgeKey -> edge info
   private edgeCount: number;
   private stats: MermaidDiagramStats;
@@ -561,6 +570,8 @@ export class MermaidGenerator {
     lines.push(`classDef package-node fill:${this.style.nodeColors.package},stroke:#2d3436,shape:${this.style.nodeShapes.package}`);
     lines.push(`classDef package-scope-node fill:${this.style.nodeColors.packageScope},stroke:#2d3436,shape:${this.style.nodeShapes.packageScope}`);
     lines.push(`classDef group-node fill:#f8f9fa30,stroke:#2d3436,stroke-width:2px,stroke-dasharray:5 5,color:#333,rx:5,ry:5`);
+    lines.push(`classDef collapsible-node cursor:pointer,stroke:#2d3436,stroke-width:3px`);
+    lines.push(`classDef collapsed-group fill:#a8e063,stroke:#2d3436,stroke-width:2px,color:#333,rx:5,ry:5,cursor:pointer`);
     
     // PHASE 2: Generate any package-specific subgraphs and groupings
     if (this.config.style === 'package-deps' || this.config.showPackageDeps) {
@@ -660,8 +671,10 @@ export class MermaidGenerator {
         lines.push(`subgraph ${nodeId}["${info.label} Group"]`);
         
         // Find all nodes connected to this group
+        const childNodes: string[] = [];
         for (const edge of this.edges.values()) {
           if (edge.source === nodeId) {
+            childNodes.push(edge.target);
             lines.push(`  ${edge.target}`);
           }
         }
@@ -669,6 +682,20 @@ export class MermaidGenerator {
         lines.push(`end`);
         lines.push(`style ${nodeId} fill:#f8f9fa30,stroke:#2d3436,stroke-width:2px,stroke-dasharray:5 5`);
         lines.push(`class ${nodeId} group-node`);
+        
+        // Add click handler for interactivity in HTML output
+        const childCount = childNodes.length;
+        if (childCount > 0) {
+          // Store the list of children for this group
+          this.nodeInfo.set(nodeId, {
+            ...info,
+            childNodes: childNodes,
+            isCollapsible: true
+          });
+          
+          // Add a click handler to toggle expansion
+          lines.push(`click ${nodeId} toggleGroup "${nodeId}"`);
+        }
       }
     }
     

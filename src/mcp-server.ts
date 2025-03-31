@@ -24,6 +24,7 @@ import {
 } from "./storage-utils.js";
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
+import { setProjectRoot, getProjectRoot } from './global-state.js';
 
 const PROJECT_ROOT_MARKERS = [
   '.cursor/mcp.json',  // Most reliable for Cursor projects
@@ -76,7 +77,6 @@ async function detectProjectRoot(startDir: string): Promise<string> {
 }
 
 // Initialize server state
-let projectRoot: string;
 let fileTree: FileNode | null = null;
 let currentConfig: FileTreeConfig | null = null;
 let DEFAULT_CONFIG: FileTreeConfig;
@@ -161,41 +161,46 @@ async function initializeServer(): Promise<void> {
   const isMcpServer = isRunningAsMcpServer();
   console.error(`Running as MCP server for Cursor: ${isMcpServer}`);
   
-  // Check for command line override first
-  const rootArg = process.argv.find(arg => arg.startsWith('--project-root='));
-  if (rootArg) {
-    projectRoot = rootArg.split('=')[1];
-    console.error(`Using provided project root: ${projectRoot}`);
-  } else if (isMcpServer) {
-    // We're running as an MCP server, so try to find the FileScopeMCP directory
-    const mcpDir = await findFileScopeMcpDirectory();
-    if (mcpDir) {
-      projectRoot = mcpDir;
-      console.error(`Using FileScopeMCP directory: ${projectRoot}`);
-    } else {
-      // Fall back to auto-detection
-      projectRoot = await detectProjectRoot(process.cwd());
-      console.error(`Falling back to auto-detected project root: ${projectRoot}`);
-    }
+  // Set project root from various sources in order of preference
+  let projectRoot: string;
+  
+  // 1. Try to get from --base-dir parameter
+  const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
+  if (baseDirArg) {
+    projectRoot = baseDirArg.split('=')[1];
+    console.error(`Using provided base directory: ${projectRoot}`);
   } else {
-    // Running directly, use current directory
-    projectRoot = process.cwd();
-    console.error(`Running directly, using current directory: ${projectRoot}`);
+    // 2. Try to detect from current working directory
+    projectRoot = await detectProjectRoot(process.cwd());
+    console.error(`Detected project root from working directory: ${projectRoot}`);
+    
+    // 3. If that didn't work, try to find the FileScopeMCP directory
+    if (!projectRoot || projectRoot === process.cwd()) {
+      const mcpDir = await findFileScopeMcpDirectory();
+      if (mcpDir) {
+        projectRoot = mcpDir;
+        console.error(`Using FileScopeMCP directory as project root: ${projectRoot}`);
+      } else {
+        // 4. Last resort: use current directory
+        projectRoot = process.cwd();
+        console.error(`Using current directory as project root: ${projectRoot}`);
+      }
+    }
   }
   
-  console.error(`Final project root set to: ${projectRoot}`);
+  // Normalize the project root
+  projectRoot = normalizeAndResolvePath(projectRoot);
+  console.error(`Normalized project root: ${projectRoot}`);
   
-  // Special handling for Cursor IDE integration
-  // If we detect we're in Cursor's directory but want to operate on the FileScopeMCP project
-  if (projectRoot.includes('Cursor') || projectRoot.includes('cursor')) {
-    console.error('Detected we may be running from Cursor IDE directory');
-    
-    // Try to find the actual FileScopeMCP project directory
-    const mcpDir = await findFileScopeMcpDirectory();
-    if (mcpDir) {
-      projectRoot = mcpDir;
-      console.error(`Overriding with FileScopeMCP directory: ${projectRoot}`);
-    }
+  // Set the global project root
+  setProjectRoot(projectRoot);
+  
+  // Verify the directory exists
+  try {
+    await fs.access(projectRoot);
+  } catch (error) {
+    console.error(`Error: Base directory ${projectRoot} does not exist`);
+    process.exit(1);
   }
   
   process.chdir(projectRoot);
@@ -501,18 +506,14 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
     // Handle special case for current directory
     let baseDir = params.baseDirectory;
     if (baseDir === '.' || baseDir === './') {
-      baseDir = process.cwd();
-      console.error('Resolved "." to current directory:', baseDir);
+      baseDir = getProjectRoot(); // Use the project root instead of cwd
+      console.error('Resolved "." to project root:', baseDir);
     }
     
-    // Check if the baseDir might be pointing to Cursor IDE directory
-    if (baseDir.includes('Cursor') || baseDir.includes('cursor')) {
-      console.error('Detected potential Cursor directory in baseDir, trying to find FileScopeMCP project');
-      const mcpDir = await findFileScopeMcpDirectory();
-      if (mcpDir) {
-        console.error(`Overriding baseDir to FileScopeMCP directory: ${mcpDir}`);
-        baseDir = mcpDir;
-      }
+    // Normalize the base directory relative to project root if not absolute
+    if (!path.isAbsolute(baseDir)) {
+      baseDir = path.join(getProjectRoot(), baseDir);
+      console.error('Resolved relative base directory:', baseDir);
     }
     
     const config = await createFileTreeConfig(relativeFilename, baseDir);
@@ -851,6 +852,20 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
       cursor: pointer;
       transition: all 0.3s ease;
     }
+    #expand-all-btn, #collapse-all-btn {
+      position: absolute;
+      top: 60px;
+      right: 20px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 50px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #collapse-all-btn {
+      top: 100px;
+    }
     #diagram-container {
       width: 90%;
       max-width: 1200px;
@@ -874,6 +889,23 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
       font-size: 14px;
       display: none;
     }
+    /* Styles for collapsed nodes */
+    .collapsed-node text {
+      font-weight: bold;
+    }
+    .collapsed-node rect, .collapsed-node circle, .collapsed-node polygon {
+      stroke-width: 3px !important;
+    }
+    .collapsed-indicator {
+      fill: #4cd137;
+      font-weight: bold;
+    }
+    /* Add + symbol to collapsed nodes */
+    .collapsed-node .collapsed-icon {
+      fill: #4cd137;
+      font-size: 16px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body class="dark-mode">
@@ -885,6 +917,9 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
 
   <!-- Theme Toggle Button -->
   <button id="theme-toggle" style="background: #2d3436; color: #ffffff;">Switch to Light Mode</button>
+  <!-- Expand/Collapse All Buttons -->
+  <button id="expand-all-btn" style="background: #2d3436; color: #ffffff;">Expand All</button>
+  <button id="collapse-all-btn" style="background: #2d3436; color: #ffffff;">Collapse All</button>
 
   <!-- Diagram Container -->
   <div id="diagram-container" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);">
@@ -899,6 +934,11 @@ ${escapedMermaidCode}
   <script>
     // Unique render ID counter
     let renderCount = 0;
+
+    // Track collapsible groups
+    const collapsibleGroups = {};
+    let expandedGroups = new Set();
+    let collapsedGroups = new Set();
 
     // Initialize Mermaid with dark theme by default
     mermaid.initialize({
@@ -932,12 +972,143 @@ ${escapedMermaidCode}
       renderMermaid();
     });
 
+    // Handle node click events
+    window.toggleGroup = function(nodeId) {
+      if (expandedGroups.has(nodeId)) {
+        // Collapse the group
+        expandedGroups.delete(nodeId);
+        collapsedGroups.add(nodeId);
+      } else {
+        // Expand the group
+        collapsedGroups.delete(nodeId);
+        expandedGroups.add(nodeId);
+      }
+      renderMermaid();
+    };
+
+    // Expand all groups
+    document.getElementById('expand-all-btn').addEventListener('click', () => {
+      collapsedGroups.clear();
+      expandedGroups = new Set(Object.keys(collapsibleGroups));
+      renderMermaid();
+    });
+
+    // Collapse all groups
+    document.getElementById('collapse-all-btn').addEventListener('click', () => {
+      expandedGroups.clear();
+      collapsedGroups = new Set(Object.keys(collapsibleGroups));
+      renderMermaid();
+    });
+
+    // Process Mermaid SVG after rendering
+    function processMermaidSvg(svgElement) {
+      // Process click events on nodes
+      const clickables = svgElement.querySelectorAll('[id^="flowchart-"]');
+      
+      clickables.forEach(node => {
+        const nodeId = node.id.replace('flowchart-', '');
+        
+        // Is this a collapsible group?
+        if (Object.keys(collapsibleGroups).includes(nodeId)) {
+          // Add visual indicator for collapsed/expanded state
+          const textElement = node.querySelector('text');
+          
+          if (textElement && collapsedGroups.has(nodeId)) {
+            // Add a + sign for collapsed groups
+            const currentText = textElement.textContent || '';
+            if (!currentText.includes('[+]')) {
+              textElement.textContent = '\${currentText} [+]';
+            }
+            
+            // Add a class for styling
+            node.classList.add('collapsed-node');
+          }
+          
+          // Make nodes clickable visually
+          node.style.cursor = 'pointer';
+          
+          // Add the children count to the label
+          const childCount = collapsibleGroups[nodeId].length;
+          const childLabel = '(\${childCount} items)';
+          const label = node.querySelector('text');
+          
+          if (label && !label.textContent.includes(childLabel)) {
+            label.textContent += ' \${childLabel}';
+          }
+        }
+      });
+      
+      // Hide children of collapsed groups
+      collapsedGroups.forEach(groupId => {
+        const children = collapsibleGroups[groupId] || [];
+        children.forEach(childId => {
+          const childElement = svgElement.querySelector('#flowchart-\${childId}');
+          if (childElement) {
+            childElement.style.display = 'none';
+            
+            // Also hide edges to/from this element
+            const edges = svgElement.querySelectorAll('path.flowchart-link');
+            edges.forEach(edge => {
+              const edgeId = edge.id;
+              if (edgeId.includes(childId)) {
+                edge.style.display = 'none';
+              }
+            });
+          }
+        });
+      });
+    }
+
+    // Detect collapsible groups in the diagram by looking for click handlers
+    function detectCollapsibleGroups(mermaidCode) {
+      // Reset the collapsible groups
+      Object.keys(collapsibleGroups).forEach(key => delete collapsibleGroups[key]);
+
+      // Look for click handler definitions like 'click node1 toggleGroup "node1"'
+      const clickHandlerRegex = /click\s+(\w+)\s+toggleGroup\s+"([^"]+)"/g;
+      let match;
+      
+      while ((match = clickHandlerRegex.exec(mermaidCode)) !== null) {
+        const nodeId = match[1];
+        
+        // Now find children of this group in the subgraph definition
+        const subgraphRegex = new RegExp('subgraph\\\\s+' + nodeId + '.*?\\\\n([\\\\s\\\\S]*?)\\\\nend', 'g');
+        const subgraphMatch = subgraphRegex.exec(mermaidCode);
+        
+        if (subgraphMatch) {
+          const subgraphContent = subgraphMatch[1];
+          // Extract node IDs from the subgraph
+          const nodeRegex = /\s+(\w+)/g;
+          const children = [];
+          let nodeMatch;
+          
+          while ((nodeMatch = nodeRegex.exec(subgraphContent)) !== null) {
+            const childId = nodeMatch[1].trim();
+            if (childId !== nodeId) {
+              children.push(childId);
+            }
+          }
+          
+          if (children.length > 0) {
+            collapsibleGroups[nodeId] = children;
+            // By default, all groups start expanded
+            expandedGroups.add(nodeId);
+          }
+        }
+      }
+      
+      console.log('Detected collapsible groups:', collapsibleGroups);
+    }
+
     // Render Mermaid diagram
     function renderMermaid() {
       const mermaidDiv = document.getElementById('mermaid-graph');
       const errorDiv = document.getElementById('error-message');
       const rawCode = document.getElementById('raw-code').textContent.trim();
-      const uniqueId = \`mermaid-svg-\${Date.now()}-\${renderCount++}\`;
+      const uniqueId = 'mermaid-svg-' + Date.now() + '-' + renderCount++;
+
+      // Detect collapsible groups in the diagram
+      detectCollapsibleGroups(rawCode);
 
       // Clear previous content
       mermaidDiv.innerHTML = '';
@@ -947,6 +1118,12 @@ ${escapedMermaidCode}
       mermaid.render(uniqueId, rawCode)
         .then(({ svg }) => {
           mermaidDiv.innerHTML = svg;
+          
+          // Process the SVG after it's been inserted into the DOM
+          const svgElement = mermaidDiv.querySelector('svg');
+          if (svgElement) {
+            processMermaidSvg(svgElement);
+          }
         })
         .catch(error => {
           console.error('Mermaid rendering failed:', error);
@@ -960,6 +1137,8 @@ ${escapedMermaidCode}
     function toggleTheme() {
       const body = document.body;
       const toggleBtn = document.getElementById('theme-toggle');
+      const expandAllBtn = document.getElementById('expand-all-btn');
+      const collapseAllBtn = document.getElementById('collapse-all-btn');
       const diagramContainer = document.getElementById('diagram-container');
       const header = document.querySelector('header');
       const isDarkMode = body.classList.contains('dark-mode');
@@ -971,6 +1150,10 @@ ${escapedMermaidCode}
         toggleBtn.textContent = 'Switch to Dark Mode';
         toggleBtn.style.background = '#dcdde1';
         toggleBtn.style.color = '#2d3436';
+        expandAllBtn.style.background = '#dcdde1';
+        expandAllBtn.style.color = '#2d3436';
+        collapseAllBtn.style.background = '#dcdde1';
+        collapseAllBtn.style.color = '#2d3436';
         diagramContainer.style.background = 'rgba(255, 255, 255, 0.8)';
         diagramContainer.style.border = '1px solid rgba(0, 0, 0, 0.1)';
         header.style.color = '#2d3436';
@@ -992,6 +1175,10 @@ ${escapedMermaidCode}
         toggleBtn.textContent = 'Switch to Light Mode';
         toggleBtn.style.background = '#2d3436';
         toggleBtn.style.color = '#ffffff';
+        expandAllBtn.style.background = '#2d3436';
+        expandAllBtn.style.color = '#ffffff';
+        collapseAllBtn.style.background = '#2d3436';
+        collapseAllBtn.style.color = '#ffffff';
         diagramContainer.style.background = 'rgba(255, 255, 255, 0.05)';
         diagramContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
         header.style.color = '#ffffff';
@@ -1163,7 +1350,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       {
         type: "resource" as const,
         resource: {
-          uri: `data:text/x-mermaid;base64,${Buffer.from(mermaidContent).toString('base64')}`,
+          uri: 'data:text/x-mermaid;base64,' + Buffer.from(mermaidContent).toString('base64'),
           text: mermaidContent,
           mimeType: "text/x-mermaid"
         }

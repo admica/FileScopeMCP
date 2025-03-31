@@ -4,6 +4,7 @@ import path from 'path';
 import * as fsSync from "fs";
 import { FileNode, PackageDependency } from "./types.js";
 import { normalizeAndResolvePath } from "./storage-utils.js";
+import { getProjectRoot } from './global-state.js';
 
 /**
  * Normalizes a file path for consistent comparison across platforms
@@ -209,12 +210,12 @@ async function extractPackageVersion(packageName: string, baseDir: string): Prom
 export async function scanDirectory(baseDir: string, currentDir: string = baseDir): Promise<FileNode> {
   // Handle special case for current directory
   if (baseDir === '.' || baseDir === './') {
-    baseDir = process.cwd();
-    console.error(`Resolved scanDirectory baseDir "." to current directory: ${baseDir}`);
+    baseDir = getProjectRoot(); // Use project root instead of cwd
+    console.error(`Resolved scanDirectory baseDir "." to project root: ${baseDir}`);
   }
   if (currentDir === '.' || currentDir === './') {
-    currentDir = process.cwd();
-    console.error(`Resolved scanDirectory currentDir "." to current directory: ${currentDir}`);
+    currentDir = getProjectRoot(); // Use project root instead of cwd
+    console.error(`Resolved scanDirectory currentDir "." to project root: ${currentDir}`);
   }
   
   console.error(`Scanning directory: ${currentDir}`);

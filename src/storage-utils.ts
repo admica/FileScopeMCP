@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as fsSync from 'fs';
 import { FileNode, FileTreeConfig, FileTreeStorage } from './types.js';
+import { getProjectRoot } from './global-state.js';
 
 // Keep a map of all loaded file trees
 const loadedTrees = new Map<string, FileTreeStorage>();
@@ -10,13 +11,13 @@ const loadedTrees = new Map<string, FileTreeStorage>();
  * Normalizes paths to use forward slashes and handles URL encoding
  * Works with both relative and absolute paths on any platform
  * @param inputPath The path to normalize
- * @param baseDirectory Optional base directory to resolve relative paths against (defaults to process.cwd())
+ * @param baseDirectory Optional base directory to resolve relative paths against (defaults to project root)
  */
 export function normalizeAndResolvePath(inputPath: string, baseDirectory?: string): string {
   try {
     // Handle special case for current directory
     if (inputPath === '.' || inputPath === './') {
-      return process.cwd().replace(/\\/g, '/').replace(/\/+/g, '/');
+      return getProjectRoot().replace(/\\/g, '/').replace(/\/+/g, '/');
     }
     
     // Decode URL encoding if present
@@ -31,7 +32,7 @@ export function normalizeAndResolvePath(inputPath: string, baseDirectory?: strin
     }
     
     // For relative paths, resolve against the base directory
-    const base = baseDirectory || process.cwd();
+    const base = baseDirectory || getProjectRoot();
     console.error(`Resolving relative path ${cleanPath} against base ${base}`);
     const fullPath = path.resolve(base, cleanPath);
     
@@ -68,8 +69,8 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
   
   // Handle special case for current directory
   if (baseDirectory === '.' || baseDirectory === './') {
-    baseDirectory = process.cwd();
-    console.error('Resolved "." to current directory:', baseDirectory);
+    baseDirectory = getProjectRoot();
+    console.error('Resolved "." to project root:', baseDirectory);
   }
   
   // Normalize paths
@@ -88,7 +89,7 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
   const config = {
     filename: cleanFilename,
     baseDirectory: normalizedBase,
-    projectRoot: normalizedBase,  // Use the normalized base as project root
+    projectRoot: getProjectRoot(),  // Always use the global project root
     lastUpdated: new Date()
   };
   console.error('Created config:', config);
