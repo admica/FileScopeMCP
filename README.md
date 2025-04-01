@@ -1,5 +1,13 @@
 # FileScopeMCP (Model Context Protocol) Server
 
+**✨ Instantly understand and visualize your codebase structure & dependencies! ✨**
+
+<!-- Add Badges Here (e.g., License, Version, Build Status) -->
+[![Build Status](https://github.com/admica/FileScopeMCP/actions/workflows/build.yml/badge.svg)](https://github.com/admica/FileScopeMCP/actions)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18.x-green)](https://nodejs.org/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+<!-- Add other badges -->
+
 A TypeScript-based tool for ranking files in your codebase by importance, tracking dependencies, and providing summaries to help understand code structure.
 
 ## Overview
@@ -8,48 +16,43 @@ This MCP server analyzes your codebase to identify the most important files base
 
 ## Features
 
-- **File Importance Analysis**
-  - Rank files on a scale from 0-10 based on their importance in the codebase
-  - Calculate importance based on both incoming and outgoing dependencies
-  - Find the most critical files in your project instantly
-  - Smart importance calculation based on file type, location, and name significance
+🚀 **Supercharge your Code Understanding!** FileScopeMCP provides insights directly to your AI assistant:
 
-- **Dependency Tracking**
-  - Track bidirectional dependency relationships between files
-  - Identify which files import a given file (dependents)
-  - See which files are imported by a given file (dependencies)
-  - Distinguish between local dependencies and package dependencies
-  - Support for multiple languages including Python, JavaScript, TypeScript, C/C++, Rust, Lua, and Zig
+- **🎯 File Importance Analysis**
+  - Rank files on a 0-10 scale based on their role in the codebase.
+  - Calculate importance using incoming/outgoing dependencies.
+  - Instantly pinpoint the most critical files in your project.
+  - Smart calculation considers file type, location, and name significance.
 
-- **Visualization**
-  - Generate Mermaid diagrams to visualize file relationships
-  - Color-coded visualization based on importance scores
-  - Support for dependency graphs, directory trees, or hybrid views
-  - HTML output with embedded rendering including theme toggle and responsive design
-  - Customize diagram depth, filter by importance, and adjust layout options
+- **🔗 Dependency Tracking**
+  - Map bidirectional dependency relationships between files.
+  - Identify which files import a given file (dependents).
+  - See which files are imported by a given file (dependencies).
+  - Distinguish between local and package dependencies.
+  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig.
 
-- **File Watching**
-  - Monitor file system changes in real-time
-  - Auto-rebuild dependency tree when files change
-  - Configurable debounce to handle rapid changes
-  - Filter which types of events to watch (add, change, delete)
-  - Ignore specific files or directories with exclude patterns
+- **📊 Visualization**
+  - Generate Mermaid diagrams to visualize file relationships.
+  - Color-coded visualization based on importance scores.
+  - Support for dependency graphs, directory trees, or hybrid views.
+  - HTML output with embedded rendering including theme toggle and responsive design.
+  - Customize diagram depth, filter by importance, and adjust layout options.
 
-- **File Summaries**
-  - Add human or AI-generated summaries to files
-  - Retrieve stored summaries to quickly understand file purpose
-  - Summaries persist across server restarts
+- **📝 File Summaries**
+  - Add human or AI-generated summaries to any file.
+  - Retrieve stored summaries to quickly grasp file purpose.
+  - Summaries persist across server restarts.
 
-- **Multiple Project Support**
-  - Create and manage multiple file trees for different parts of your project
-  - Configure separate file trees with different base directories
-  - Switch between different file trees as needed
-  - Cached file trees for faster subsequent operations
+- **📚 Multiple Project Support**
+  - Create and manage multiple file trees for different project areas.
+  - Configure separate trees with distinct base directories.
+  - Switch between different file trees effortlessly.
+  - Cached trees for faster subsequent operations.
 
-- **Persistent Storage**
-  - All data is automatically saved to disk in JSON format
-  - Load existing file trees without rescanning the filesystem
-  - Track when file trees were last updated
+- **💾 Persistent Storage**
+  - All data automatically saved to disk in JSON format.
+  - Load existing file trees without rescanning the filesystem.
+  - Track when file trees were last updated.
 
 ## Installation
 
@@ -73,12 +76,73 @@ This MCP server analyzes your codebase to identify the most important files base
      "mcpServers": {
        "FileScopeMCP": {
          "command": "node",
-         "args": ["yourpath/to/dist/mcp-server.js"],
+         "args": ["<build script sets this>/FileScopeMCP/dist/mcp-server.js","--base-dir=C:/Users/admica/my/project/base"], 
+
          "transport": "stdio"
        }
      }
    }
    ```
+4. Update the arg path --base-dir to your project's base path.
+
+## How It Works
+
+### Dependency Detection
+
+The tool scans source code for import statements and other language-specific patterns:
+- Python: `import` and `from ... import` statements
+- JavaScript/TypeScript: `import` statements and `require()` calls
+- C/C++: `#include` directives
+- Rust: `use` and `mod` statements
+- Lua: `require` statements
+- Zig: `@import` directives
+
+### Importance Calculation
+
+Files are assigned importance scores (0-10) based on a weighted formula that considers:
+- Number of files that import this file (dependents)
+- Number of files this file imports (dependencies)
+- File type and extension (with TypeScript/JavaScript files getting higher base scores)
+- Location in the project structure (files in `src/` are weighted higher)
+- File naming (files like 'index', 'main', 'server', etc. get additional points)
+
+A file that is central to the codebase (imported by many files) will have a higher score.
+
+### Diagram Generation
+
+The system uses a three-phase approach to generate valid Mermaid syntax:
+1. Collection Phase: Register all nodes and relationships
+2. Node Definition Phase: Generate definitions for all nodes before any references
+3. Edge Generation Phase: Create edges between defined nodes
+
+This ensures all diagrams have valid syntax and render correctly. HTML output includes:
+- Responsive design that works on any device
+- Light/dark theme toggle with system preference detection
+- Client-side Mermaid rendering for optimal performance
+- Timestamp of generation
+
+### Path Normalization
+
+The system handles various path formats to ensure consistent file identification:
+- Windows and Unix path formats
+- Absolute and relative paths
+- URL-encoded paths
+- Cross-platform compatibility
+
+### File Storage
+
+All file tree data is stored in JSON files with the following structure:
+- Configuration metadata (filename, base directory, last updated timestamp)
+- Complete file tree with dependencies, dependents, importance scores, and summaries
+
+## Technical Details
+
+- **TypeScript/Node.js**: Built with TypeScript for type safety and modern JavaScript features
+- **Model Context Protocol**: Implements the MCP specification for integration with Cursor
+- **Mermaid.js**: Uses Mermaid syntax for diagram generation
+- **JSON Storage**: Uses simple JSON files for persistence
+- **Path Normalization**: Cross-platform path handling to support Windows and Unix
+- **Caching**: Implements caching for faster repeated operations
 
 ## Available Tools
 
@@ -193,65 +257,6 @@ The MCP server exposes the following tools:
      watchForChanged: true
    })
    ```
-
-## How It Works
-
-### Dependency Detection
-
-The tool scans source code for import statements and other language-specific patterns:
-- Python: `import` and `from ... import` statements
-- JavaScript/TypeScript: `import` statements and `require()` calls
-- C/C++: `#include` directives
-- Rust: `use` and `mod` statements
-- Lua: `require` statements
-- Zig: `@import` directives
-
-### Importance Calculation
-
-Files are assigned importance scores (0-10) based on a weighted formula that considers:
-- Number of files that import this file (dependents)
-- Number of files this file imports (dependencies)
-- File type and extension (with TypeScript/JavaScript files getting higher base scores)
-- Location in the project structure (files in `src/` are weighted higher)
-- File naming (files like 'index', 'main', 'server', etc. get additional points)
-
-A file that is central to the codebase (imported by many files) will have a higher score.
-
-### Diagram Generation
-
-The system uses a three-phase approach to generate valid Mermaid syntax:
-1. Collection Phase: Register all nodes and relationships
-2. Node Definition Phase: Generate definitions for all nodes before any references
-3. Edge Generation Phase: Create edges between defined nodes
-
-This ensures all diagrams have valid syntax and render correctly. HTML output includes:
-- Responsive design that works on any device
-- Light/dark theme toggle with system preference detection
-- Client-side Mermaid rendering for optimal performance
-- Timestamp of generation
-
-### Path Normalization
-
-The system handles various path formats to ensure consistent file identification:
-- Windows and Unix path formats
-- Absolute and relative paths
-- URL-encoded paths
-- Cross-platform compatibility
-
-### File Storage
-
-All file tree data is stored in JSON files with the following structure:
-- Configuration metadata (filename, base directory, last updated timestamp)
-- Complete file tree with dependencies, dependents, importance scores, and summaries
-
-## Technical Details
-
-- **TypeScript/Node.js**: Built with TypeScript for type safety and modern JavaScript features
-- **Model Context Protocol**: Implements the MCP specification for integration with Cursor
-- **Mermaid.js**: Uses Mermaid syntax for diagram generation
-- **JSON Storage**: Uses simple JSON files for persistence
-- **Path Normalization**: Cross-platform path handling to support Windows and Unix
-- **Caching**: Implements caching for faster repeated operations
 
 ## Future Improvements
 
