@@ -3,7 +3,7 @@
     "filename": "FileScopeMCP-tree.json",
     "baseDirectory": "C:/Users/admica/code/mcp/FileScopeMCP",
     "projectRoot": "C:/Users/admica/code/mcp/FileScopeMCP",
-    "lastUpdated": "2025-04-01T19:15:12.115Z"
+    "lastUpdated": "2025-04-01T12:12:34.5678Z"
   },
   "fileTree": {
     "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP",
@@ -25,15 +25,6 @@
             "dependents": []
           }
         ]
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\.cursorrules",
-        "name": ".cursorrules",
-        "isDirectory": false,
-        "importance": 0,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
       },
       {
         "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\build.bat",
@@ -61,12 +52,6 @@
         "dependencies": [],
         "packageDependencies": [],
         "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\diagrams",
-        "name": "diagrams",
-        "isDirectory": true,
-        "children": []
       },
       {
         "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist",
@@ -119,10 +104,6 @@
               {
                 "name": "firebase",
                 "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\firebase\\auth"
-              },
-              {
-                "name": "${importPath}",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\${importPath}"
               }
             ],
             "dependents": [
@@ -341,15 +322,6 @@
         "name": "mcp.json.win.txt",
         "isDirectory": false,
         "importance": 0,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\package-lock.json",
-        "name": "package-lock.json",
-        "isDirectory": false,
-        "importance": 1,
         "dependencies": [],
         "packageDependencies": [],
         "dependents": []
