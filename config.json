@@ -47,5 +47,6 @@
     "watchForDeleted": true,
     "watchForChanged": true
   },
-  "baseDirectory": ""
+  "baseDirectory": "",
+  "version": "2.3.0"
 }
