@@ -1,10 +1,11 @@
-import fs from 'fs';
+import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
-import path from 'path';
+import * as path from 'path';
 import * as fsSync from "fs";
-import { FileNode, PackageDependency } from "./types.js";
+import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { normalizeAndResolvePath } from "./storage-utils.js";
 import { getProjectRoot, getConfig } from './global-state.js';
+import { saveFileTree } from './storage-utils.js'; // Import saveFileTree
 
 /**
  * Normalizes a file path for consistent comparison across platforms
@@ -720,3 +721,395 @@ export function getFileImportance(fileTree: FileNode, targetPath: string): FileN
   
   return findNode(fileTree, normalizedInputPath);
 }
+
+/**
+ * Finds a node in the file tree by its absolute path.
+ * @param tree The file tree node to search within.
+ * @param targetPath The absolute path of the node to find.
+ * @returns The found FileNode or null if not found.
+ */
+export function findNodeByPath(tree: FileNode | null, targetPath: string): FileNode | null {
+  if (!tree) return null;
+
+  const normalizedTargetPath = normalizePath(targetPath);
+  const normalizedNodePath = normalizePath(tree.path);
+
+  // Check the current node
+  if (normalizedNodePath === normalizedTargetPath) {
+    return tree;
+  }
+
+  // If it's a directory, search its children
+  if (tree.isDirectory && tree.children) {
+    for (const child of tree.children) {
+      const found = findNodeByPath(child, targetPath);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  // Node not found in this subtree
+  return null;
+}
+
+// --- New Functions for Incremental Updates ---
+
+// Placeholder for dependency analysis of a single new file
+// This needs to replicate the relevant logic from scanDirectory
+async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[] }> {
+  console.error(`[analyzeNewFile] Analyzing ${filePath}`);
+  const dependencies: string[] = [];
+  const packageDependencies: PackageDependency[] = [];
+  const ext = path.extname(filePath);
+  const pattern = IMPORT_PATTERNS[ext];
+
+  if (pattern) {
+     try {
+       const content = await fsPromises.readFile(filePath, 'utf-8');
+       let match;
+       while ((match = pattern.exec(content)) !== null) {
+         const importPath = match[1] || match[2] || match[3]; // Adjust indices based on specific regex
+         if (importPath) {
+            try {
+                const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
+                const normalizedResolvedPath = normalizePath(resolvedPath);
+
+                // Check if it's a package dependency (heuristic: includes node_modules or doesn't start with . or /)
+                if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+                    const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
+                     const version = await extractPackageVersion(pkgDep.name, projectRoot);
+                      if (version) {
+                        pkgDep.version = version;
+                      }
+                    packageDependencies.push(pkgDep);
+                } else {
+                    // Attempt to confirm local file exists (you might need more robust checking like in scanDirectory)
+                    try {
+                      await fsPromises.access(normalizedResolvedPath);
+                      dependencies.push(normalizedResolvedPath);
+                    } catch {
+                      //console.warn(`[analyzeNewFile] Referenced local file not found: ${normalizedResolvedPath}`);
+                    }
+                }
+            } catch (resolveError) {
+                 console.error(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}:`, resolveError);
+            }
+         }
+       }
+     } catch (readError) {
+       console.error(`[analyzeNewFile] Error reading file ${filePath}:`, readError);
+     }
+  }
+  console.error(`[analyzeNewFile] Found deps for ${filePath}:`, { dependencies, packageDependencies });
+  return { dependencies, packageDependencies };
+}
+
+
+/**
+ * Incrementally adds a new file node to the global file tree.
+ * Analyzes the new file, calculates its importance, and updates relevant dependents.
+ * Must be called with the currently active file tree and its config.
+ * @param filePath The absolute path of the file to add.
+ * @param activeFileTree The currently active FileNode tree.
+ * @param activeProjectRoot The project root directory.
+ */
+export async function addFileNode(
+    filePath: string,
+    activeFileTree: FileNode,
+    activeProjectRoot: string
+): Promise<void> {
+  const normalizedFilePath = normalizePath(filePath);
+  // Removed reliance on getConfig() here
+
+  console.error(`[addFileNode] Attempting to add file: ${normalizedFilePath} to tree rooted at ${activeFileTree.path}`);
+
+  // 1. Find the parent directory node within the provided active tree
+  const parentDir = path.dirname(normalizedFilePath);
+  const parentNode = findNodeByPath(activeFileTree, parentDir);
+
+  if (!parentNode || !parentNode.isDirectory) {
+    console.error(`[addFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
+    // Optionally: Handle cases where intermediate directories might also need creation
+    return;
+  }
+
+  // 2. Check if node already exists (should not happen if watcher is correct, but good practice)
+  if (parentNode.children?.some(child => normalizePath(child.path) === normalizedFilePath)) {
+    console.error(`[addFileNode] Node already exists: ${normalizedFilePath}`);
+    return;
+  }
+
+  try {
+    // 3. Create the new FileNode (Removed size, createdAt, modifiedAt)
+    const newNode = new FileNode(); // Use class constructor
+    newNode.path = normalizedFilePath;
+    newNode.name = path.basename(normalizedFilePath);
+    newNode.isDirectory = false;
+    newNode.dependencies = []; // Initialize as empty arrays
+    newNode.packageDependencies = [];
+    newNode.dependents = [];
+    newNode.summary = '';
+
+    // 4. Analyze the new file's content for dependencies
+    // Use the placeholder analysis function
+    const { dependencies, packageDependencies } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+    newNode.dependencies = dependencies;
+    newNode.packageDependencies = packageDependencies;
+
+
+    // 5. Calculate initial importance for the new node
+    // Use the existing calculateInitialImportance function
+    newNode.importance = calculateInitialImportance(newNode.path, activeProjectRoot);
+
+    // 6. Add the new node to the parent's children
+    if (!parentNode.children) {
+      parentNode.children = [];
+    }
+    parentNode.children.push(newNode);
+    parentNode.children.sort((a, b) => a.name.localeCompare(b.name)); // Keep sorted
+
+    // 7. Update dependents lists of the files imported by the new node
+    await updateDependentsForNewNode(newNode, activeFileTree); // Pass active tree
+
+
+    // 8. Recalculate importance for affected nodes (new node and its dependencies)
+    // Ensure dependencies is an array before mapping
+    const depPaths = (newNode.dependencies ?? []).map(d => normalizePath(d));
+    await recalculateImportanceForAffected([newNode.path, ...depPaths], activeFileTree, activeProjectRoot); // Pass active tree & root
+
+    // 9. Global state update is handled by the caller (mcp-server) after saving
+
+    console.error(`[addFileNode] Successfully added node: ${normalizedFilePath}`);
+
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+       console.error(`[addFileNode] File not found during add operation (might have been deleted quickly): ${normalizedFilePath}`);
+    } else {
+       console.error(`[addFileNode] Error adding file node ${normalizedFilePath}:`, error);
+    }
+  }
+}
+
+/**
+ * Incrementally removes a file node from the global file tree.
+ * Updates dependents of the removed file and the files it depended on.
+ * Must be called with the currently active file tree.
+ * @param filePath The absolute path of the file to remove.
+ * @param activeFileTree The currently active FileNode tree.
+ * @param activeProjectRoot The project root directory.
+ */
+export async function removeFileNode(
+    filePath: string,
+    activeFileTree: FileNode,
+    activeProjectRoot: string
+): Promise<void> {
+  const normalizedFilePath = normalizePath(filePath);
+  // Removed reliance on getConfig() here
+
+  console.error(`[removeFileNode] Attempting to remove file: ${normalizedFilePath} from tree rooted at ${activeFileTree.path}`);
+
+  // 1. Find the node to remove within the provided active tree
+  const nodeToRemove = findNodeByPath(activeFileTree, normalizedFilePath);
+  if (!nodeToRemove || nodeToRemove.isDirectory) {
+    // Handle case where node not found or it's unexpectedly a directory
+    console.error(`[removeFileNode] File node not found or is a directory: ${normalizedFilePath}`);
+    return;
+  }
+
+  // 2. Find the parent directory node within the provided active tree
+  const parentDir = path.dirname(normalizedFilePath);
+  const parentNode = findNodeByPath(activeFileTree, parentDir);
+  if (!parentNode || !parentNode.isDirectory || !parentNode.children) {
+    console.error(`[removeFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
+    return;
+  }
+
+  // 3. Store necessary info before removal (Ensure arrays exist)
+  const dependenciesToRemoveFrom = [...(nodeToRemove.dependencies ?? [])];
+  const dependentsToUpdate = [...(nodeToRemove.dependents ?? [])]; // Files that depended on this node
+
+  // 4. Remove the node from its parent's children array
+  const index = parentNode.children.findIndex(child => normalizePath(child.path) === normalizedFilePath);
+  if (index > -1) {
+    parentNode.children.splice(index, 1);
+  } else {
+     console.error(`[removeFileNode] Node not found in parent's children: ${normalizedFilePath}`);
+     // Continue removal process anyway, as the node might be detached elsewhere
+  }
+
+  // 5. Update the 'dependents' list of files the removed node imported
+  await updateDependentsAfterRemoval(nodeToRemove, activeFileTree); // Pass active tree
+
+
+  // 6. Update the 'dependencies' list of files that imported the removed node
+  await updateDependersAfterRemoval(nodeToRemove, activeFileTree); // Pass active tree
+
+
+  // 7. Recalculate importance for affected nodes (dependents and dependencies)
+  const affectedPaths = [
+      ...(dependenciesToRemoveFrom ?? []).map(d => normalizePath(d)),
+      ...(dependentsToUpdate ?? []).map(depPath => normalizePath(depPath))
+  ];
+  await recalculateImportanceForAffected(affectedPaths, activeFileTree, activeProjectRoot); // Pass active tree & root
+
+  // 8. Global state update is handled by the caller (mcp-server) after saving
+
+  console.error(`[removeFileNode] Successfully removed node: ${normalizedFilePath}`);
+}
+
+
+// --- Helper / Placeholder Functions for Incremental Updates ---
+
+/**
+ * Calculates the importance of a node, considering dependents and dependencies.
+ * This adapts the existing `calculateImportance` logic for targeted recalculation.
+ */
+function calculateNodeImportance(node: FileNode, projectRoot: string): number {
+   // Use existing initial calculation
+   let importance = calculateInitialImportance(node.path, projectRoot);
+
+   // Add importance based on number of dependents (files that import this file)
+   const dependentsCount = node.dependents?.length ?? 0;
+   if (dependentsCount > 0) {
+       importance += Math.min(dependentsCount, 3);
+   }
+
+   // Add importance based on number of local dependencies (files this file imports)
+   const localDepsCount = node.dependencies?.length ?? 0;
+   if (localDepsCount > 0) {
+       importance += Math.min(localDepsCount, 2);
+   }
+
+   // Add importance based on number of package dependencies
+   const pkgDeps = node.packageDependencies ?? [];
+   if (pkgDeps.length > 0) {
+       const sdkDeps = pkgDeps.filter(dep => dep.name?.includes('@modelcontextprotocol/sdk'));
+       const otherDeps = pkgDeps.filter(dep => !dep.name?.includes('@modelcontextprotocol/sdk'));
+       importance += Math.min(sdkDeps.length, 2); // SDK dependencies are more important
+       importance += Math.min(otherDeps.length, 1); // Other package dependencies
+   }
+
+   // Cap importance at 10
+   return Math.min(10, Math.max(0, Math.round(importance)));
+}
+
+/**
+ * Updates the 'dependents' list of nodes that the new node imports.
+ * @param newNode The node that was just added.
+ * @param activeFileTree The tree to search within.
+ */
+async function updateDependentsForNewNode(newNode: FileNode, activeFileTree: FileNode): Promise<void> {
+   console.error(`[updateDependentsForNewNode] Updating dependents for new node ${newNode.path}`);
+   // Removed reliance on getConfig()
+
+   // Ensure dependencies is an array
+   for (const depPath of (newNode.dependencies ?? [])) {
+       const depNode = findNodeByPath(activeFileTree, depPath); // depPath is already string
+       if (depNode && !depNode.isDirectory) {
+           // Ensure dependents is an array
+           if (!depNode.dependents) {
+              depNode.dependents = [];
+           }
+           if (!depNode.dependents.includes(newNode.path)) {
+               depNode.dependents.push(newNode.path);
+               console.error(`[updateDependentsForNewNode] Added ${newNode.path} as dependent for ${depNode.path}`);
+           }
+       } else {
+          // console.warn(`[updateDependentsForNewNode] Dependency node not found or is directory: ${depPath}`);
+       }
+   }
+   // Package dependencies don't have dependents lists in our model
+}
+
+/**
+ * Updates the 'dependents' list of nodes that the removed node imported.
+ * @param removedNode The node that was removed.
+ * @param activeFileTree The tree to search within.
+ */
+async function updateDependentsAfterRemoval(removedNode: FileNode, activeFileTree: FileNode): Promise<void> {
+   console.error(`[updateDependentsAfterRemoval] Updating dependents after removing ${removedNode.path}`);
+    // Removed reliance on getConfig()
+
+    // Ensure dependencies is an array
+    for (const depPath of (removedNode.dependencies ?? [])) {
+        const depNode = findNodeByPath(activeFileTree, depPath); // depPath is string
+        if (depNode && !depNode.isDirectory) {
+            // Ensure dependents is an array before searching/splicing
+            if (depNode.dependents) {
+                const index = depNode.dependents.indexOf(removedNode.path);
+                if (index > -1) {
+                    depNode.dependents.splice(index, 1);
+                    console.error(`[updateDependentsAfterRemoval] Removed ${removedNode.path} from dependents of ${depNode.path}`);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Updates the 'dependencies' list of nodes that imported the removed node.
+ * @param removedNode The node that was removed.
+ * @param activeFileTree The tree to search within.
+ */
+async function updateDependersAfterRemoval(removedNode: FileNode, activeFileTree: FileNode): Promise<void> {
+   console.error(`[updateDependersAfterRemoval] Updating dependers after removing ${removedNode.path}`);
+   // Removed reliance on getConfig()
+
+   // Ensure dependents is an array
+   for (const dependentPath of (removedNode.dependents ?? [])) {
+       const dependerNode = findNodeByPath(activeFileTree, dependentPath);
+       if (dependerNode && !dependerNode.isDirectory) {
+           // Ensure dependencies is an array before searching/splicing
+           if (dependerNode.dependencies) {
+               const normalizedRemovedPath = normalizePath(removedNode.path);
+               const index = dependerNode.dependencies.findIndex(d => normalizePath(d) === normalizedRemovedPath);
+               if (index > -1) {
+                   dependerNode.dependencies.splice(index, 1);
+                   console.error(`[updateDependersAfterRemoval] Removed dependency on ${removedNode.path} from ${dependerNode.path}`);
+               }
+           }
+       }
+   }
+}
+
+
+/**
+ * Recalculates importance for a specific set of affected nodes.
+ * @param affectedPaths Array of absolute paths for nodes needing recalculation.
+ * @param activeFileTree The tree to search/update within.
+ * @param activeProjectRoot The project root directory.
+ */
+async function recalculateImportanceForAffected(
+    affectedPaths: string[],
+    activeFileTree: FileNode,
+    activeProjectRoot: string
+): Promise<void> {
+  console.error(`[recalculateImportanceForAffected] Recalculating importance for paths:`, affectedPaths);
+  // Removed reliance on getConfig()
+
+  const uniquePaths = [...new Set(affectedPaths)]; // Ensure uniqueness
+
+  for (const filePath of uniquePaths) {
+    const node = findNodeByPath(activeFileTree, filePath);
+    if (node && !node.isDirectory) {
+       const oldImportance = node.importance;
+       // Use the corrected importance calculation function
+       node.importance = calculateNodeImportance(node, activeProjectRoot);
+       if(oldImportance !== node.importance) {
+          console.error(`[recalculateImportanceForAffected] Importance for ${node.path} changed from ${oldImportance} to ${node.importance}`);
+          // Potential future enhancement: trigger recursive recalculation if importance changed significantly
+       }
+    } else {
+       // console.warn(`[recalculateImportanceForAffected] Node not found or is directory during recalculation: ${filePath}`);
+    }
+  }
+}
+
+
+// --- End of New Functions ---
+
+/**
+ * Recursively calculates importance scores for all file nodes in the tree.
+ * Uses calculateNodeImportance for individual node calculation.
+ */

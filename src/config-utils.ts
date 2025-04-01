@@ -1,12 +1,25 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { z } from 'zod';
-import { Config } from './types.js';
+import { Config, FileWatchingConfig } from './types.js';
+
+// Define the FileWatchingConfig schema
+const FileWatchingSchema = z.object({
+  enabled: z.boolean().default(false),
+  debounceMs: z.number().int().positive().default(300),
+  ignoreDotFiles: z.boolean().default(true),
+  autoRebuildTree: z.boolean().default(true),
+  maxWatchedDirectories: z.number().int().positive().default(1000),
+  watchForNewFiles: z.boolean().default(true),
+  watchForDeleted: z.boolean().default(true),
+  watchForChanged: z.boolean().default(true)
+}).optional();
 
 // Define the config schema
 const ConfigSchema = z.object({
   baseDirectory: z.string(),
   excludePatterns: z.array(z.string()),
+  fileWatching: FileWatchingSchema,
   version: z.string()
 });
 
@@ -16,6 +29,16 @@ type ValidateConfig = z.infer<typeof ConfigSchema> extends Config ? true : false
 const DEFAULT_CONFIG: Config = {
   baseDirectory: "",
   excludePatterns: [],
+  fileWatching: {
+    enabled: false,
+    debounceMs: 300,
+    ignoreDotFiles: true,
+    autoRebuildTree: true,
+    maxWatchedDirectories: 1000,
+    watchForNewFiles: true,
+    watchForDeleted: true,
+    watchForChanged: true
+  },
   version: "1.0.0"
 };
 

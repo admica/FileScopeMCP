@@ -28,6 +28,13 @@ This MCP server analyzes your codebase to identify the most important files base
   - HTML output with embedded rendering including theme toggle and responsive design
   - Customize diagram depth, filter by importance, and adjust layout options
 
+- **File Watching**
+  - Monitor file system changes in real-time
+  - Auto-rebuild dependency tree when files change
+  - Configurable debounce to handle rapid changes
+  - Filter which types of events to watch (add, change, delete)
+  - Ignore specific files or directories with exclude patterns
+
 - **File Summaries**
   - Add human or AI-generated summaries to files
   - Retrieve stored summaries to quickly understand file purpose
@@ -97,6 +104,12 @@ The MCP server exposes the following tools:
 - **get_file_summary**: Get the stored summary of a specific file
 - **set_file_summary**: Set or update the summary of a specific file
 
+### File Watching
+
+- **toggle_file_watching**: Toggle file watching on/off
+- **get_file_watching_status**: Get the current status of file watching
+- **update_file_watching_config**: Update file watching configuration
+
 ### Diagram Generation
 
 - **generate_diagram**: Create Mermaid diagrams with customizable options
@@ -156,6 +169,29 @@ The MCP server exposes the following tools:
 3. Customize the diagram layout:
    ```
    generate_diagram(style: "dependency", layout: { direction: "LR", nodeSpacing: 50, rankSpacing: 70 }, outputPath: "diagrams/dependencies", outputFormat: "html")
+   ```
+
+### Using File Watching
+
+1. Enable file watching for your project:
+   ```
+   toggle_file_watching()
+   ```
+
+2. Check the current file watching status:
+   ```
+   get_file_watching_status()
+   ```
+
+3. Update file watching configuration:
+   ```
+   update_file_watching_config(config: { 
+     debounceMs: 500, 
+     autoRebuildTree: true,
+     watchForNewFiles: true,
+     watchForDeleted: true,
+     watchForChanged: true
+   })
    ```
 
 ## How It Works

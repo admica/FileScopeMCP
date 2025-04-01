@@ -10,9 +10,10 @@ import {
   ToolResponse, 
   FileTreeConfig,
   FileTreeStorage,
-  MermaidDiagramConfig
+  MermaidDiagramConfig,
+  FileWatchingConfig
 } from "./types.js";
-import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath } from "./file-utils.js";
+import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode } from "./file-utils.js";
 import { 
   createFileTreeConfig, 
   saveFileTree,
@@ -25,12 +26,17 @@ import {
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
-import { loadConfig } from './config-utils.js';
+import { loadConfig, saveConfig } from './config-utils.js';
+import { FileWatcher, FileEventType } from './file-watcher.js';
 
 // Initialize server state
 let fileTree: FileNode | null = null;
 let currentConfig: FileTreeConfig | null = null;
 let DEFAULT_CONFIG: FileTreeConfig;
+let fileWatcher: FileWatcher | null = null;
+// Map to hold debounce timers for file events
+const fileEventDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
+const DEBOUNCE_DURATION_MS = 2000; // 2 seconds
 
 // Check if we're running as an MCP server for Cursor
 function isRunningAsMcpServer(): boolean {
@@ -174,6 +180,129 @@ async function initializeServer(): Promise<void> {
   } catch (error) {
     console.error("Failed to build default file tree:", error);
   }
+  
+  // Initialize file watcher if enabled in config
+  const fileWatchingConfig = getConfig()?.fileWatching;
+  if (fileWatchingConfig?.enabled) {
+    console.error('File watching is enabled in config, initializing watcher...');
+    await initializeFileWatcher();
+  } else {
+    console.error('File watching is disabled in config');
+  }
+}
+
+/**
+ * Initialize the file watcher
+ */
+async function initializeFileWatcher(): Promise<void> {
+  try {
+    const config = getConfig();
+    if (!config || !config.fileWatching) {
+      console.error('Cannot initialize file watcher: config or fileWatching not available');
+      return;
+    }
+    
+    // Stop any existing watcher
+    if (fileWatcher) {
+      fileWatcher.stop();
+      fileWatcher = null;
+    }
+    
+    // Create and start a new watcher
+    fileWatcher = new FileWatcher(config.fileWatching, getProjectRoot());
+    fileWatcher.addEventCallback((filePath, eventType) => handleFileEvent(filePath, eventType));
+    fileWatcher.start();
+    
+    console.error('File watcher initialized and started successfully');
+  } catch (error) {
+    console.error('Error initializing file watcher:', error);
+  }
+}
+
+/**
+ * Handle a file event
+ * @param filePath The path of the file that changed (already normalized by watcher)
+ * @param eventType The type of event
+ */
+async function handleFileEvent(filePath: string, eventType: FileEventType): Promise<void> {
+  console.error(`[MCP Server] Handling file event: ${eventType} for ${filePath}`);
+  
+  // Use the module-level active config and tree
+  const activeConfig = currentConfig;
+  const activeTree = fileTree;
+  const projectRoot = getProjectRoot();
+  const fileWatchingConfig = getConfig()?.fileWatching;
+
+  if (!activeConfig || !activeTree || !projectRoot || !fileWatchingConfig) {
+    console.error('[MCP Server] Ignoring file event: Active config, tree, project root, or watching config not available.');
+    return;
+  }
+  
+  if (!fileWatchingConfig.autoRebuildTree) {
+    console.error('[MCP Server] Ignoring file event: Auto-rebuild is disabled.');
+    return;
+  }
+
+  // --- Debounce Logic --- 
+  const debounceKey = `${filePath}:${eventType}`;
+  const existingTimer = fileEventDebounceTimers.get(debounceKey);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  const newTimer = setTimeout(async () => {
+    fileEventDebounceTimers.delete(debounceKey); // Remove timer reference once it executes
+    console.error(`[MCP Server] Debounced processing for: ${eventType} - ${filePath}`);
+
+    try {
+      let updated = false;
+      switch (eventType) {
+        case 'add':
+          if (fileWatchingConfig.watchForNewFiles) {
+            console.error(`[MCP Server] Calling addFileNode for ${filePath}`);
+            await addFileNode(filePath, activeTree, projectRoot);
+            updated = true;
+          }
+          break;
+          
+        case 'change':
+          // TODO: Implement incremental update for changed files if needed
+          if (fileWatchingConfig.watchForChanged) {
+             console.error(`[MCP Server] CHANGE detected for ${filePath}, incremental handling not implemented. Triggering full rebuild as fallback.`);
+             // Fallback to full rebuild for now
+             await buildFileTree(activeConfig);
+             updated = true; // Assume tree changed
+          }
+          break;
+          
+        case 'unlink':
+          if (fileWatchingConfig.watchForDeleted) {
+             console.error(`[MCP Server] Calling removeFileNode for ${filePath}`);
+             await removeFileNode(filePath, activeTree, projectRoot);
+             updated = true;
+          }
+          break;
+      }
+
+      // Save the potentially modified tree if an add/remove/rebuild happened
+      if (updated) {
+        // We need the latest references in case buildFileTree was called
+        const latestActiveConfig = currentConfig;
+        const latestActiveTree = fileTree;
+        if(latestActiveConfig && latestActiveTree){
+            console.error(`[MCP Server] Saving updated file tree after ${eventType} event.`);
+            await saveFileTree(latestActiveConfig, latestActiveTree);
+        } else {
+            console.error(`[MCP Server] Error saving tree after ${eventType} event: active config or tree became null.`);
+        }
+      }
+
+    } catch (error) {
+      console.error(`[MCP Server] Error processing debounced file event ${eventType} for ${filePath}:`, error);
+    }
+  }, DEBOUNCE_DURATION_MS);
+
+  fileEventDebounceTimers.set(debounceKey, newTimer);
 }
 
 /**
@@ -759,12 +888,15 @@ server.tool("recalculate_importance", "Recalculate importance values for all fil
   if (!fileTree || !currentConfig) {
     await buildFileTree(DEFAULT_CONFIG);
   }
-  
-  // Recalculate importance values
+
+  console.error('Recalculating importance values...');
+  buildDependentMap(fileTree!);
   calculateImportance(fileTree!);
   
   // Save the updated tree
-  await saveFileTree(currentConfig!, fileTree!);
+  if (currentConfig) {
+    await saveFileTree(currentConfig, fileTree!);
+  }
   
   // Count files with non-zero importance
   const allFiles = getAllFileNodes(fileTree!);
@@ -777,7 +909,114 @@ server.tool("recalculate_importance", "Recalculate importance values for all fil
   });
 });
 
-// Add a debug tool to list all file paths
+// File watching tools
+server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
+  const config = getConfig();
+  if (!config) {
+    return createMcpResponse('No configuration loaded', true);
+  }
+  
+  // Create default file watching config if it doesn't exist
+  if (!config.fileWatching) {
+    config.fileWatching = {
+      enabled: true,
+      debounceMs: 300,
+      ignoreDotFiles: true,
+      autoRebuildTree: true,
+      maxWatchedDirectories: 1000,
+      watchForNewFiles: true,
+      watchForDeleted: true,
+      watchForChanged: true
+    };
+  } else {
+    // Toggle the enabled status
+    config.fileWatching.enabled = !config.fileWatching.enabled;
+  }
+  
+  // Save the updated config
+  setConfig(config);
+  await saveConfig(config);
+  
+  if (config.fileWatching.enabled) {
+    // Start watching
+    await initializeFileWatcher();
+    return createMcpResponse('File watching enabled');
+  } else {
+    // Stop watching
+    if (fileWatcher) {
+      fileWatcher.stop();
+      fileWatcher = null;
+    }
+    return createMcpResponse('File watching disabled');
+  }
+});
+
+server.tool("get_file_watching_status", "Get the current status of file watching", async () => {
+  const config = getConfig();
+  const status = {
+    enabled: config?.fileWatching?.enabled || false,
+    isActive: fileWatcher !== null && fileWatcher !== undefined,
+    config: config?.fileWatching || null
+  };
+  
+  return createMcpResponse(status);
+});
+
+server.tool("update_file_watching_config", "Update file watching configuration", {
+  config: z.object({
+    enabled: z.boolean().optional(),
+    debounceMs: z.number().int().positive().optional(),
+    ignoreDotFiles: z.boolean().optional(),
+    autoRebuildTree: z.boolean().optional(),
+    maxWatchedDirectories: z.number().int().positive().optional(),
+    watchForNewFiles: z.boolean().optional(),
+    watchForDeleted: z.boolean().optional(),
+    watchForChanged: z.boolean().optional()
+  }).describe("File watching configuration options")
+}, async (params: { config: Partial<FileWatchingConfig> }) => {
+  const config = getConfig();
+  if (!config) {
+    return createMcpResponse('No configuration loaded', true);
+  }
+  
+  // Create or update file watching config
+  if (!config.fileWatching) {
+    config.fileWatching = {
+      enabled: false,
+      debounceMs: 300,
+      ignoreDotFiles: true,
+      autoRebuildTree: true,
+      maxWatchedDirectories: 1000,
+      watchForNewFiles: true,
+      watchForDeleted: true,
+      watchForChanged: true,
+      ...params.config
+    };
+  } else {
+    config.fileWatching = {
+      ...config.fileWatching,
+      ...params.config
+    };
+  }
+  
+  // Save the updated config
+  setConfig(config);
+  await saveConfig(config);
+  
+  // Restart watcher if it's enabled
+  if (config.fileWatching.enabled) {
+    await initializeFileWatcher();
+  } else if (fileWatcher) {
+    fileWatcher.stop();
+    fileWatcher = null;
+  }
+  
+  return createMcpResponse({
+    message: 'File watching configuration updated',
+    config: config.fileWatching
+  });
+});
+
 server.tool("debug_list_all_files", "List all file paths in the current file tree", async () => {
   if (!fileTree) {
     await buildFileTree(DEFAULT_CONFIG);

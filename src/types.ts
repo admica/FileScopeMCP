@@ -1,9 +1,22 @@
 import { getProjectRoot } from './global-state.js';
 
+// File watching configuration
+export interface FileWatchingConfig {
+  enabled: boolean;               // Master switch for file watching
+  debounceMs: number;             // Debounce time for file change events
+  ignoreDotFiles: boolean;        // Whether to ignore files/dirs starting with a dot
+  autoRebuildTree: boolean;       // Whether to auto-rebuild the tree on file changes
+  maxWatchedDirectories: number;  // Limit to prevent watching too many directories
+  watchForNewFiles: boolean;      // Watch for file additions
+  watchForDeleted: boolean;       // Watch for file deletions
+  watchForChanged: boolean;       // Watch for file modifications
+}
+
 // Configuration type for the application
 export interface Config {
   baseDirectory: string;
   excludePatterns: string[];
+  fileWatching?: FileWatchingConfig;
   version: string;
 }
 
