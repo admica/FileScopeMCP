@@ -42,6 +42,11 @@ if errorlevel 1 (
 
 echo.
 echo --- Building TypeScript...
+
+:: Clean previous build output
+echo --- Cleaning previous build output (dist directory)...
+if exist dist ( rmdir /s /q dist )
+
 echo --- Checking for tsc.js...
 if exist "node_modules\typescript\bin\tsc.js" (
     echo --- Found tsc.js, running build...
@@ -54,7 +59,7 @@ if exist "node_modules\typescript\bin\tsc.js" (
     echo --- tsc.js not found, listing bin contents...
     dir "node_modules\typescript\bin" 2>nul || echo Bin directory missing.
     echo --- Falling back to npx tsc...
-    call "%NPM_CMD%" exec -- tsc
+    call "%NPM_CMD%" exec -- tsc -p tsconfig.json
     if errorlevel 1 (
         echo ERROR: Build failed with npx. Check tsconfig.json or TypeScript errors above.
         exit /b 1
