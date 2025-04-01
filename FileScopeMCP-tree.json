@@ -3,7 +3,7 @@
     "filename": "FileScopeMCP-tree.json",
     "baseDirectory": "C:/Users/admica/code/mcp/FileScopeMCP",
     "projectRoot": "C:/Users/admica/code/mcp/FileScopeMCP",
-    "lastUpdated": "2025-04-01T17:13:41.553Z"
+    "lastUpdated": "2025-04-01T19:15:12.115Z"
   },
   "fileTree": {
     "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP",
@@ -61,6 +61,12 @@
         "dependencies": [],
         "packageDependencies": [],
         "dependents": []
+      },
+      {
+        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\diagrams",
+        "name": "diagrams",
+        "isDirectory": true,
+        "children": []
       },
       {
         "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist",
@@ -406,7 +412,7 @@
             "dependents": [
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
             ],
-            "summary": "This file defines configuration schemas using Zod and provides functions to load and save the application's settings from a JSON file."
+            "summary": "Defines Zod schemas for configuration validation (`Config`, `FileWatchingConfig`). Exports `loadConfig` to read/validate `config.json` (with defaults and error handling) and `saveConfig` to write the config file."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
@@ -449,7 +455,7 @@
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts",
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
             ],
-            "summary": "This file provides core utilities for scanning directories, analyzing file dependencies, calculating file importance scores, normalizing paths, and managing the file tree structure, including incremental updates for added/removed files."
+            "summary": "Provides core file system utilities: path normalization, recursive directory scanning (`scanDirectory`) to build the file tree, dependency extraction (local & package), initial importance calculation, reverse dependency mapping, importance recalculation, node searching, and incremental tree updates (`addFileNode`, `removeFileNode`)."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts",
@@ -475,7 +481,7 @@
             "dependents": [
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
             ],
-            "summary": "This file defines a FileWatcher class using chokidar to monitor file system changes (add, change, delete) within a specified directory, applying configured ignore patterns and notifying registered callbacks about detected events."
+            "summary": "Implements a `FileWatcher` class using `chokidar` to monitor file system changes (add, change, unlink) within the project's base directory. It respects configuration for ignored patterns and specific event types. Allows registering callbacks to react to detected file events. Includes basic error handling and restart logic."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
@@ -493,7 +499,7 @@
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
             ],
-            "summary": "This file provides simple global state management for the application, specifically storing and providing access to the project's root directory and the loaded configuration object."
+            "summary": "Manages simple global state for the MCP server, specifically the project root directory (`_projectRoot`) and the loaded application configuration (`_config`). Provides getter and setter functions (`setProjectRoot`, `getProjectRoot`, `setConfig`, `getConfig`)."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\grouping-rules.ts",
@@ -510,7 +516,7 @@
               }
             ],
             "dependents": [],
-            "summary": "This file defines strategies and rules for automatically grouping related file nodes based on directory structure, package boundaries, or dependency clusters, intended for use in diagram generation."
+            "summary": "Defines default grouping logic for diagram generation. Includes functions to group `FileNode` arrays by directory (`groupByDirectory`), nearest `package.json` (`groupByPackage`), or dependency clusters (`groupByDependencyCluster`). Also includes condition functions (`hasMultiplePackages`, `hasComplexDependencies`) to determine when to apply specific grouping rules. Exports `defaultGroupingRules` array and individual functions."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\layout-engine.ts",
@@ -522,7 +528,7 @@
             ],
             "packageDependencies": [],
             "dependents": [],
-            "summary": "This file provides functions to analyze graph metrics like width, depth, and density, and determine an optimal layout strategy (direction, spacing) for generating Mermaid diagrams based on these metrics and user configuration."
+            "summary": "Provides functions to analyze the structure of a file tree (`calculateGraphWidth`, `calculateGraphDepth`, `calculateDensity`, `findLevels`) and determine an optimal Mermaid layout strategy (`determineOptimalLayout`) based on these metrics (width, depth, density, clusters). Allows overriding with user configuration."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
@@ -582,7 +588,7 @@
               }
             ],
             "dependents": [],
-            "summary": "This file initializes and runs the MCP server, defines the available tools (like listing files, managing trees, setting summaries, generating diagrams), handles incoming requests, manages the active file tree state, and orchestrates interactions with other utility modules like file analysis, storage, and watching."
+            "summary": "The core MCP server logic. Initializes the server, loads configuration, builds/loads the file tree using `file-utils` and `storage-utils`. Implements the `McpServer` from the SDK, defining tools for tree management (create, select, list, delete), file information (importance, summary, content), diagram generation (`generate_diagram` using `mermaid-generator`), and file watching (`FileWatcher`). Handles stdio transport and JSON-RPC communication. Includes global state management via `global-state`."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
@@ -601,7 +607,7 @@
             "dependents": [
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
             ],
-            "summary": "This file defines a MermaidGenerator class responsible for traversing the file tree, collecting nodes and edges based on various configuration options (style, depth, importance, dependencies), and generating Mermaid diagram syntax to visualize the project structure or dependencies."
+            "summary": "Defines the `MermaidGenerator` class responsible for creating Mermaid diagram code from a `FileNode` tree. It takes configuration options (style, depth, importance, etc.), collects relevant nodes and edges based on the chosen style (`collectNodesAndEdges`), sanitizes labels (`sanitizeLabel`), handles package grouping, applies styling (colors, shapes), and generates the final Mermaid syntax string along with diagram statistics."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
@@ -630,7 +636,7 @@
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
             ],
-            "summary": "This file handles the persistence logic for file tree data, including creating configurations, saving and loading file trees to/from JSON files, listing saved trees, and providing utilities for path normalization and finding/updating nodes within a loaded tree."
+            "summary": "Handles the persistence of file trees. Includes functions for normalizing and resolving paths (`normalizeAndResolvePath`), creating file tree configurations (`createFileTreeConfig`), saving (`saveFileTree`) and loading (`loadFileTree`) file trees to/from JSON files, listing saved trees (`listSavedFileTrees`), and updating/retrieving specific nodes within a loaded tree (`updateFileNode`, `getFileNode`). Uses the project root from global state."
           },
           {
             "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
@@ -652,7 +658,7 @@
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
               "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts"
             ],
-            "summary": "This file defines the core TypeScript interfaces and classes used throughout the application, including configurations for file watching and diagrams, the structure of file nodes (FileNode), package dependencies, and storage formats."
+            "summary": "Defines the core TypeScript types and classes used throughout the application. Includes `FileNode` (representing files/directories in the tree), `PackageDependency`, `FileTreeConfig`, `FileTreeStorage`, `MermaidDiagramConfig`, `MermaidDiagram`, `MermaidDiagramStats`, `MermaidDiagramStyle`, `FileWatchingConfig`, `Config`, `GroupingRule`, and `ToolResponse`. Uses classes instead of interfaces for better type safety during compilation."
           }
         ]
       },
@@ -663,7 +669,8 @@
         "importance": 3,
         "dependencies": [],
         "packageDependencies": [],
-        "dependents": []
+        "dependents": [],
+        "summary": "TypeScript configuration file (`tsconfig.json`). Specifies compiler options: targets ES2020, uses ESNext modules with Node resolution, sets output (`dist`) and root (`src`) directories, enables strict type checking, allows ES module interop, and skips library checks. Includes all files within the `src` directory for compilation."
       }
     ]
   }
