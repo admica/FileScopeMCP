@@ -44,7 +44,7 @@ export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);
 }
 
-const SUPPORTED_EXTENSIONS = [".py", ".c", ".cpp", ".h", ".rs", ".lua", ".js", ".jsx", ".ts", ".tsx", ".zig"];
+const SUPPORTED_EXTENSIONS = [".py", ".c", ".cpp", ".h", ".rs", ".lua", ".js", ".jsx", ".ts", ".tsx", ".zig", ".php", ".blade.php", ".phtml"];
 const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.js': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
   '.jsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
@@ -57,6 +57,9 @@ const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.rs': /use\s+[\w:]+|mod\s+\w+/g,
   '.lua': /require\s*\(['"][^'"]+['"]\)/g,
   '.zig': /@import\s*\(['"][^'"]+['"]\)|const\s+[\w\s,{}]+\s*=\s*@import\s*\(['"][^'"]+['"]\)/g,
+  '.php': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g,
+  '.blade.php': /@(?:include|extends|component)\s*\(\s*["']([^"']+)["']\s*\)|@(?:include|extends|component)\s*\(\s*["']([^"']+)["']\s*,\s*\[.*?\]\s*\)|@(?:include|extends|component)\s*\(["']([^"']+)["']\)/g,
+  '.phtml': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g
 };
 
 // Helper to resolve TypeScript/JavaScript import paths
@@ -107,8 +110,24 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
     case '.jsx':
       importance += 2;
       break;
+    case '.php':
+      // PHP controllers and models are highly important
+      if (fileName.toLowerCase().includes('controller') || fileName.toLowerCase().includes('model')) {
+        importance += 3;
+      } else {
+        importance += 2;
+      }
+      break;
+    case '.blade.php':
+      // Blade layout files are more important than regular views
+      if (fileName.toLowerCase().includes('layout') || fileName.toLowerCase().includes('app')) {
+        importance += 3;
+      } else {
+        importance += 2;
+      }
+      break;
     case '.json':
-      if (fileName === 'package' || fileName === 'tsconfig') {
+      if (fileName === 'package' || fileName === 'tsconfig' || fileName === 'composer') {
         importance += 3;
       } else {
         importance += 1;
@@ -126,14 +145,29 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
   }
 
   // Importance by location
-  if (parts[0] === 'src') {
+  if (parts[0] === 'src' || parts[0] === 'app') {
     importance += 2;
   } else if (parts[0] === 'test' || parts[0] === 'tests') {
     importance += 1;
   }
 
+  // Laravel-specific directory importance
+  if (parts.includes('app')) {
+    if (parts.includes('Http') && parts.includes('Controllers')) {
+      importance += 2;
+    } else if (parts.includes('Models')) {
+      importance += 2;
+    } else if (parts.includes('Providers')) {
+      importance += 2;
+    }
+  }
+
   // Importance by name significance
-  const significantNames = ['index', 'main', 'server', 'app', 'config', 'types', 'utils'];
+  const significantNames = [
+    'index', 'main', 'server', 'app', 'config', 'types', 'utils',
+    'kernel', 'provider', 'middleware', 'service', 'repository',
+    'controller', 'model', 'layout', 'master'
+  ];
   if (significantNames.includes(fileName.toLowerCase())) {
     importance += 2;
   }
