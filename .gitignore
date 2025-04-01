@@ -22,3 +22,4 @@ FileScopeMCP-tree.json
 *.svg
 *.pdf
 *.csv
+run.sh
