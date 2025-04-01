@@ -18,9 +18,12 @@
     "**/.cursor",
     "**/package-lock.json",
     "**/.env*",
+    "**/*.gradle",
+    "**/*-tree.json",
     "**/*.pyc",
     "**/*.pyo",
     "**/__pycache__/**",
+    "**/venv/**",
     "**/*.Zone.Identifier",
     "**/.yarn/**",
     "**/target/**",
@@ -35,8 +38,7 @@
     "**/*.js.map",
     "**/*.ts.map",
     "**/venv/**",
-    "**/*.gradle/**",
-    "**/FileScopeMCP-tree.json"
+    "**/*.gradle"
   ],
   "fileWatching": {
     "enabled": true,
@@ -49,5 +51,5 @@
     "watchForChanged": true
   },
   "baseDirectory": "",
-  "version": "2.3.0"
+  "version": "2.5.0"
 }

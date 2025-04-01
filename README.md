@@ -71,6 +71,8 @@ This MCP server analyzes your codebase to identify the most important files base
    build.sh
    ```
 3. Copy the generated mcp.json configuration to your project's `.cursor` directory:
+
+   For Windows:
    ```json
    {
      "mcpServers": {
@@ -82,6 +84,21 @@ This MCP server analyzes your codebase to identify the most important files base
      }
    }
    ```
+   
+   If your Cursor project is in WSL:
+   ```json
+   {
+     "mcpServers": {
+       "FileScopeMCP": {
+       "command": "wsl",
+       "args": ["-d", "Ubuntu-24.04", "/home/admica/FileScopeMCP/run.sh", "--base-dir=/some/path"],
+       "transport": "stdio",
+       "disabled": false,
+       "alwaysAllow": []
+       }
+     }
+    }
+    ```
 4. Update the arg path --base-dir to your project's base path.
 
 ## How It Works
