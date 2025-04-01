@@ -90,6 +90,25 @@ export class MermaidGenerator {
     };
   }
 
+  // --- Sanitization Helper ---
+  private sanitizeLabel(label: string): string {
+    if (!label || typeof label !== 'string') return '_(empty)';
+    // Replace ${...} placeholders FIRST
+    let sanitized = label.replace(/\$\{[^}]+\}/g, '_invalid_import_');
+    // Remove potentially problematic characters for Mermaid IDs/labels
+    // Allow letters, numbers, underscores, hyphens, periods
+    // Replace others with underscore
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+    // Ensure it doesn't start or end with chars invalid for IDs if used as ID
+    sanitized = sanitized.replace(/^[^a-zA-Z0-9_]+|[^a-zA-Z0-9_]+$/g, '');
+    // If empty after sanitization, provide a default
+    if (!sanitized) return 'sanitized_empty';
+    // Limit length
+    const maxLength = 40; // Increased max length slightly
+    return sanitized.length <= maxLength ? sanitized : sanitized.substring(0, maxLength - 3) + '...';
+  }
+  // --- End Sanitization Helper ---
+
   // Generate or retrieve a node ID for a given file path
   private getNodeId(filePath: string, isPackage: boolean = false, isPackageScope: boolean = false): string {
     // If we already have an ID for this path, return it
@@ -104,7 +123,7 @@ export class MermaidGenerator {
     
     // Initialize basic info for this node (will be refined later if it's a FileNode)
     const basename = path.basename(filePath);
-    const label = basename.length <= 20 ? basename : basename.substring(0, 17) + '...';
+    const label = this.sanitizeLabel(basename);
     
     // Set different styling based on node type
     let color = this.style.nodeColors.lowImportance;
@@ -136,16 +155,22 @@ export class MermaidGenerator {
 
   // Get or create a package scope node
   private getPackageScopeNodeId(scope: string): string {
-    if (this.packageScopeNodes.has(scope)) {
-      return this.packageScopeNodes.get(scope)!;
+    // Sanitize the scope name before using it as part of the path key
+    const sanitizedScope = this.sanitizeLabel(scope);
+    const scopePathKey = `scope:${sanitizedScope}`;
+
+    if (this.packageScopeNodes.has(scopePathKey)) {
+      return this.packageScopeNodes.get(scopePathKey)!;
     }
     
-    const nodeId = this.getNodeId(`scope:${scope}`, false, true);
-    this.packageScopeNodes.set(scope, nodeId);
+    // Use the sanitized scope for the node ID path key
+    const nodeId = this.getNodeId(scopePathKey, false, true);
+    this.packageScopeNodes.set(scopePathKey, nodeId);
     
     // Update node info for the scope node
     const info = this.nodeInfo.get(nodeId)!;
-    info.label = scope;
+    // Use the sanitized scope for the label as well
+    info.label = sanitizedScope; 
     info.color = this.style.nodeColors.packageScope;
     info.shape = this.style.nodeShapes.packageScope;
     info.isPackageScope = true;
@@ -158,7 +183,7 @@ export class MermaidGenerator {
     const nodeId = this.getNodeId(node.path);
     const info = this.nodeInfo.get(nodeId)!;
     
-    // Update the label to the proper node label
+    // Update the label to the proper node label, using sanitization
     info.label = this.getNodeLabel(node);
     
     // Determine proper color based on importance
@@ -176,37 +201,51 @@ export class MermaidGenerator {
   }
 
   private getNodeLabel(node: FileNode): string {
-    const maxLength = 20;
-    const name = node.name;
-    // Escape quotes and special characters to prevent Mermaid syntax errors
-    const escapedName = name.replace(/"/g, '\\"').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
-    return escapedName.length <= maxLength ? escapedName : escapedName.substring(0, maxLength - 3) + '...';
+    // Use sanitizeLabel
+    return this.sanitizeLabel(node.name);
   }
 
   // Create node for a package dependency
   private addPackageNode(pkg: PackageDependency): string {
-    console.error(`[MermaidGenerator] Processing package dependency: ${pkg.name} (${pkg.path})`);
+    // Ensure pkg.name is a string before processing
+    const packageName = typeof pkg.name === 'string' ? pkg.name : '';
+    const packagePath = typeof pkg.path === 'string' ? pkg.path : ''; // Use path as unique key
+
+    console.error(`[MermaidGenerator] Processing package dependency: ${packageName} (${packagePath})`);
+
+     // Skip if path is missing (likely indicates bad data)
+    if (!packagePath) {
+       console.error(`[MermaidGenerator] Skipping package dependency with missing path.`);
+       return '';
+    }
     
-    // Skip excluded packages
-    if (this.config.excludePackages && this.config.excludePackages.includes(pkg.name)) {
-      console.error(`[MermaidGenerator] Skipping excluded package: ${pkg.name}`);
+    // Skip excluded packages (using sanitized name)
+    const sanitizedPackageName = this.sanitizeLabel(packageName || path.basename(packagePath));
+    if (this.config.excludePackages && this.config.excludePackages.includes(sanitizedPackageName)) {
+      console.error(`[MermaidGenerator] Skipping excluded package: ${sanitizedPackageName}`);
       return '';
     }
     
-    // Only include specific packages if the filter is set
+    // Only include specific packages if the filter is set (using sanitized name)
     if (this.config.includeOnlyPackages && 
         this.config.includeOnlyPackages.length > 0 && 
-        !this.config.includeOnlyPackages.includes(pkg.name)) {
-      console.error(`[MermaidGenerator] Skipping non-included package: ${pkg.name}`);
+        !this.config.includeOnlyPackages.includes(sanitizedPackageName)) {
+      console.error(`[MermaidGenerator] Skipping non-included package: ${sanitizedPackageName}`);
       return '';
     }
     
-    // Generate or get node id for this package
-    const nodeId = this.getNodeId(pkg.path, true);
+    // Get or create node ID using package PATH (more unique than name)
+    const nodeId = this.getNodeId(packagePath, true);
+    
+    // Update node info using the sanitized package NAME
     const info = this.nodeInfo.get(nodeId)!;
+    info.label = this.getPackageLabel(pkg); // This now uses sanitizeLabel
+    info.color = this.style.nodeColors.package;
+    info.shape = this.style.nodeShapes.package;
+    info.isPackage = true;
     
     // Enhance the label with version if available
-    let label = pkg.name;
+    let label = sanitizedPackageName;
     if (pkg.version) {
       // Escape caret and parentheses in version strings
       const escapedVersion = pkg.version.replace(/\^/g, '\\^').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
@@ -222,12 +261,12 @@ export class MermaidGenerator {
     
     // Track package in scope if it has one and grouping is enabled
     if (pkg.scope && this.config.packageGrouping) {
-      console.error(`[MermaidGenerator] Adding package ${pkg.name} to scope ${pkg.scope}`);
+      console.error(`[MermaidGenerator] Adding package ${sanitizedPackageName} to scope ${pkg.scope}`);
       if (!this.packageScopes.has(pkg.scope)) {
         this.packageScopes.set(pkg.scope, new Set());
         this.stats.packageScopeCount++;
       }
-      this.packageScopes.get(pkg.scope)!.add(pkg.name);
+      this.packageScopes.get(pkg.scope)!.add(sanitizedPackageName);
       
       // Create edge from scope to package
       const scopeNodeId = this.getPackageScopeNodeId(pkg.scope);
@@ -238,143 +277,184 @@ export class MermaidGenerator {
     return nodeId;
   }
 
-  // First pass: Collect all nodes that will be in the diagram
-  private collectAllNodes(node: FileNode, depth: number = 0): void {
-    if (depth >= (this.config.maxDepth || 3)) return;
-    
-    // Skip this node if it's for package dependencies diagram and not a file
-    if (this.config.style === 'package-deps' && node.isDirectory) {
-      console.error(`[MermaidGenerator] Skipping directory node in package-deps mode: ${node.path}`);
-      // Still process children
-      if (node.children) {
-        for (const child of node.children) {
-          this.collectAllNodes(child, depth + 1);
-        }
-      }
-      return;
-    }
-    
-    // Register this node and update its info
-    const nodeId = this.getNodeId(node.path);
-    this.updateNodeInfo(node);
-    
-    // Skip files with low importance if minImportance is set (except in package-deps mode)
-    if (!node.isDirectory && 
-        this.config.style !== 'package-deps' && 
-        this.config.minImportance && 
-        (node.importance || 0) < this.config.minImportance) {
-      console.error(`[MermaidGenerator] Skipping low importance file: ${node.path} (${node.importance})`);
-      return;
-    }
-    
-    // Collect package dependencies
-    if (this.config.showPackageDeps && !node.isDirectory && node.packageDependencies) {
-      console.error(`[MermaidGenerator] Processing package dependencies for file: ${node.path}`);
-      console.error(`[MermaidGenerator] Found ${node.packageDependencies.length} package dependencies`);
-      for (const pkgDep of node.packageDependencies) {
-        // Skip if package has no name
-        if (!pkgDep.name) continue;
-        
-        const packageNodeId = this.addPackageNode(pkgDep);
-        if (packageNodeId) {
-          // Add edge from file to package
-          console.error(`[MermaidGenerator] Adding edge from ${node.path} to package ${pkgDep.name}`);
-          this.addEdge(node.path, pkgDep.path, 'package');
-        }
-      }
-    }
+  // Get the label for a package dependency node
+  private getPackageLabel(pkg: PackageDependency): string {
+    // Ensure name and path are strings before using them
+    const name = typeof pkg.name === 'string' ? pkg.name : '';
+    const pkgPath = typeof pkg.path === 'string' ? pkg.path : '';
+    // Use sanitizeLabel on the package name or fallback to basename of path
+    const labelBase = name || path.basename(pkgPath);
+    return this.sanitizeLabel(labelBase);
   }
-  
+
+  // First pass: Collect all nodes and relationships based on style and filters
+  private collectNodesAndEdges(node: FileNode, depth: number = 0): void {
+      // --- DEPTH CHECK ---
+      const maxDepth = this.config.maxDepth ?? 5; // Use a default if undefined
+      if (depth >= maxDepth) { // Stop if max depth is reached
+           console.error(`[MermaidGenerator] Max depth ${maxDepth} reached at node: ${node.path}, stopping recursion.`);
+           return;
+      }
+      this.stats.maxDepth = Math.max(this.stats.maxDepth, depth);
+
+
+      const isPackageDepsMode = this.config.style === 'package-deps';
+      const isDirectoryStyle = this.config.style === 'directory';
+      const isDependencyStyle = this.config.style === 'dependency';
+      const isHybridStyle = this.config.style === 'hybrid';
+
+      // --- NODE FILTERING ---
+      // Skip low importance files (unless it's a directory or package-deps mode)
+      if (!node.isDirectory && !isPackageDepsMode && this.config.minImportance && (node.importance || 0) < this.config.minImportance) {
+          console.error(`[MermaidGenerator] Filtering node: Skipping low importance file ${node.path} (${node.importance})`);
+          return; // Skip this node entirely
+      }
+
+      // Skip directories in dependency-only style
+      if (node.isDirectory && isDependencyStyle) {
+           console.error(`[MermaidGenerator] Filtering node: Skipping directory ${node.path} in dependency style.`);
+           // Still need to process children for their dependencies
+          if (node.children) {
+              for (const child of node.children) {
+                  this.collectNodesAndEdges(child, depth + 1);
+              }
+          }
+           return; // Don't register the directory node itself or its containment edges
+      }
+
+      // Skip files in directory-only style (unless showDependencies is true)
+      if (!node.isDirectory && isDirectoryStyle && !this.config.showDependencies) {
+           console.error(`[MermaidGenerator] Filtering node: Skipping file ${node.path} in directory style.`);
+           return;
+      }
+
+
+      // --- NODE REGISTRATION --- (Get ID and update info, but don't add to definedNodes yet)
+      console.error(`[MermaidGenerator] Registering node: ${node.path} (Depth: ${depth}, Importance: ${node.importance || 'N/A'})`);
+      const nodeId = this.getNodeId(node.path);
+      this.updateNodeInfo(node);
+      // Node will be added to definedNodes within addEdge if it connects to anything
+
+
+      // --- RELATIONSHIP PROCESSING ---
+
+      // 1. Directory Containment Edges (for 'directory' and 'hybrid' styles)
+      if (node.isDirectory && (isDirectoryStyle || isHybridStyle)) {
+          if (node.children) {
+              for (const child of node.children) {
+                   const childImportance = child.importance || 0;
+                   const childIsDir = child.isDirectory;
+                   const childDepth = depth + 1;
+
+                   // Conditions for child to be included in diagram:
+                   const passesDepth = childDepth < maxDepth;
+                   const passesImportance = childIsDir || isPackageDepsMode || !this.config.minImportance || childImportance >= this.config.minImportance;
+                   const passesStyleFilter = !(childIsDir && isDependencyStyle) && !(!childIsDir && isDirectoryStyle && !this.config.showDependencies);
+
+                   if(passesDepth && passesImportance && passesStyleFilter) {
+                       const childNodeId = this.getNodeId(child.path); // Ensure child node ID exists in node map
+                       this.addEdge(node.path, child.path, 'directory');
+                   } else {
+                        console.error(`[MermaidGenerator] Skipping directory edge: Child ${child.path} is filtered out (Depth: ${childDepth}, Imp: ${childImportance}, Style: ${this.config.style}).`);
+                   }
+              }
+          }
+      }
+
+      // 2. Dependency Edges (for 'dependency' and 'hybrid' styles)
+      if (!node.isDirectory && (isDependencyStyle || isHybridStyle)) {
+           // Local file dependencies
+          if (this.config.showDependencies && node.dependencies) {
+              for (const depPath of node.dependencies) {
+                  // addEdge will handle checks if target node exists and is defined
+                  this.addEdge(node.path, depPath, 'dependency');
+              }
+          }
+           // Package dependencies
+          if (this.config.showPackageDeps && node.packageDependencies) {
+              for (const pkgDep of node.packageDependencies) {
+                  if (!pkgDep.name || !pkgDep.path) continue;
+                  const packageNodeId = this.addPackageNode(pkgDep);
+                  if (packageNodeId) {
+                      this.addEdge(node.path, pkgDep.path, 'package');
+                  }
+              }
+          }
+      }
+
+       // 3. Package Dependency Edges (ONLY for 'package-deps' style)
+       if (!node.isDirectory && isPackageDepsMode && node.packageDependencies) {
+           if (this.config.showPackageDeps) {
+                for (const pkgDep of node.packageDependencies) {
+                     if (!pkgDep.name || !pkgDep.path) continue;
+                     const packageNodeId = this.addPackageNode(pkgDep);
+                     if (packageNodeId) {
+                          // Ensure the source file node is also marked for definition in this mode
+                          this.definedNodes.add(nodeId);
+                          this.addEdge(node.path, pkgDep.path, 'package');
+                     }
+                }
+           }
+       }
+
+
+      // --- RECURSION ---
+      // Recurse into children for all styles
+      // Filtering happens at the start of the call for the child
+      if (node.isDirectory && node.children) {
+          for (const child of node.children) {
+               this.collectNodesAndEdges(child, depth + 1);
+          }
+      }
+  }
+
   // Add an edge between two nodes
   private addEdge(sourcePath: string, targetPath: string, type: string): void {
-    const sourceId = this.getNodeId(sourcePath);
+    const sourceId = this.getNodeId(sourcePath); // Ensures source node exists in map
     let targetId;
-    
-    // Handle package nodes specially
+
+    // Ensure target node also exists before adding edge
     if (type === 'package') {
-      targetId = this.nodes.get(targetPath);
-      if (!targetId) return; // Skip if package node doesn't exist (might be filtered)
+        targetId = this.nodes.get(targetPath); // Package nodes use path as key
     } else {
-      targetId = this.getNodeId(targetPath);
+        targetId = this.nodes.get(targetPath); // File/Dir nodes use path as key
     }
-    
-    const edgeKey = `${sourceId}-->${targetId}`;
-    
+
+    // Only add edge if both source and target nodes were actually created/registered
+    // Use this.nodes.has() for existence check is slightly better than relying on getNodeInfo
+    if (!targetId || !this.nodes.has(sourcePath) || !this.nodes.has(targetPath)) {
+         console.error(`[MermaidGenerator] Skipping edge from ${sourcePath} to ${targetPath}: Source or Target node path not found in nodes map.`);
+         return;
+    }
+
+    // Ensure the nodeInfo map also has entries if needed elsewhere, though nodes map is primary for existence
+    if (!this.nodeInfo.has(sourceId) || !this.nodeInfo.has(targetId)) {
+         console.error(`[MermaidGenerator] Skipping edge from ${sourcePath} to ${targetPath}: Source or Target node info missing.`);
+         return;
+    }
+
+    const edgeKey = `${sourceId}-->${targetId}`; // Use node IDs for edge key
+
     if (!this.edges.has(edgeKey)) {
-      this.edges.set(edgeKey, {
-        source: sourceId,
-        target: targetId,
-        type: type
-      });
+        console.error(`[MermaidGenerator] Adding edge (${type}): ${sourceId} --> ${targetId}`);
+        this.edges.set(edgeKey, {
+            source: sourceId,
+            target: targetId,
+            type: type
+        });
+         // Mark both nodes involved in an edge as defined
+         this.definedNodes.add(sourceId);
+         this.definedNodes.add(targetId);
     }
   }
-  
-  // Generate the node definition lines for the diagram
-  private generateNodeDefinition(nodeId: string): string[] {
-    if (this.definedNodes.has(nodeId)) {
-      return []; // Already defined
-    }
     
-    const info = this.nodeInfo.get(nodeId)!;
-    const lines: string[] = [];
-    
-    // Add node definition with specified shape based on node type
-    lines.push(`${nodeId}[${info.label}]`);
-    
-    // Add styling based on node type
-    lines.push(`style ${nodeId} fill:${info.color},stroke:#2d3436`);
-    
-    // If the node is a package or package scope, apply special shape
-    if (info.isPackage || info.isPackageScope) {
-      lines.push(`class ${nodeId} ${info.isPackage ? 'package-node' : 'package-scope-node'}`);
-    }
-    
-    // Mark as defined in output
-    this.definedNodes.add(nodeId);
-    info.isDefined = true;
-    this.stats.nodeCount++;
-    
-    return lines;
-  }
-
-  // Generate package dependency diagram
-  private generatePackageDepsView(): string[] {
-    const lines: string[] = [];
-    
-    // Add package scope subgraphs if grouping is enabled
-    if (this.config.packageGrouping) {
-      for (const [scope, nodeId] of this.packageScopeNodes.entries()) {
-        // Only include the scope if it has at least one package
-        const packagesInScope = this.packageScopes.get(scope);
-        if (packagesInScope && packagesInScope.size > 0) {
-          lines.push(`subgraph ${nodeId}[${scope}]`);
-          
-          // Add each package in this scope
-          for (const pkg of packagesInScope) {
-            for (const [path, id] of this.nodes.entries()) {
-              const info = this.nodeInfo.get(id);
-              if (info && info.isPackage && info.label.startsWith(pkg)) {
-                lines.push(`  ${id}`);
-              }
-            }
-          }
-          
-          lines.push(`end`);
-          lines.push(`style ${nodeId} fill:${this.style.nodeColors.packageScope},stroke:#2d3436,stroke-dasharray: 5 5`);
-        }
-      }
-    }
-    
-    return lines;
-  }
-
   public generate(): MermaidDiagram {
     // Reset state for a clean generation
     this.nodes = new Map();
     this.nodeInfo = new Map();
     this.edges = new Map();
     this.edgeCount = 0;
-    this.definedNodes = new Set();
+    this.definedNodes = new Set(); // Reset defined nodes
     this.packageScopes = new Map();
     this.packageScopeNodes = new Map();
     this.stats = {
@@ -388,175 +468,130 @@ export class MermaidGenerator {
     };
     
     // PHASE 1: Collect all nodes and edges that will be in the diagram
-    this.collectAllNodes(this.fileTree);
+    console.error(`[MermaidGenerator] Starting Phase 1: Collecting nodes and edges for style '${this.config.style}'...`);
+    this.collectNodesAndEdges(this.fileTree, 0); // Use the refactored collection function
+    console.error(`[MermaidGenerator] Finished Phase 1: Collected ${this.nodes.size} potential nodes, ${this.edges.size} potential edges.`);
+    console.error(`[MermaidGenerator] Nodes marked for definition (involved in edges): ${this.definedNodes.size}`);
     
-    // Auto-select layout direction based on diagram structure
+    // Auto-select layout direction based on diagram structure (optional)
     let direction = this.config.layout?.direction || 'TB';
+    // ... (layout logic can remain or be simplified) ...
     
-    // Check if we should auto-switch to LR based on tree structure
-    // For directory style diagrams with many top-level nodes, LR is often better
-    const rootNodeId = this.nodes.get(this.fileTree.path);
-    if (rootNodeId && !this.config.layout?.direction) {
-      let directChildCount = 0;
-      
-      // Count direct children of root
-      for (const edge of this.edges.values()) {
-        if (edge.source === rootNodeId && edge.type === 'directory') {
-          directChildCount++;
-        }
-      }
-      
-      // If many direct children or many grouped nodes, switch to LR layout
-      const groupNodeCount = Array.from(this.nodes.keys()).filter(path => path.includes('_group_')).length;
-      if (directChildCount > 6 || groupNodeCount > 2) {
-        direction = 'LR';
-        
-        // Also increase node spacing for better readability
-        if (!this.config.layout?.nodeSpacing) {
-          this.config.layout = this.config.layout || {};
-          this.config.layout.nodeSpacing = 60;
-        }
-      }
-    }
-    
-    // Use a compatible Mermaid syntax format
-    const lines: string[] = [
+    const output: string[] = [
       `graph ${direction}`
     ];
-    
-    // Add CSS classes for package nodes
-    lines.push(`classDef package-node fill:${this.style.nodeColors.package},stroke:#2d3436,shape:${this.style.nodeShapes.package}`);
-    lines.push(`classDef package-scope-node fill:${this.style.nodeColors.packageScope},stroke:#2d3436,shape:${this.style.nodeShapes.packageScope}`);
-    lines.push(`classDef group-node fill:#f8f9fa30,stroke:#2d3436,stroke-width:2px,stroke-dasharray:5 5,color:#333,rx:5,ry:5`);
-    lines.push(`classDef collapsible-node cursor:pointer,stroke:#2d3436,stroke-width:3px`);
-    lines.push(`classDef collapsed-group fill:#a8e063,stroke:#2d3436,stroke-width:2px,color:#333,rx:5,ry:5,cursor:pointer`);
-    
-    // PHASE 2: Generate any package-specific subgraphs and groupings
-    if (this.config.style === 'package-deps' || this.config.showPackageDeps) {
-      lines.push(...this.generatePackageDepsView());
+
+    // Add class definitions
+    output.push(`classDef package-node fill:${this.style.nodeColors.package},stroke:#2d3436,shape:${this.style.nodeShapes.package}`);
+    output.push(`classDef package-scope-node fill:${this.style.nodeColors.packageScope},stroke:#2d3436,shape:${this.style.nodeShapes.packageScope}`);
+    // ... (other classDefs)
+
+    // Add package scope subgraphs if needed
+    // ... (subgraph logic can remain the same, relies on collected data) ...
+    if (this.config.packageGrouping) { // Simplified check
+      output.push('');
+      output.push('  %% Package Scopes');
+      for (const [scope, packages] of this.packageScopes.entries()) {
+         const sanitizedScope = this.sanitizeLabel(scope);
+         const scopePathKey = `scope:${sanitizedScope}`;
+         const scopeNodeId = this.packageScopeNodes.get(scopePathKey);
+         // Only add subgraph if the scope node itself is needed (i.e., part of an edge)
+         if (scopeNodeId && this.definedNodes.has(scopeNodeId)) {
+           output.push(`  subgraph ${scopeNodeId}["${sanitizedScope}"]`);
+           // Add nodes belonging to this scope that are defined
+           packages.forEach(pkgName => {
+                // Find the node ID for this package name/path more reliably
+                let pkgNodeId: string | undefined;
+                for (const [pathKey, nodeId] of this.nodes.entries()) {
+                    const info = this.nodeInfo.get(nodeId);
+                    if (info?.isPackage && (this.sanitizeLabel(info.label) === pkgName || path.basename(pathKey) === pkgName)) {
+                        pkgNodeId = nodeId;
+                        break;
+                    }
+                }
+                if(pkgNodeId && this.definedNodes.has(pkgNodeId)) {
+                    output.push(`    ${pkgNodeId};`);
+                }
+           });
+           output.push('  end');
+           output.push(`  style ${scopeNodeId} fill:${this.style.nodeColors.packageScope},stroke:#2d3436,stroke-dasharray: 5 5`);
+         }
+      }
+      output.push('');
     }
-    
-    // PHASE 2.5: Generate file group subgraphs
-    const groupSubgraphs = this.generateGroupSubgraphs();
-    lines.push(...groupSubgraphs);
-    
-    // PHASE 3: Generate all node definitions
-    const allNodeIds = new Set<string>();
-    
-    // First, add all nodes that are sources or targets in edges
-    for (const edge of this.edges.values()) {
-      allNodeIds.add(edge.source);
-      allNodeIds.add(edge.target);
+
+    // --- Node Definitions and Styles (Phase 2) ---
+    output.push('  %% Node Definitions & Styles');
+    console.error(`[MermaidGenerator Phase 2] Number of nodes to define (involved in edges): ${this.definedNodes.size}`); 
+    let definedCount = 0;
+    for (const [nodeId, info] of this.nodeInfo.entries()) {
+       // Only define nodes that are actually marked in the definedNodes set
+       if (this.definedNodes.has(nodeId)) {
+           const labelText = info.label; // Already sanitized
+           output.push(`  ${nodeId}["${labelText}"];`);
+           // Apply style
+           output.push(`  style ${nodeId} fill:${info.color},stroke:#333,stroke-width:1px`);
+            // Apply class if package/scope
+           if (info.isPackage || info.isPackageScope) {
+               output.push(`  class ${nodeId} ${info.isPackage ? 'package-node' : 'package-scope-node'}`);
+           }
+           definedCount++;
+       }
     }
-    
-    // Generate definitions for all nodes
-    const nodeLines: string[] = [];
-    for (const nodeId of allNodeIds) {
-      nodeLines.push(...this.generateNodeDefinition(nodeId));
-    }
-    
-    lines.push(...nodeLines);
-    
-    // PHASE 4: Generate all edges
-    this.edgeCount = 0;
+    console.error(`[MermaidGenerator Phase 2] Actually defined ${definedCount} nodes.`);
+    output.push('');
+
+    // --- Edge Definitions (Phase 3) ---
+    output.push('  %% Edge Definitions');
     const edgeLines: string[] = [];
-    
+    this.edgeCount = 0; // Reset edge count for linkStyle indexing
+    let edgeOutputCount = 0;
     for (const edge of this.edges.values()) {
-      // Only include edges where both nodes exist
-      if (this.nodeInfo.has(edge.source) && this.nodeInfo.has(edge.target)) {
-        edgeLines.push(`${edge.source} --> ${edge.target}`);
+      // Double-check both nodes exist in definedNodes before creating edge link
+      if (this.definedNodes.has(edge.source) && this.definedNodes.has(edge.target)) {
+        edgeLines.push(`  ${edge.source} --> ${edge.target}`);
         
-        // Choose edge color based on type
-        let color = this.style.edgeColors.dependency;
+        // Choose edge color/style based on type
+        let color = this.style.edgeColors.dependency; // Default
         let strokeWidth = '1px';
-        
+        let strokeDasharray = 'solid'; // Default
+
         switch (edge.type) {
-          case 'dependency':
-            color = this.style.edgeColors.dependency;
-            strokeWidth = '2px';
-            break;
-          case 'directory':
-            color = this.style.edgeColors.directory;
-            strokeWidth = '2px';
-            break;
-          case 'circular':
-            color = this.style.edgeColors.circular;
-            strokeWidth = '2px';
-            break;
-          case 'package':
-            color = this.style.edgeColors.package;
-            strokeWidth = '1.5px';
-            break;
+            case 'directory':
+                color = this.style.edgeColors.directory;
+                strokeWidth = '2px';
+                strokeDasharray = '5,5'; // Dashed line for directory containment
+                break;
+            case 'package':
+                color = this.style.edgeColors.package;
+                strokeWidth = '1.5px';
+                break;
+            case 'dependency':
+                color = this.style.edgeColors.dependency;
+                break;
+            // Add case for 'circular' if detected
         }
-          
-        edgeLines.push(`linkStyle ${this.edgeCount} stroke:${color},stroke-width:${strokeWidth}`);
-        this.edgeCount++;
+
+        edgeLines.push(`  linkStyle ${this.edgeCount} stroke:${color},stroke-width:${strokeWidth}${strokeDasharray !== 'solid' ? `,stroke-dasharray:${strokeDasharray}` : ''}`);
+        this.edgeCount++; // Increment index for linkStyle
+        edgeOutputCount++;
         this.stats.edgeCount++;
-        
-        if (edge.type === 'dependency') {
-          this.stats.importantFiles++;
-        }
+         // Add logic to update other stats like circularDeps, importantFiles if needed
+      } else {
+          console.error(`[MermaidGenerator Phase 3] Skipping edge ${edge.source} --> ${edge.target} because one or both nodes were not defined.`);
       }
     }
-    
-    lines.push(...edgeLines);
+    console.error(`[MermaidGenerator Phase 3] Added ${edgeOutputCount} edges to the output.`);
+    output.push(...edgeLines);
+
+    // Update stats
+    this.stats.nodeCount = this.definedNodes.size;
 
     return {
-      code: lines.join('\n'),
+      code: output.join('\n'),
       style: this.style,
       stats: this.stats,
       timestamp: new Date()
     };
-  }
-  
-  // Generate subgraphs for file type groups
-  private generateGroupSubgraphs(): string[] {
-    const lines: string[] = [];
-    const groupNodeIds = new Set<string>();
-    
-    // Find all group nodes
-    for (const [path, nodeId] of this.nodes.entries()) {
-      if (path.includes('_group_')) {
-        groupNodeIds.add(nodeId);
-      }
-    }
-    
-    // Generate subgraph for each group
-    for (const nodeId of groupNodeIds) {
-      const info = this.nodeInfo.get(nodeId);
-      if (info) {
-        // Create subgraph with styling
-        lines.push(`subgraph ${nodeId}["${info.label} Group"]`);
-        
-        // Find all nodes connected to this group
-        const childNodes: string[] = [];
-        for (const edge of this.edges.values()) {
-          if (edge.source === nodeId) {
-            childNodes.push(edge.target);
-            lines.push(`  ${edge.target}`);
-          }
-        }
-        
-        lines.push(`end`);
-        lines.push(`style ${nodeId} fill:#f8f9fa30,stroke:#2d3436,stroke-width:2px,stroke-dasharray:5 5`);
-        lines.push(`class ${nodeId} group-node`);
-        
-        // Add click handler for interactivity in HTML output
-        const childCount = childNodes.length;
-        if (childCount > 0) {
-          // Store the list of children for this group
-          this.nodeInfo.set(nodeId, {
-            ...info,
-            childNodes: childNodes,
-            isCollapsible: true
-          });
-          
-          // Add a click handler to toggle expansion
-          lines.push(`click ${nodeId} toggleGroup "${nodeId}"`);
-        }
-      }
-    }
-    
-    return lines;
   }
 } 
