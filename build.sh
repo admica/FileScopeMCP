@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # PATH: ./build.sh
 # MCP setup script for FileScopeMCP

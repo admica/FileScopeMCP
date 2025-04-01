@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "FileScopeMCP": {
-      "command": "node",
-      "args": ["{projectRoot}/dist/mcp-server.js"],
+      "command": "wsl",
+      "args": ["-d", "Ubuntu-24.04", "node", {projectRoot}/dist/mcp-server.js", "--base-dir=\\wsl.localhost\\your\\project\\path"],
       "transport": "stdio",
     }
   }
