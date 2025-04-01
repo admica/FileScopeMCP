@@ -76,8 +76,7 @@ This MCP server analyzes your codebase to identify the most important files base
      "mcpServers": {
        "FileScopeMCP": {
          "command": "node",
-         "args": ["<build script sets this>/FileScopeMCP/dist/mcp-server.js","--base-dir=C:/Users/admica/my/project/base"], 
-
+         "args": ["<build script sets this>/mcp-server.js","--base-dir=C:/Users/admica/my/project/base"],
          "transport": "stdio"
        }
      }
