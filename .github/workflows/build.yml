@@ -1,0 +1,30 @@
+name: Windows Node.js CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies and build
+        shell: cmd
+        run: |
+          build.bat
+
+      - name: Verify build output
+        shell: cmd
+        run: |
+          dir dist
