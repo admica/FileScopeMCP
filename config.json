@@ -35,7 +35,8 @@
     "**/*.js.map",
     "**/*.ts.map",
     "**/venv/**",
-    "**/.gradle/**"
+    "**/*.gradle/**",
+    "**/FileScopeMCP-tree.json"
   ],
   "fileWatching": {
     "enabled": true,

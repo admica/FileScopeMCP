@@ -343,14 +343,26 @@ function isExcluded(filePath: string, baseDir: string): boolean {
 // Helper function to convert glob pattern to RegExp
 function globToRegExp(pattern: string): RegExp {
   console.error(`  Converting glob pattern: ${pattern}`);
-  
+
   // Escape special regex characters except * and ?
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   console.error(`  - After escaping special chars: ${escaped}`);
-  
-  // Convert glob patterns to regex patterns
-  const converted = escaped
-    // Convert ** to special marker
+
+  // Handle patterns starting with **/
+  let prefix = '';
+  if (escaped.startsWith('**/')) {
+    // Make the initial part optional to match root level
+    prefix = '(?:.*/)?';
+    // Remove the leading **/ from the pattern being converted
+    pattern = escaped.substring(3);
+  } else {
+    // Use the original escaped pattern if it doesn't start with **/
+    pattern = escaped;
+  }
+
+  // Convert glob patterns to regex patterns (applied to the potentially shortened pattern)
+  const converted = pattern
+    // Convert ** to special marker (use a different marker to avoid conflict)
     .replace(/\*\*/g, '__GLOBSTAR__')
     // Convert remaining * to [^/\\]*
     .replace(/\*/g, '[^/\\\\]*')
@@ -358,11 +370,13 @@ function globToRegExp(pattern: string): RegExp {
     .replace(/\?/g, '[^/\\\\]')
     // Convert globstar back to proper pattern
     .replace(/__GLOBSTAR__/g, '.*');
-  
+
   console.error(`  - After pattern conversion: ${converted}`);
-  
-  // Create regex that matches entire path
-  const regex = new RegExp(`^${converted}$`, 'i');
+
+  // Create regex that matches entire path, adding the optional prefix
+  // Ensure the pattern is anchored correctly
+  const finalPattern = `^${prefix}${converted}$`;
+  const regex = new RegExp(finalPattern, 'i');
   console.error(`  - Final regex: ${regex}`);
   return regex;
 }
