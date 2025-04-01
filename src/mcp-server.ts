@@ -24,7 +24,8 @@ import {
 } from "./storage-utils.js";
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
-import { setProjectRoot, getProjectRoot } from './global-state.js';
+import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
+import { loadConfig } from './config-utils.js';
 
 // Initialize server state
 let fileTree: FileNode | null = null;
@@ -107,19 +108,46 @@ async function initializeServer(): Promise<void> {
   console.error('Initial working directory:', process.cwd());
   console.error('Command line args:', process.argv);
   
-  // Require --base-dir parameter
+  // First try to get base directory from command line
   const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
-  if (!baseDirArg) {
-    console.error('Error: --base-dir parameter is required');
-    process.exit(1);
+  let projectRoot: string;
+  let config = await loadConfig();
+  
+  console.error('========== CONFIG DEBUGGING ==========');
+  console.error('Loaded config:', JSON.stringify(config, null, 2));
+  console.error('Exclude patterns count:', config.excludePatterns?.length || 0);
+  console.error('=====================================');
+  
+  if (baseDirArg) {
+    // Use command line argument if provided
+    projectRoot = normalizeAndResolvePath(baseDirArg.split('=')[1]);
+    console.error(`Using base directory from command line: ${projectRoot}`);
+    // Update config with command line base directory
+    config.baseDirectory = projectRoot;
+  } else {
+    // Check if baseDirectory is set in config
+    if (!config.baseDirectory) {
+      console.error('Error: baseDirectory must be set in either config.json or via --base-dir parameter');
+      process.exit(1);
+    }
+    
+    projectRoot = normalizeAndResolvePath(config.baseDirectory);
+    console.error(`Using base directory from config: ${projectRoot}`);
   }
   
-  // Extract and normalize the project root path
-  const projectRoot = normalizeAndResolvePath(baseDirArg.split('=')[1]);
-  console.error(`Using base directory: ${projectRoot}`);
-  
-  // Set the global project root
+  // Set the global project root and config
   setProjectRoot(projectRoot);
+  setConfig(config);
+  
+  console.error('Global state after initialization:');
+  console.error('- Project root:', getProjectRoot());
+  console.error('- Config loaded:', getConfig() !== null);
+  if (getConfig()) {
+    console.error('- Exclude patterns count:', getConfig()?.excludePatterns?.length || 0);
+    if (getConfig()?.excludePatterns?.length) {
+      console.error('- First few exclude patterns:', getConfig()?.excludePatterns?.slice(0, 5));
+    }
+  }
   
   // Verify the directory exists
   try {
@@ -328,8 +356,14 @@ function getAllFileNodes(node: FileNode): FileNode[] {
 
 // Build or load the file tree
 async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
-  console.error('Building file tree with config:', config);
+  console.error('\n🌲 BUILD FILE TREE STARTED');
+  console.error('==========================================');
+  console.error('Building file tree with config:', JSON.stringify(config, null, 2));
   console.error('Current working directory:', process.cwd());
+  console.error('Config in global state:', getConfig() !== null ? '✅ YES' : '❌ NO');
+  if (getConfig()) {
+    console.error('Global config exclude patterns count:', getConfig()?.excludePatterns?.length || 0);
+  }
   
   // First try to load from file
   try {
@@ -337,44 +371,67 @@ async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
     if (savedTree) {
       // Use the saved tree
       if (!savedTree.fileTree) {
-        console.error('Invalid file tree structure in saved file');
+        console.error('❌ Invalid file tree structure in saved file');
         throw new Error('Invalid file tree structure');
       }
-      console.error('Using existing file tree from:', config.filename);
+      console.error('✅ Using existing file tree from:', config.filename);
       console.error('Tree root path:', savedTree.fileTree.path);
+      console.error('Tree has children:', savedTree.fileTree.children?.length || 0);
       fileTree = savedTree.fileTree;
       currentConfig = savedTree.config;
+      
+      console.error('🌲 BUILD FILE TREE COMPLETED (loaded from file)');
+      console.error('==========================================\n');
       return fileTree;
     }
   } catch (error) {
-    console.error('Failed to load existing file tree:', error);
+    console.error('❌ Failed to load existing file tree:', error);
     // Continue to build new tree
   }
 
   // If not found or failed to load, build from scratch
-  console.error('Building new file tree for directory:', config.baseDirectory);
-  fileTree = await scanDirectory(config.baseDirectory);
-  if (!fileTree.children || fileTree.children.length === 0) {
-    console.error('Failed to scan directory - no children found');
-    throw new Error('Failed to scan directory');
+  console.error('🔍 Building new file tree for directory:', config.baseDirectory);
+  
+  // Verify config is in global state before scanning
+  if (!getConfig()) {
+    console.error('⚠️ WARNING: No config in global state, setting it now');
+    // Get the current config
+    const currentConfig = await loadConfig();
+    // Set the global config
+    setConfig(currentConfig);
+    console.error('Config set in global state:', getConfig() !== null ? '✅ YES' : '❌ NO');
+    if (getConfig()) {
+      console.error('Global config exclude patterns count:', getConfig()?.excludePatterns?.length || 0);
+    }
   }
   
-  console.error('Building dependency map...');
+  fileTree = await scanDirectory(config.baseDirectory);
+  
+  if (!fileTree.children || fileTree.children.length === 0) {
+    console.error('❌ Failed to scan directory - no children found');
+    throw new Error('Failed to scan directory');
+  } else {
+    console.error(`✅ Successfully scanned directory, found ${fileTree.children.length} top-level entries`);
+  }
+  
+  console.error('📊 Building dependency map...');
   buildDependentMap(fileTree);
-  console.error('Calculating importance values...');
+  console.error('📈 Calculating importance values...');
   calculateImportance(fileTree);
   
   // Save to disk
-  console.error('Saving file tree to:', config.filename);
+  console.error('💾 Saving file tree to:', config.filename);
   try {
     await saveFileTree(config, fileTree);
-    console.error('Successfully saved file tree');
+    console.error('✅ Successfully saved file tree');
     currentConfig = config;
   } catch (error) {
-    console.error('Failed to save file tree:', error);
+    console.error('❌ Failed to save file tree:', error);
     throw error;
   }
   
+  console.error('🌲 BUILD FILE TREE COMPLETED (built from scratch)');
+  console.error('==========================================\n');
   return fileTree;
 }
 

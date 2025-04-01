@@ -1,5 +1,12 @@
 import { getProjectRoot } from './global-state.js';
 
+// Configuration type for the application
+export interface Config {
+  baseDirectory: string;
+  excludePatterns: string[];
+  version: string;
+}
+
 // Define concrete classes rather than just interfaces to ensure proper compilation
 export class FileNode {
   path: string = '';
