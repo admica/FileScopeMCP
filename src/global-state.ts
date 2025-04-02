@@ -1,4 +1,6 @@
 import { Config } from './types.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Global state management for the MCP server
 let _projectRoot: string = process.cwd(); // Default to current directory
@@ -19,5 +21,20 @@ export function setConfig(config: Config) {
 }
 
 export function getConfig(): Config | null {
+  if (!_config) return null;
+
+  try {
+    const customExcludesPath = path.join(_projectRoot, 'FileScopeMCP-excludes.json');
+    if (fs.existsSync(customExcludesPath)) {
+      const customExcludes = JSON.parse(fs.readFileSync(customExcludesPath, 'utf-8'));
+      if (Array.isArray(customExcludes)) {
+        _config.excludePatterns = [..._config.excludePatterns, ...customExcludes];
+        console.error('Custom excludes loaded:', customExcludes);
+      }
+    }
+  } catch (error) {
+    console.error('Error loading custom excludes:', error);
+  }
+
   return _config;
 } 

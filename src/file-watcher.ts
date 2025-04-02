@@ -198,6 +198,23 @@ export class FileWatcher {
     const relativePath = path.relative(this.baseDir, filePath);
     console.error(`FileWatcher: Event: ${eventType} - ${relativePath}`);
     
+    // Log the ignored patterns
+    const ignoredPatterns = this.getIgnoredPatterns();
+    console.error(`FileWatcher: Ignored patterns:`, ignoredPatterns);
+
+    // Check if the file should be ignored
+    const shouldIgnore = ignoredPatterns.some(pattern => {
+      const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+      return regex.test(relativePath);
+    });
+
+    console.error(`FileWatcher: Should ignore ${relativePath}? ${shouldIgnore ? 'YES' : 'NO'}`);
+
+    if (shouldIgnore) {
+      console.error(`FileWatcher: Ignoring event for ${relativePath}`);
+      return;
+    }
+
     // Notify all registered callbacks of a file event
     console.error(`FileWatcher: Notifying ${this.eventCallbacks.length} callbacks for ${eventType} event on ${filePath}`);
     this.eventCallbacks.forEach(callback => {

@@ -118,6 +118,9 @@ export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): 
       fileTree
     };
     
+    console.error('File tree before saving:', JSON.stringify(fileTree, null, 2));
+    console.error('Excluded files should not be present in the tree.');
+
     console.error('Writing file...');
     fsSync.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
     console.error('Successfully saved file tree');

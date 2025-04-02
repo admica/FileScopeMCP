@@ -356,7 +356,8 @@ function globToRegExp(pattern: string): RegExp {
     // Remove the leading **/ from the pattern being converted
     pattern = escaped.substring(3);
   } else {
-    // Use the original escaped pattern if it doesn't start with **/
+    // Make the initial part optional for patterns not starting with **/
+    prefix = '(?:.*/)?';
     pattern = escaped;
   }
 
