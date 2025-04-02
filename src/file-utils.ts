@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fsSync from "fs";
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { normalizeAndResolvePath } from "./storage-utils.js";
-import { getProjectRoot, getConfig } from './global-state.js';
+import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.js';
 import { saveFileTree } from './storage-utils.js'; // Import saveFileTree
 
 /**
@@ -958,6 +958,9 @@ export async function removeFileNode(
 
   console.error(`[removeFileNode] Attempting to remove file: ${normalizedFilePath} from tree rooted at ${activeFileTree.path}`);
 
+  // Log the current state of the file tree
+  console.error('Current file tree state before removal:', JSON.stringify(activeFileTree, null, 2));
+
   // 1. Find the node to remove within the provided active tree
   const nodeToRemove = findNodeByPath(activeFileTree, normalizedFilePath);
   if (!nodeToRemove || nodeToRemove.isDirectory) {
@@ -965,6 +968,8 @@ export async function removeFileNode(
     console.error(`[removeFileNode] File node not found or is a directory: ${normalizedFilePath}`);
     return;
   }
+
+  console.error(`[removeFileNode] Found node to remove: ${nodeToRemove.path}`);
 
   // 2. Find the parent directory node within the provided active tree
   const parentDir = path.dirname(normalizedFilePath);
@@ -974,6 +979,8 @@ export async function removeFileNode(
     return;
   }
 
+  console.error(`[removeFileNode] Found parent node: ${parentNode.path}`);
+
   // 3. Store necessary info before removal (Ensure arrays exist)
   const dependenciesToRemoveFrom = [...(nodeToRemove.dependencies ?? [])];
   const dependentsToUpdate = [...(nodeToRemove.dependents ?? [])]; // Files that depended on this node
@@ -982,10 +989,14 @@ export async function removeFileNode(
   const index = parentNode.children.findIndex(child => normalizePath(child.path) === normalizedFilePath);
   if (index > -1) {
     parentNode.children.splice(index, 1);
+    console.error(`[removeFileNode] Node removed from parent's children: ${normalizedFilePath}`);
   } else {
      console.error(`[removeFileNode] Node not found in parent's children: ${normalizedFilePath}`);
      // Continue removal process anyway, as the node might be detached elsewhere
   }
+
+  // Log the updated state of the file tree
+  console.error('Updated file tree state after removal:', JSON.stringify(activeFileTree, null, 2));
 
   // 5. Update the 'dependents' list of files the removed node imported
   await updateDependentsAfterRemoval(nodeToRemove, activeFileTree); // Pass active tree
@@ -1162,3 +1173,16 @@ async function recalculateImportanceForAffected(
  * Recursively calculates importance scores for all file nodes in the tree.
  * Uses calculateNodeImportance for individual node calculation.
  */
+
+export async function excludeAndRemoveFile(filePath: string, activeFileTree: FileNode, activeProjectRoot: string): Promise<void> {
+  // Normalize the file path
+  const normalizedFilePath = normalizePath(filePath);
+  console.error(`Excluding and removing file: ${normalizedFilePath}`);
+
+  // Add the file path to the exclusion patterns
+  addExclusionPattern(normalizedFilePath);
+
+  // Remove the file node from the file tree
+  await removeFileNode(normalizedFilePath, activeFileTree, activeProjectRoot);
+  console.error(`File removed from tree and added to exclusion patterns: ${normalizedFilePath}`);
+}

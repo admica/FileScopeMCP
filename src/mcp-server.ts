@@ -13,7 +13,7 @@ import {
   MermaidDiagramConfig,
   FileWatchingConfig
 } from "./types.js";
-import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode } from "./file-utils.js";
+import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, excludeAndRemoveFile } from "./file-utils.js";
 import { 
   createFileTreeConfig, 
   saveFileTree,
@@ -1567,7 +1567,36 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
     return createMcpResponse(`Failed to generate diagram: ${error}`, true);
   }
 });
-  
+
+// Register a new tool to exclude and remove a file or pattern
+server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {
+  filepath: z.string().describe("The path or pattern of the file to exclude and remove")
+}, async (params: { filepath: string }) => {
+  try {
+    if (!fileTree || !currentConfig) {
+      await buildFileTree(DEFAULT_CONFIG);
+    }
+
+    console.error('exclude_and_remove called with params:', params);
+    console.error('Current file tree root:', fileTree?.path);
+
+    // Use the excludeAndRemoveFile function
+    await excludeAndRemoveFile(params.filepath, fileTree!, getProjectRoot());
+
+    // Save the updated tree
+    if (currentConfig) {
+      await saveFileTree(currentConfig, fileTree!);
+    }
+
+    return createMcpResponse({
+      message: `File or pattern excluded and removed: ${params.filepath}`
+    });
+  } catch (error) {
+    console.error('Error in exclude_and_remove:', error);
+    return createMcpResponse(`Failed to exclude and remove file or pattern: ${error}`, true);
+  }
+});
+
 // Start the server
 (async () => {
   try {

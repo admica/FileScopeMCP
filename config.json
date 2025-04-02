@@ -20,6 +20,7 @@
     "**/.env*",
     "**/*.gradle",
     "**/*-tree.json",
+    "**/*-excludes.json",
     "**/*.pyc",
     "**/*.pyo",
     "**/__pycache__/**",
@@ -50,6 +51,6 @@
     "watchForDeleted": true,
     "watchForChanged": true
   },
-  "baseDirectory": "",
-  "version": "2.5.0"
+  "baseDirectory": ",
+  "version": "2.6.0"
 }

@@ -37,4 +37,25 @@ export function getConfig(): Config | null {
   }
 
   return _config;
+}
+
+export function addExclusionPattern(pattern: string): void {
+  const customExcludesPath = path.join(_projectRoot, 'FileScopeMCP-excludes.json');
+  let customExcludes: string[] = [];
+
+  try {
+    if (fs.existsSync(customExcludesPath)) {
+      customExcludes = JSON.parse(fs.readFileSync(customExcludesPath, 'utf-8'));
+    }
+
+    if (!customExcludes.includes(pattern)) {
+      customExcludes.push(pattern);
+      fs.writeFileSync(customExcludesPath, JSON.stringify(customExcludes, null, 2), 'utf-8');
+      console.error(`Added exclusion pattern to FileScopeMCP-excludes.json: ${pattern}`);
+    } else {
+      console.error(`Pattern already exists in FileScopeMCP-excludes.json: ${pattern}`);
+    }
+  } catch (error) {
+    console.error('Error updating FileScopeMCP-excludes.json:', error);
+  }
 } 

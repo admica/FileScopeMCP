@@ -1,6 +1,6 @@
 #!/bin/bash
 # PATH: ./build.sh
-# MCP setup script for FileScopeMCP
+# MCP setup script for FileScopeMCP (Linux + macOS compatible, including WSL)
 
 # Exit immediately on error
 set -e
@@ -14,7 +14,18 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 APPNAME="FileScopeMCP"
-LOGFILE="/tmp/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
+OS=$(uname -s)
+PROJECT_ROOT=$(pwd)
+
+# Set log file based on OS
+if [ "$OS" = "Darwin" ]; then
+    LOGFILE="${HOME}/Library/Logs/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
+    mkdir -p "${HOME}/Library/Logs"
+    PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+else
+    LOGFILE="${PROJECT_ROOT}/logs/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
+    mkdir -p "${PROJECT_ROOT}/logs"
+fi
 
 # Logging functions
 print_header() {
@@ -55,17 +66,18 @@ print_detail() {
 
 # Main script execution
 print_header "Starting FileScopeMCP Setup"
+print_detail "Detected OS: $OS"
 
-# Check for Node.js
-print_action "Checking for Node.js..."
-if ! command -v node >/dev/null 2>&1; then
-    print_error "Node.js is not installed. Please install it first (e.g., via nvm or apt)."
+# Check for Node.js and npm
+print_action "Checking for Node.js and npm..."
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    print_error "Node.js and/or npm not installed. Install via Homebrew (macOS: 'brew install node') or your package manager (Linux/WSL: e.g., 'apt install nodejs')."
 fi
-print_detail "Node.js found: $(node --version)"
+print_detail "Node.js version: $(node --version), npm version: $(npm --version)"
 
 # Install Node.js dependencies
 print_action "Installing dependencies..."
-if npm install >> "$LOGFILE" 2>&1; then
+if npm install 2>&1 | tee -a "$LOGFILE"; then
     print_detail "Dependencies installed successfully."
 else
     print_error "Failed to install dependencies. Check $LOGFILE for details."
@@ -73,20 +85,25 @@ fi
 
 # Compile TypeScript
 print_action "Building TypeScript..."
-if npm run build >> "$LOGFILE" 2>&1; then
+if npm run build 2>&1 | tee -a "$LOGFILE"; then
     print_detail "TypeScript compiled successfully."
 else
-    print_error "Build failed. Check $LOGFILE for details."
+    if command -v tsc >/dev/null 2>&1; then
+        print_warning "npm run build failed, falling back to tsc..."
+        tsc 2>&1 | tee -a "$LOGFILE" || print_error "Build failed with tsc. Check $LOGFILE for details."
+    else
+        print_error "Build failed and tsc not found. Ensure 'build' script is in package.json or install TypeScript globally."
+    fi
 fi
 
 # Generate MCP config from template in the base directory
 print_action "Generating MCP configuration..."
-PROJECT_ROOT=$(pwd)
-
 if [ ! -f "mcp.json.txt" ]; then
-    print_error "mcp.json.txt not found in the project directory."
+    print_error "mcp.json.txt not found in $PROJECT_ROOT."
 fi
-
+if ! grep -q "{projectRoot}" "mcp.json.txt"; then
+    print_warning "No {projectRoot} placeholder in mcp.json.txt. Output may be incorrect."
+fi
 if sed "s|{projectRoot}|${PROJECT_ROOT}|g" mcp.json.txt > "mcp.json" 2>> "$LOGFILE"; then
     print_detail "MCP configuration generated at ./mcp.json"
 else
