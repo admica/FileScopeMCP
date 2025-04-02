@@ -66,13 +66,8 @@ This MCP server analyzes your codebase to identify the most important files base
    build.bat
    ```
 
-   Linux:
-   ```bash
-   build.sh
-   ```
-3. Copy the generated mcp.json configuration to your project's `.cursor` directory:
+   Copy the generated mcp.json configuration to your project's `.cursor` directory:
 
-   For Windows:
    ```json
    {
      "mcpServers": {
@@ -85,7 +80,11 @@ This MCP server analyzes your codebase to identify the most important files base
    }
    ```
    
-   If your Cursor project is in WSL:
+   Linux: (Cursor in Windows, but your project is in Linux WSL, then put the MCP in Linux and build)
+   ```bash
+   build.sh
+   ```
+   
    ```json
    {
      "mcpServers": {
@@ -200,6 +199,8 @@ The MCP server exposes the following tools:
 
 ## Usage Examples
 
+The easiest way to get started is to enable this mcp in cursor and tell cursor to figure it out and use it. As soon as the mcp starts, it builds an initial json tree. Tell an LLM to make summaries of all your important files and use the mcp's set_file_summary to add them.
+
 ### Analyzing a Project
 
 1. Create a file tree for your project:
@@ -277,7 +278,6 @@ The MCP server exposes the following tools:
 ## Future Improvements
 
 - Add support for more programming languages
-- Implement real-time file system monitoring
 - Add more sophisticated importance calculation algorithms
 - Enhance diagram customization options
 - Support for exporting diagrams to additional formats
