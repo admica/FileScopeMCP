@@ -121,8 +121,9 @@ echo "# Adapt this for your needs in WSL/Linux." >> run.sh
 echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
 echo -n "$(which node) " >> run.sh
 MCP_SERVER_JS=$(find . -name mcp-server.js)
-echo -n "${MCP_SERVER_JS:1} " >> run.sh
+echo -n "${PWD}${MCP_SERVER_JS:1} " >> run.sh
 echo "--base-dir=${PWD}" >> run.sh
+chmod +x run.sh
 
 echo ">> run.sh:"
 echo -n -e "${PURPLE}"
@@ -134,4 +135,4 @@ print_header "Setup Complete"
 print_detail "Project root: $PROJECT_ROOT"
 print_detail "Log file: $LOGFILE"
 echo -e "${GREEN}MCP server configuration generated.${NC}"
-echo -e "${CYAN}Move ./mcp.json to your project's .cursor/ to use with Cursor AI, or run the server manually with: node dist/mcp-server.js${NC}"
+echo -e "${CYAN}Copy ./mcp.json to your project's .cursor/ to use with Cursor AI, or run the server manually with: run.sh${NC}"

@@ -74,7 +74,9 @@ This MCP server analyzes your codebase to identify the most important files base
        "FileScopeMCP": {
          "command": "node",
          "args": ["<build script sets this>/mcp-server.js","--base-dir=C:/Users/admica/my/project/base"],
-         "transport": "stdio"
+         "transport": "stdio",
+         "disabled": false,
+         "alwaysAllow": []
        }
      }
    }
@@ -90,7 +92,7 @@ This MCP server analyzes your codebase to identify the most important files base
      "mcpServers": {
        "FileScopeMCP": {
        "command": "wsl",
-       "args": ["-d", "Ubuntu-24.04", "/home/admica/FileScopeMCP/run.sh", "--base-dir=/some/path"],
+       "args": ["-d", "Ubuntu-24.04", "/home/admica/FileScopeMCP/run.sh"],
        "transport": "stdio",
        "disabled": false,
        "alwaysAllow": []
