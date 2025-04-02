@@ -199,6 +199,8 @@ The MCP server exposes the following tools:
 
 ## Usage Examples
 
+The easiest way to get started is to enable this mcp in cursor and tell cursor to figure it out and use it. As soon as the mcp starts, it builds an initial json tree. Tell an LLM to make summaries of all your important files and use the mcp's set_file_summary to add them.
+
 ### Analyzing a Project
 
 1. Create a file tree for your project:
