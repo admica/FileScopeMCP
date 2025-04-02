@@ -278,7 +278,6 @@ The easiest way to get started is to enable this mcp in cursor and tell cursor t
 ## Future Improvements
 
 - Add support for more programming languages
-- Implement real-time file system monitoring
 - Add more sophisticated importance calculation algorithms
 - Enhance diagram customization options
 - Support for exporting diagrams to additional formats
