@@ -66,13 +66,8 @@ This MCP server analyzes your codebase to identify the most important files base
    build.bat
    ```
 
-   Linux:
-   ```bash
-   build.sh
-   ```
-3. Copy the generated mcp.json configuration to your project's `.cursor` directory:
+   Copy the generated mcp.json configuration to your project's `.cursor` directory:
 
-   For Windows:
    ```json
    {
      "mcpServers": {
@@ -85,7 +80,11 @@ This MCP server analyzes your codebase to identify the most important files base
    }
    ```
    
-   If your Cursor project is in WSL:
+   Linux: (Cursor in Windows, but your project is in Linux WSL, then put the MCP in Linux and build)
+   ```bash
+   build.sh
+   ```
+   
    ```json
    {
      "mcpServers": {
