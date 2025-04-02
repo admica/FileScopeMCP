@@ -10,6 +10,7 @@ GREEN='\033[1;32m'
 BLUE='\033[1;34m'
 YELLOW='\033[1;33m'
 RED='\033[1;31m'
+PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
@@ -96,19 +97,37 @@ else
     fi
 fi
 
+# Ensure mcp template exists
+if [ ! -f "mcp.json.linux" ]; then
+    print_error "mcp.json.linux not found in $PROJECT_ROOT."
+    exit 1
+fi
+
 # Generate MCP config from template in the base directory
 print_action "Generating MCP configuration..."
-if [ ! -f "mcp.json.txt" ]; then
-    print_error "mcp.json.txt not found in $PROJECT_ROOT."
+if ! grep -q "{projectRoot}" "mcp.json.linux"; then
+    print_warning "No {projectRoot} placeholder in mcp.json.linux. Output may be incorrect."
 fi
-if ! grep -q "{projectRoot}" "mcp.json.txt"; then
-    print_warning "No {projectRoot} placeholder in mcp.json.txt. Output may be incorrect."
-fi
-if sed "s|{projectRoot}|${PROJECT_ROOT}|g" mcp.json.txt > "mcp.json" 2>> "$LOGFILE"; then
+if sed "s|{projectRoot}|${PROJECT_ROOT}|g" mcp.json.linux > "mcp.json" 2>> "$LOGFILE"; then
     print_detail "MCP configuration generated at ./mcp.json"
 else
     print_error "Failed to generate mcp.json. Check $LOGFILE for details."
 fi
+
+# Build run.sh for simple setup
+print_action "Creating run.sh..."
+echo "#!/bin/bash" > run.sh
+echo "# Adapt this for your needs in WSL/Linux." >> run.sh
+echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
+echo -n "$(which node) " >> run.sh
+MCP_SERVER_JS=$(find . -name mcp-server.js)
+echo -n "${MCP_SERVER_JS:1} " >> run.sh
+echo "--base-dir=${PWD}" >> run.sh
+
+echo ">> run.sh:"
+echo -n -e "${PURPLE}"
+cat run.sh
+echo -n -e "${NC}"
 
 # Final message
 print_header "Setup Complete"
