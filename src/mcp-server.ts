@@ -28,6 +28,10 @@ import { MermaidGenerator } from "./mermaid-generator.js";
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, saveConfig } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
+import { log, enableFileLogging } from './logger.js';
+
+// Enable file logging for debugging
+enableFileLogging(true, 'mcp-debug.log');
 
 // Initialize server state
 let fileTree: FileNode | null = null;
@@ -56,7 +60,7 @@ function isRunningAsMcpServer(): boolean {
 async function findFileScopeMcpDirectory(): Promise<string | null> {
   // Try to extract it from command line arguments
   const scriptPath = process.argv[1] || '';
-  console.error('Script path:', scriptPath);
+  log('Script path: ' + scriptPath);
   
   if (scriptPath.includes('FileScopeMCP')) {
     // Extract the project directory from script path
@@ -67,10 +71,10 @@ async function findFileScopeMcpDirectory(): Promise<string | null> {
         // Verify this directory by checking for package.json
         const packageJsonPath = path.join(mcpDir, 'package.json');
         await fs.access(packageJsonPath);
-        console.error(`Verified FileScopeMCP directory: ${mcpDir}`);
+        log(`Verified FileScopeMCP directory: ${mcpDir}`);
         return mcpDir;
       } catch (error) {
-        console.error(`Could not verify directory ${mcpDir}`);
+        log(`Could not verify directory ${mcpDir}`);
       }
     }
   }
@@ -80,10 +84,10 @@ async function findFileScopeMcpDirectory(): Promise<string | null> {
   if (envProjectDir) {
     try {
       await fs.access(envProjectDir);
-      console.error(`Found project directory from env: ${envProjectDir}`);
+      log(`Found project directory from env: ${envProjectDir}`);
       return envProjectDir;
     } catch (error) {
-      console.error(`Invalid environment directory: ${envProjectDir}`);
+      log(`Invalid environment directory: ${envProjectDir}`);
     }
   }
   
@@ -98,7 +102,7 @@ async function findFileScopeMcpDirectory(): Promise<string | null> {
   for (const testPath of commonDevPaths) {
     try {
       await fs.access(testPath);
-      console.error(`Found project directory in common paths: ${testPath}`);
+      log(`Found project directory in common paths: ${testPath}`);
       return testPath;
     } catch (error) {
       // Path doesn't exist, try next one
@@ -110,48 +114,48 @@ async function findFileScopeMcpDirectory(): Promise<string | null> {
 
 // Server initialization
 async function initializeServer(): Promise<void> {
-  console.error('Starting FileScopeMCP server initialization');
-  console.error('Initial working directory:', process.cwd());
-  console.error('Command line args:', process.argv);
+  log('Starting FileScopeMCP server initialization');
+  log('Initial working directory: ' + process.cwd());
+  log('Command line args: ' + process.argv);
   
   // First try to get base directory from command line
   const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
   let projectRoot: string;
   let config = await loadConfig();
   
-  console.error('========== CONFIG DEBUGGING ==========');
-  console.error('Loaded config:', JSON.stringify(config, null, 2));
-  console.error('Exclude patterns count:', config.excludePatterns?.length || 0);
-  console.error('=====================================');
+  log('========== CONFIG DEBUGGING ==========');
+  log('Loaded config: ' + JSON.stringify(config, null, 2));
+  log('Exclude patterns count: ' + (config.excludePatterns?.length || 0));
+  log('=====================================');
   
   if (baseDirArg) {
     // Use command line argument if provided
     projectRoot = normalizeAndResolvePath(baseDirArg.split('=')[1]);
-    console.error(`Using base directory from command line: ${projectRoot}`);
+    log(`Using base directory from command line: ${projectRoot}`);
     // Update config with command line base directory
     config.baseDirectory = projectRoot;
   } else {
     // Check if baseDirectory is set in config
     if (!config.baseDirectory) {
-      console.error('Error: baseDirectory must be set in either config.json or via --base-dir parameter');
+      log('Error: baseDirectory must be set in either config.json or via --base-dir parameter');
       process.exit(1);
     }
     
     projectRoot = normalizeAndResolvePath(config.baseDirectory);
-    console.error(`Using base directory from config: ${projectRoot}`);
+    log(`Using base directory from config: ${projectRoot}`);
   }
   
   // Set the global project root and config
   setProjectRoot(projectRoot);
   setConfig(config);
   
-  console.error('Global state after initialization:');
-  console.error('- Project root:', getProjectRoot());
-  console.error('- Config loaded:', getConfig() !== null);
+  log('Global state after initialization:');
+  log('- Project root: ' + getProjectRoot());
+  log('- Config loaded: ' + (getConfig() !== null));
   if (getConfig()) {
-    console.error('- Exclude patterns count:', getConfig()?.excludePatterns?.length || 0);
+    log('- Exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
     if (getConfig()?.excludePatterns?.length) {
-      console.error('- First few exclude patterns:', getConfig()?.excludePatterns?.slice(0, 5));
+      log('- First few exclude patterns: ' + getConfig()?.excludePatterns?.slice(0, 5));
     }
   }
   
@@ -159,12 +163,12 @@ async function initializeServer(): Promise<void> {
   try {
     await fs.access(projectRoot);
   } catch (error) {
-    console.error(`Error: Base directory ${projectRoot} does not exist`);
+    log(`Error: Base directory ${projectRoot} does not exist`);
     process.exit(1);
   }
   
   process.chdir(projectRoot);
-  console.error(`Changed working directory to: ${process.cwd()}`);
+  log('Changed working directory to: ' + process.cwd());
   
   // Now we can safely set the default config
   DEFAULT_CONFIG = {
@@ -178,16 +182,16 @@ async function initializeServer(): Promise<void> {
   try {
     await buildFileTree(DEFAULT_CONFIG);
   } catch (error) {
-    console.error("Failed to build default file tree:", error);
+    log("Failed to build default file tree: " + error);
   }
   
   // Initialize file watcher if enabled in config
   const fileWatchingConfig = getConfig()?.fileWatching;
   if (fileWatchingConfig?.enabled) {
-    console.error('File watching is enabled in config, initializing watcher...');
+    log('File watching is enabled in config, initializing watcher...');
     await initializeFileWatcher();
   } else {
-    console.error('File watching is disabled in config');
+    log('File watching is disabled in config');
   }
 }
 
@@ -198,7 +202,7 @@ async function initializeFileWatcher(): Promise<void> {
   try {
     const config = getConfig();
     if (!config || !config.fileWatching) {
-      console.error('Cannot initialize file watcher: config or fileWatching not available');
+      log('Cannot initialize file watcher: config or fileWatching not available');
       return;
     }
     
@@ -213,9 +217,9 @@ async function initializeFileWatcher(): Promise<void> {
     fileWatcher.addEventCallback((filePath, eventType) => handleFileEvent(filePath, eventType));
     fileWatcher.start();
     
-    console.error('File watcher initialized and started successfully');
+    log('File watcher initialized and started successfully');
   } catch (error) {
-    console.error('Error initializing file watcher:', error);
+    log('Error initializing file watcher: ' + error);
   }
 }
 
@@ -225,7 +229,7 @@ async function initializeFileWatcher(): Promise<void> {
  * @param eventType The type of event
  */
 async function handleFileEvent(filePath: string, eventType: FileEventType): Promise<void> {
-  console.error(`[MCP Server] Handling file event: ${eventType} for ${filePath}`);
+  log(`[MCP Server] Handling file event: ${eventType} for ${filePath}`);
   
   // Use the module-level active config and tree
   const activeConfig = currentConfig;
@@ -234,12 +238,12 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
   const fileWatchingConfig = getConfig()?.fileWatching;
 
   if (!activeConfig || !activeTree || !projectRoot || !fileWatchingConfig) {
-    console.error('[MCP Server] Ignoring file event: Active config, tree, project root, or watching config not available.');
+    log('[MCP Server] Ignoring file event: Active config, tree, project root, or watching config not available.');
     return;
   }
   
   if (!fileWatchingConfig.autoRebuildTree) {
-    console.error('[MCP Server] Ignoring file event: Auto-rebuild is disabled.');
+    log('[MCP Server] Ignoring file event: Auto-rebuild is disabled.');
     return;
   }
 
@@ -252,14 +256,14 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
 
   const newTimer = setTimeout(async () => {
     fileEventDebounceTimers.delete(debounceKey); // Remove timer reference once it executes
-    console.error(`[MCP Server] Debounced processing for: ${eventType} - ${filePath}`);
+    log(`[MCP Server] Debounced processing for: ${eventType} - ${filePath}`);
 
     try {
       let updated = false;
       switch (eventType) {
         case 'add':
           if (fileWatchingConfig.watchForNewFiles) {
-            console.error(`[MCP Server] Calling addFileNode for ${filePath}`);
+            log(`[MCP Server] Calling addFileNode for ${filePath}`);
             await addFileNode(filePath, activeTree, projectRoot);
             updated = true;
           }
@@ -268,7 +272,7 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
         case 'change':
           // TODO: Implement incremental update for changed files if needed
           if (fileWatchingConfig.watchForChanged) {
-             console.error(`[MCP Server] CHANGE detected for ${filePath}, incremental handling not implemented. Triggering full rebuild as fallback.`);
+             log(`[MCP Server] CHANGE detected for ${filePath}, incremental handling not implemented. Triggering full rebuild as fallback.`);
              // Fallback to full rebuild for now
              await buildFileTree(activeConfig);
              updated = true; // Assume tree changed
@@ -277,7 +281,7 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
           
         case 'unlink':
           if (fileWatchingConfig.watchForDeleted) {
-             console.error(`[MCP Server] Calling removeFileNode for ${filePath}`);
+             log(`[MCP Server] Calling removeFileNode for ${filePath}`);
              await removeFileNode(filePath, activeTree, projectRoot);
              updated = true;
           }
@@ -290,15 +294,15 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
         const latestActiveConfig = currentConfig;
         const latestActiveTree = fileTree;
         if(latestActiveConfig && latestActiveTree){
-            console.error(`[MCP Server] Saving updated file tree after ${eventType} event.`);
+            log(`[MCP Server] Saving updated file tree after ${eventType} event.`);
             await saveFileTree(latestActiveConfig, latestActiveTree);
         } else {
-            console.error(`[MCP Server] Error saving tree after ${eventType} event: active config or tree became null.`);
+            log(`[MCP Server] Error saving tree after ${eventType} event: active config or tree became null.`);
         }
       }
 
     } catch (error) {
-      console.error(`[MCP Server] Error processing debounced file event ${eventType} for ${filePath}:`, error);
+      log(`[MCP Server] Error processing debounced file event ${eventType} for ${filePath}: ${error}`);
     }
   }, DEBOUNCE_DURATION_MS);
 
@@ -324,7 +328,7 @@ class StdioTransport implements Transport {
         // Check buffer size before appending
         const currentSize = this.buffer.toString().length;
         if (currentSize + chunk.length > this.MAX_BUFFER_SIZE) {
-          console.error(`Buffer overflow: size would exceed ${this.MAX_BUFFER_SIZE} bytes`);
+          log(`Buffer overflow: size would exceed ${this.MAX_BUFFER_SIZE} bytes`);
           this.onerror?.(new Error('Buffer overflow: maximum size exceeded'));
           this.buffer = new ReadBuffer(); // Reset buffer to prevent memory issues
           return;
@@ -338,7 +342,7 @@ class StdioTransport implements Transport {
           }
         }
       } catch (error) {
-        console.error('Error processing message:', error);
+        log('Error processing message: ' + error);
         if (this.onerror) {
           this.onerror(error instanceof Error ? error : new Error(String(error)));
         }
@@ -361,7 +365,7 @@ class StdioTransport implements Transport {
     
     // Check message size
     if (serialized.length > this.MAX_BUFFER_SIZE) {
-      console.error(`Message too large: ${serialized.length} bytes`);
+      log(`Message too large: ${serialized.length} bytes`);
       throw new Error('Message exceeds maximum size limit');
     }
     
@@ -423,28 +427,28 @@ function findNode(node: FileNode, targetPath: string): FileNode | null {
   const normalizedTargetPath = normalizePath(targetPath);
   const normalizedNodePath = normalizePath(node.path);
   
-  console.error('Finding node:', {
+  log('Finding node: ' + JSON.stringify({
     targetPath: normalizedTargetPath,
     currentNodePath: normalizedNodePath,
     isDirectory: node.isDirectory,
     childCount: node.children?.length
-  });
+  }));
   
   // Try exact match first
   if (normalizedNodePath === normalizedTargetPath) {
-    console.error('Found exact matching node');
+    log('Found exact matching node');
     return node;
   }
   
   // Try case-insensitive match for Windows compatibility
   if (normalizedNodePath.toLowerCase() === normalizedTargetPath.toLowerCase()) {
-    console.error('Found case-insensitive matching node');
+    log('Found case-insensitive matching node');
     return node;
   }
   
   // Check if the path ends with our target (to handle relative vs absolute paths)
   if (normalizedTargetPath.endsWith(normalizedNodePath) || normalizedNodePath.endsWith(normalizedTargetPath)) {
-    console.error('Found path suffix matching node');
+    log('Found path suffix matching node');
     return node;
   }
   
@@ -479,19 +483,19 @@ function getAllFileNodes(node: FileNode): FileNode[] {
   
   // Start traversal with the root node
   traverse(node);
-  console.error(`Found ${results.length} file nodes`);
+  log(`Found ${results.length} file nodes`);
   return results;
 }
 
 // Build or load the file tree
 async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
-  console.error('\n🌲 BUILD FILE TREE STARTED');
-  console.error('==========================================');
-  console.error('Building file tree with config:', JSON.stringify(config, null, 2));
-  console.error('Current working directory:', process.cwd());
-  console.error('Config in global state:', getConfig() !== null ? '✅ YES' : '❌ NO');
+  log('\n🌲 BUILD FILE TREE STARTED');
+  log('==========================================');
+  log('Building file tree with config: ' + JSON.stringify(config, null, 2));
+  log('Current working directory: ' + process.cwd());
+  log('Config in global state: ' + (getConfig() !== null ? '✅ YES' : '❌ NO'));
   if (getConfig()) {
-    console.error('Global config exclude patterns count:', getConfig()?.excludePatterns?.length || 0);
+    log('Global config exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
   }
   
   // First try to load from file
@@ -500,67 +504,67 @@ async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
     if (savedTree) {
       // Use the saved tree
       if (!savedTree.fileTree) {
-        console.error('❌ Invalid file tree structure in saved file');
+        log('❌ Invalid file tree structure in saved file');
         throw new Error('Invalid file tree structure');
       }
-      console.error('✅ Using existing file tree from:', config.filename);
-      console.error('Tree root path:', savedTree.fileTree.path);
-      console.error('Tree has children:', savedTree.fileTree.children?.length || 0);
+      log('✅ Using existing file tree from: ' + config.filename);
+      log('Tree root path: ' + savedTree.fileTree.path);
+      log('Tree has children: ' + (savedTree.fileTree.children?.length || 0));
       fileTree = savedTree.fileTree;
       currentConfig = savedTree.config;
       
-      console.error('🌲 BUILD FILE TREE COMPLETED (loaded from file)');
-      console.error('==========================================\n');
+      log('🌲 BUILD FILE TREE COMPLETED (loaded from file)');
+      log('==========================================\n');
       return fileTree;
     }
   } catch (error) {
-    console.error('❌ Failed to load existing file tree:', error);
+    log('❌ Failed to load existing file tree: ' + error);
     // Continue to build new tree
   }
 
   // If not found or failed to load, build from scratch
-  console.error('🔍 Building new file tree for directory:', config.baseDirectory);
+  log('🔍 Building new file tree for directory: ' + config.baseDirectory);
   
   // Verify config is in global state before scanning
   if (!getConfig()) {
-    console.error('⚠️ WARNING: No config in global state, setting it now');
+    log('⚠️ WARNING: No config in global state, setting it now');
     // Get the current config
     const currentConfig = await loadConfig();
     // Set the global config
     setConfig(currentConfig);
-    console.error('Config set in global state:', getConfig() !== null ? '✅ YES' : '❌ NO');
+    log('Config set in global state: ' + (getConfig() !== null ? '✅ YES' : '❌ NO'));
     if (getConfig()) {
-      console.error('Global config exclude patterns count:', getConfig()?.excludePatterns?.length || 0);
+      log('Global config exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
     }
   }
   
   fileTree = await scanDirectory(config.baseDirectory);
   
   if (!fileTree.children || fileTree.children.length === 0) {
-    console.error('❌ Failed to scan directory - no children found');
+    log('❌ Failed to scan directory - no children found');
     throw new Error('Failed to scan directory');
   } else {
-    console.error(`✅ Successfully scanned directory, found ${fileTree.children.length} top-level entries`);
+    log(`✅ Successfully scanned directory, found ${fileTree.children.length} top-level entries`);
   }
   
-  console.error('📊 Building dependency map...');
+  log('📊 Building dependency map...');
   buildDependentMap(fileTree);
-  console.error('📈 Calculating importance values...');
+  log('📈 Calculating importance values...');
   calculateImportance(fileTree);
   
   // Save to disk
-  console.error('💾 Saving file tree to:', config.filename);
+  log('💾 Saving file tree to: ' + config.filename);
   try {
     await saveFileTree(config, fileTree);
-    console.error('✅ Successfully saved file tree');
+    log('✅ Successfully saved file tree');
     currentConfig = config;
   } catch (error) {
-    console.error('❌ Failed to save file tree:', error);
+    log('❌ Failed to save file tree: ' + error);
     throw error;
   }
   
-  console.error('🌲 BUILD FILE TREE COMPLETED (built from scratch)');
-  console.error('==========================================\n');
+  log('🌲 BUILD FILE TREE COMPLETED (built from scratch)');
+  log('==========================================\n');
   return fileTree;
 }
 
@@ -569,7 +573,7 @@ async function readFileContent(filePath: string): Promise<string> {
   try {
     return await fs.readFile(filePath, 'utf-8');
   } catch (error) {
-    console.error(`Failed to read file ${filePath}:`, error);
+    log(`Failed to read file ${filePath}: ` + error);
     throw error;
   }
 }
@@ -612,7 +616,7 @@ server.tool("delete_file_tree", "Delete a file tree configuration", {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return createMcpResponse(`File tree ${params.filename} does not exist`);
     }
-    return createMcpResponse(`Failed to delete ${params.filename}: ${error}`, true);
+    return createMcpResponse(`Failed to delete ${params.filename}: ` + error, true);
   }
 });
 
@@ -620,35 +624,35 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
   filename: z.string().describe("Name of the JSON file to store the file tree"),
   baseDirectory: z.string().describe("Base directory to scan for files")
 }, async (params: { filename: string, baseDirectory: string }) => {
-  console.error('Create file tree called with params:', params);
-  console.error('Current working directory:', process.cwd());
+  log('Create file tree called with params: ' + JSON.stringify(params));
+  log('Current working directory: ' + process.cwd());
   
   try {
     // Ensure we're using paths relative to the current directory
     const relativeFilename = path.isAbsolute(params.filename) 
       ? path.relative(process.cwd(), params.filename) 
       : params.filename;
-    console.error('Relative filename:', relativeFilename);
+    log('Relative filename: ' + relativeFilename);
     
     // Handle special case for current directory
     let baseDir = params.baseDirectory;
     if (baseDir === '.' || baseDir === './') {
       baseDir = getProjectRoot(); // Use the project root instead of cwd
-      console.error('Resolved "." to project root:', baseDir);
+      log('Resolved "." to project root: ' + baseDir);
     }
     
     // Normalize the base directory relative to project root if not absolute
     if (!path.isAbsolute(baseDir)) {
       baseDir = path.join(getProjectRoot(), baseDir);
-      console.error('Resolved relative base directory:', baseDir);
+      log('Resolved relative base directory: ' + baseDir);
     }
     
     const config = await createFileTreeConfig(relativeFilename, baseDir);
-    console.error('Created config:', config);
+    log('Created config: ' + JSON.stringify(config));
     
     // Build the tree with the new config, not the default
     const tree = await buildFileTree(config);
-    console.error('Built file tree with root path:', tree.path);
+    log('Built file tree with root path: ' + tree.path);
     
     // Update global state
     fileTree = tree;
@@ -659,8 +663,8 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
       config
     });
   } catch (error) {
-    console.error('Error in create_file_tree:', error);
-    return createMcpResponse(`Failed to create file tree: ${error}`, true);
+    log('Error in create_file_tree: ' + error);
+    return createMcpResponse(`Failed to create file tree: ` + error, true);
   }
 });
 
@@ -691,26 +695,26 @@ server.tool("list_files", "List all files in the project with their importance r
 server.tool("get_file_importance", "Get the importance ranking of a specific file", {
   filepath: z.string().describe("The path to the file to check")
 }, async (params: { filepath: string }) => {
-  console.error('Get file importance called with params:', params);
-  console.error('Current config:', currentConfig);
-  console.error('File tree root path:', fileTree?.path);
+  log('Get file importance called with params: ' + JSON.stringify(params));
+  log('Current config: ' + JSON.stringify(currentConfig));
+  log('File tree root path: ' + fileTree?.path);
   
   try {
     if (!fileTree || !currentConfig) {
-      console.error('No file tree loaded, building default tree');
+      log('No file tree loaded, building default tree');
       await buildFileTree(DEFAULT_CONFIG);
     }
     
     const normalizedPath = normalizePath(params.filepath);
-    console.error('Normalized path:', normalizedPath);
+    log('Normalized path: ' + normalizedPath);
     
     const node = findNode(fileTree!, normalizedPath);
-    console.error('Found node:', node ? {
+    log('Found node: ' + JSON.stringify(node ? {
       path: node.path,
       importance: node.importance,
       dependencies: node.dependencies?.length,
       dependents: node.dependents?.length
-    } : null);
+    } : null));
     
     if (!node) {
       return createMcpResponse(`File not found: ${params.filepath}`, true);
@@ -724,8 +728,8 @@ server.tool("get_file_importance", "Get the importance ranking of a specific fil
       summary: node.summary || null
     });
   } catch (error) {
-    console.error('Error in get_file_importance:', error);
-    return createMcpResponse(`Failed to get file importance: ${error}`, true);
+    log('Error in get_file_importance: ' + error);
+    return createMcpResponse(`Failed to get file importance: ` + error, true);
   }
 });
 
@@ -821,7 +825,7 @@ server.tool("read_file_content", "Read the content of a specific file", {
     
     return createMcpResponse(content);
   } catch (error) {
-    return createMcpResponse(`Failed to read file: ${params.filepath} - ${error}`, true);
+    return createMcpResponse(`Failed to read file: ${params.filepath} - ` + error, true);
   }
 });
 
@@ -835,12 +839,12 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
       await buildFileTree(DEFAULT_CONFIG);
     }
     
-    console.error('set_file_importance called with params:', params);
-    console.error('Current file tree root:', fileTree?.path);
+    log('set_file_importance called with params: ' + JSON.stringify(params));
+    log('Current file tree root: ' + fileTree?.path);
     
     // Get a list of all files
     const allFiles = getAllFileNodes(fileTree!);
-    console.error(`Total files in tree: ${allFiles.length}`);
+    log(`Total files in tree: ${allFiles.length}`);
     
     // First try the findAndSetImportance method
     const wasUpdated = setFileImportance(fileTree!, params.filepath, params.importance);
@@ -848,15 +852,15 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
     // If that didn't work, try matching by basename
     if (!wasUpdated) {
       const basename = path.basename(params.filepath);
-      console.error(`Looking for file with basename: ${basename}`);
+      log(`Looking for file with basename: ${basename}`);
       
       let foundFile = false;
       for (const file of allFiles) {
         const fileBasename = path.basename(file.path);
-        console.error(`Checking file: ${file.path} with basename: ${fileBasename}`);
+        log(`Checking file: ${file.path} with basename: ${fileBasename}`);
         
         if (fileBasename === basename) {
-          console.error(`Found match: ${file.path}`);
+          log(`Found match: ${file.path}`);
           file.importance = Math.min(10, Math.max(0, params.importance));
           foundFile = true;
           break;
@@ -864,7 +868,7 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
       }
       
       if (!foundFile) {
-        console.error('File not found by any method');
+        log('File not found by any method');
         return createMcpResponse(`File not found: ${params.filepath}`, true);
       }
     }
@@ -878,8 +882,8 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
       importance: params.importance
     });
   } catch (error) {
-    console.error('Error in set_file_importance:', error);
-    return createMcpResponse(`Failed to set file importance: ${error}`, true);
+    log('Error in set_file_importance: ' + error);
+    return createMcpResponse(`Failed to set file importance: ` + error, true);
   }
 });
 
@@ -889,7 +893,7 @@ server.tool("recalculate_importance", "Recalculate importance values for all fil
     await buildFileTree(DEFAULT_CONFIG);
   }
 
-  console.error('Recalculating importance values...');
+  log('Recalculating importance values...');
   buildDependentMap(fileTree!);
   calculateImportance(fileTree!);
   
@@ -1183,7 +1187,7 @@ ${escapedMermaidCode}
     // Render on DOM load
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof mermaid === 'undefined') {
-        console.error('Mermaid library failed to load. Check network or CDN URL.');
+        log('Mermaid library failed to load. Check network or CDN URL.');
         document.getElementById('error-message').style.display = 'block';
         document.getElementById('error-message').textContent = 'Error: Mermaid library not loaded';
         return;
@@ -1305,7 +1309,7 @@ ${escapedMermaidCode}
         }
       }
       
-      console.log('Detected collapsible groups:', collapsibleGroups);
+      log('Detected collapsible groups: ' + JSON.stringify(collapsibleGroups));
     }
 
     // Render Mermaid diagram
@@ -1334,7 +1338,7 @@ ${escapedMermaidCode}
           }
         })
         .catch(error => {
-          console.error('Mermaid rendering failed:', error);
+          log('Mermaid rendering failed: ' + error);
           errorDiv.style.display = 'block';
           errorDiv.textContent = error.message;
           
@@ -1487,18 +1491,18 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       const baseOutputPath = path.resolve(process.cwd(), params.outputPath);
       const outputDir = path.dirname(baseOutputPath);
       
-      process.stderr.write(`[${new Date().toISOString()}] Attempting to save diagram file(s):\n`);
-      process.stderr.write(`[${new Date().toISOString()}] - Base output path: ${baseOutputPath}\n`);
-      process.stderr.write(`[${new Date().toISOString()}] - Output directory: ${outputDir}\n`);
-      process.stderr.write(`[${new Date().toISOString()}] - Output format: ${outputFormat}\n`);
+      log(`[${new Date().toISOString()}] Attempting to save diagram file(s):`);
+      log(`[${new Date().toISOString()}] - Base output path: ${baseOutputPath}`);
+      log(`[${new Date().toISOString()}] - Output directory: ${outputDir}`);
+      log(`[${new Date().toISOString()}] - Output format: ${outputFormat}`);
       
       // Ensure output directory exists
       try {
         await fs.mkdir(outputDir, { recursive: true });
-        console.error(`[${new Date().toISOString()}] Created output directory: ${outputDir}`);
+        log(`[${new Date().toISOString()}] Created output directory: ${outputDir}`);
       } catch (err: any) {
         if (err.code !== 'EEXIST') {
-          console.error(`[${new Date().toISOString()}] Error creating output directory:`, err);
+          log(`[${new Date().toISOString()}] Error creating output directory: ` + err);
           return createMcpResponse(`Failed to create output directory: ${err.message}`, true);
         }
       }
@@ -1509,7 +1513,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
         const mmdPath = baseOutputPath.endsWith('.mmd') ? baseOutputPath : baseOutputPath + '.mmd';
         try {
           await fs.writeFile(mmdPath, mermaidContent, 'utf8');
-          console.error(`[${new Date().toISOString()}] Successfully saved Mermaid file to: ${mmdPath}`);
+          log(`[${new Date().toISOString()}] Successfully saved Mermaid file to: ${mmdPath}`);
           
           return createMcpResponse({
             message: `Successfully generated diagram in mmd format`,
@@ -1517,7 +1521,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
             stats: diagram.stats
           });
         } catch (err: any) {
-          console.error(`[${new Date().toISOString()}] Error saving Mermaid file:`, err);
+          log(`[${new Date().toISOString()}] Error saving Mermaid file: ` + err);
           return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
         }
       } else if (outputFormat === 'html') {
@@ -1529,7 +1533,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
         const htmlPath = baseOutputPath.endsWith('.html') ? baseOutputPath : baseOutputPath + '.html';
         try {
           await fs.writeFile(htmlPath, htmlContent, 'utf8');
-          console.error(`[${new Date().toISOString()}] Successfully saved HTML file to: ${htmlPath}`);
+          log(`[${new Date().toISOString()}] Successfully saved HTML file to: ${htmlPath}`);
           
           return createMcpResponse({
             message: `Successfully generated diagram in html format`,
@@ -1537,7 +1541,7 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
             stats: diagram.stats
           });
         } catch (err: any) {
-          console.error(`[${new Date().toISOString()}] Error saving HTML file:`, err);
+          log(`[${new Date().toISOString()}] Error saving HTML file: ` + err);
           return createMcpResponse(`Failed to save HTML file: ${err.message}`, true);
         }
       }
@@ -1563,8 +1567,8 @@ server.tool("generate_diagram", "Generate a Mermaid diagram for the current file
       }
     ]);
   } catch (error) {
-    console.error('Error generating diagram:', error);
-    return createMcpResponse(`Failed to generate diagram: ${error}`, true);
+    log('Error generating diagram: ' + error);
+    return createMcpResponse(`Failed to generate diagram: ` + error, true);
   }
 });
 
@@ -1577,8 +1581,8 @@ server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the
       await buildFileTree(DEFAULT_CONFIG);
     }
 
-    console.error('exclude_and_remove called with params:', params);
-    console.error('Current file tree root:', fileTree?.path);
+    log('exclude_and_remove called with params: ' + JSON.stringify(params));
+    log('Current file tree root: ' + fileTree?.path);
 
     // Use the excludeAndRemoveFile function
     await excludeAndRemoveFile(params.filepath, fileTree!, getProjectRoot());
@@ -1592,8 +1596,8 @@ server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the
       message: `File or pattern excluded and removed: ${params.filepath}`
     });
   } catch (error) {
-    console.error('Error in exclude_and_remove:', error);
-    return createMcpResponse(`Failed to exclude and remove file or pattern: ${error}`, true);
+    log('Error in exclude_and_remove: ' + error);
+    return createMcpResponse(`Failed to exclude and remove file or pattern: ` + error, true);
   }
 });
 
@@ -1607,7 +1611,7 @@ server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the
     const transport = new StdioTransport();
     await server.connect(transport);
   } catch (error) {
-    console.error("Server error:", error);
+    log('Server error: ' + error);
     process.exit(1);
   }
 })();

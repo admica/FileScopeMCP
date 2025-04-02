@@ -6,6 +6,7 @@ import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { normalizeAndResolvePath } from "./storage-utils.js";
 import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.js';
 import { saveFileTree } from './storage-utils.js'; // Import saveFileTree
+import { log } from './logger.js'; // Import the logger
 
 /**
  * Normalizes a file path for consistent comparison across platforms
@@ -34,7 +35,7 @@ export function normalizePath(filepath: string): string {
     // Remove trailing slash
     return deduped.endsWith('/') ? deduped.slice(0, -1) : deduped;
   } catch (error) {
-    console.error(`Failed to normalize path: ${filepath}`, error);
+    log(`Failed to normalize path: ${filepath} - ${error}`);
     // Return original as fallback
     return filepath;
   }
@@ -64,7 +65,7 @@ const IMPORT_PATTERNS: { [key: string]: RegExp } = {
 
 // Helper to resolve TypeScript/JavaScript import paths
 function resolveImportPath(importPath: string, currentFilePath: string, baseDir: string): string {
-  console.error(`Resolving import path: ${importPath} from file: ${currentFilePath}`);
+  log(`Resolving import path: ${importPath} from file: ${currentFilePath}`);
   
   // For TypeScript files, if the import ends with .js, convert it to .ts
   if (currentFilePath.endsWith('.ts') || currentFilePath.endsWith('.tsx')) {
@@ -76,20 +77,20 @@ function resolveImportPath(importPath: string, currentFilePath: string, baseDir:
   // Handle relative imports
   if (importPath.startsWith('.')) {
     const resolvedPath = path.resolve(path.dirname(currentFilePath), importPath);
-    console.error(`Resolved relative import to: ${resolvedPath}`);
+    log(`Resolved relative import to: ${resolvedPath}`);
     return path.normalize(resolvedPath);
   }
 
   // Handle absolute imports (from project root)
   if (importPath.startsWith('/')) {
     const resolvedPath = path.join(baseDir, importPath);
-    console.error(`Resolved absolute import to: ${resolvedPath}`);
+    log(`Resolved absolute import to: ${resolvedPath}`);
     return path.normalize(resolvedPath);
   }
 
   // Handle package imports
   const nodeModulesPath = path.join(baseDir, 'node_modules', importPath);
-  console.error(`Resolved package import to: ${nodeModulesPath}`);
+  log(`Resolved package import to: ${nodeModulesPath}`);
   return path.normalize(nodeModulesPath);
 }
 
@@ -237,7 +238,7 @@ async function extractPackageVersion(packageName: string, baseDir: string): Prom
     
     return undefined;
   } catch (error) {
-    console.error(`Failed to extract package version for ${packageName}:`, error);
+    log(`Failed to extract package version for ${packageName}: ${error}`);
     return undefined;
   }
 }
@@ -246,33 +247,33 @@ async function extractPackageVersion(packageName: string, baseDir: string): Prom
 function isExcluded(filePath: string, baseDir: string): boolean {
   // Add a failsafe check specifically for .git directory
   if (filePath.includes('.git') || path.basename(filePath) === '.git') {
-    console.error(`🔴 SPECIAL CASE: .git directory/file detected: ${filePath}`);
+    log(`🔴 SPECIAL CASE: .git directory/file detected: ${filePath}`);
     return true;
   }
   
   // Add a failsafe check for node_modules
   if (filePath.includes('node_modules') || path.basename(filePath) === 'node_modules') {
-    console.error(`🔴 SPECIAL CASE: node_modules directory/file detected: ${filePath}`);
+    log(`🔴 SPECIAL CASE: node_modules directory/file detected: ${filePath}`);
     return true;
   }
   
   // Add a failsafe check for test_excluded files
   if (filePath.includes('test_excluded') || path.basename(filePath).startsWith('test_excluded')) {
-    console.error(`🔴 SPECIAL CASE: test_excluded file detected: ${filePath}`);
+    log(`🔴 SPECIAL CASE: test_excluded file detected: ${filePath}`);
     return true;
   }
   
-  console.error(`\n===== EXCLUDE CHECK for: ${filePath} =====`);
+  log(`\n===== EXCLUDE CHECK for: ${filePath} =====`);
   
   const config = getConfig();
   if (!config) {
-    console.error('❌ ERROR: Config is null! Global state not initialized properly.');
+    log('❌ ERROR: Config is null! Global state not initialized properly.');
     return false;
   }
   
   if (!config.excludePatterns || config.excludePatterns.length === 0) {
-    console.error('❌ WARNING: No exclude patterns found in config!');
-    console.error('Config object:', JSON.stringify(config, null, 2));
+    log('❌ WARNING: No exclude patterns found in config!');
+    log(`Config object: ${JSON.stringify(config, null, 2)}`);
     return false;
   }
 
@@ -280,73 +281,73 @@ function isExcluded(filePath: string, baseDir: string): boolean {
   const relativePath = path.relative(baseDir, filePath).replace(/\\/g, '/');
   const fileName = path.basename(filePath);
   
-  console.error(`📂 Path details:`);
-  console.error(`  - Full path: ${filePath}`);
-  console.error(`  - Base dir: ${baseDir}`);
-  console.error(`  - Relative path: ${relativePath}`);
-  console.error(`  - File name: ${fileName}`);
-  console.error(`  - Platform: ${process.platform}, path separator: ${path.sep}`);
+  log(`📂 Path details:`);
+  log(`  - Full path: ${filePath}`);
+  log(`  - Base dir: ${baseDir}`);
+  log(`  - Relative path: ${relativePath}`);
+  log(`  - File name: ${fileName}`);
+  log(`  - Platform: ${process.platform}, path separator: ${path.sep}`);
   
-  console.error(`\n🔍 Testing against ${config.excludePatterns.length} exclude patterns...`);
+  log(`\n🔍 Testing against ${config.excludePatterns.length} exclude patterns...`);
   
   // Special case check for .git and node_modules
   if (relativePath.includes('/.git/') || relativePath === '.git' || 
       fileName === '.git' || relativePath.startsWith('.git/')) {
-    console.error(`✅ MATCH! Special case for .git directory detected: ${relativePath}`);
+    log(`✅ MATCH! Special case for .git directory detected: ${relativePath}`);
     return true;
   }
   
   if (relativePath.includes('/node_modules/') || relativePath === 'node_modules' || 
       fileName === 'node_modules' || relativePath.startsWith('node_modules/')) {
-    console.error(`✅ MATCH! Special case for node_modules directory detected: ${relativePath}`);
+    log(`✅ MATCH! Special case for node_modules directory detected: ${relativePath}`);
     return true;
   }
   
   // Check each exclude pattern
   for (let i = 0; i < config.excludePatterns.length; i++) {
     const pattern = config.excludePatterns[i];
-    console.error(`\n  [${i+1}/${config.excludePatterns.length}] Testing pattern: "${pattern}"`);
+    log(`\n  [${i+1}/${config.excludePatterns.length}] Testing pattern: "${pattern}"`);
     
     try {
       const regex = globToRegExp(pattern);
-      console.error(`  - Converted to regex: ${regex}`);
+      //log(`  - Converted to regex: ${regex}`); // Uncomment for debugging
       
       // Test against full relative path
       const fullPathMatch = regex.test(relativePath);
-      console.error(`  - Match against relative path: ${fullPathMatch ? '✅ YES' : '❌ NO'}`);
+      //log(`  - Match against relative path: ${fullPathMatch ? '✅ YES' : '❌ NO'}`); // Uncomment for debugging
       
       if (fullPathMatch) {
-        console.error(`✅ MATCH! Path ${relativePath} matches exclude pattern ${pattern}`);
+        log(`✅ MATCH! Path ${relativePath} matches exclude pattern ${pattern}`);
         return true;
       }
       
       // Also test against just the filename for file extension patterns
       if (pattern.startsWith('**/*.') || pattern.includes('/*.')) {
         const filenameMatch = regex.test(fileName);
-        console.error(`  - Match against filename only: ${filenameMatch ? '✅ YES' : '❌ NO'}`);
+        //log(`  - Match against filename only: ${filenameMatch ? '✅ YES' : '❌ NO'}`); // Uncomment for debugging
         
         if (filenameMatch) {
-          console.error(`✅ MATCH! Filename ${fileName} matches exclude pattern ${pattern}`);
+          log(`✅ MATCH! Filename ${fileName} matches exclude pattern ${pattern}`);
           return true;
         }
       }
     } catch (error) {
-      console.error(`  - ❌ ERROR converting pattern to regex: ${error}`);
+      log(`  - ❌ ERROR converting pattern to regex: ${error}`);
     }
   }
   
-  console.error(`❌ No pattern matches found for ${relativePath}`);
-  console.error(`===== END EXCLUDE CHECK =====\n`);
+  log(`❌ No pattern matches found for ${relativePath}`);
+  log(`===== END EXCLUDE CHECK =====\n`);
   return false;
 }
 
 // Helper function to convert glob pattern to RegExp
 function globToRegExp(pattern: string): RegExp {
-  console.error(`  Converting glob pattern: ${pattern}`);
+  //log(`  Converting glob pattern: ${pattern}`); // Uncomment for debugging
 
   // Escape special regex characters except * and ?
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  console.error(`  - After escaping special chars: ${escaped}`);
+  //log(`  - After escaping special chars: ${escaped}`); // Uncomment for debugging
 
   // Handle patterns starting with **/
   let prefix = '';
@@ -372,26 +373,26 @@ function globToRegExp(pattern: string): RegExp {
     // Convert globstar back to proper pattern
     .replace(/__GLOBSTAR__/g, '.*');
 
-  console.error(`  - After pattern conversion: ${converted}`);
+  //log(`  - After pattern conversion: ${converted}`); // Uncomment for debugging
 
   // Create regex that matches entire path, adding the optional prefix
   // Ensure the pattern is anchored correctly
   const finalPattern = `^${prefix}${converted}$`;
   const regex = new RegExp(finalPattern, 'i');
-  console.error(`  - Final regex: ${regex}`);
+  //log(`  - Final regex: ${regex}`); // Uncomment for debugging
   return regex;
 }
 
 export async function scanDirectory(baseDir: string, currentDir: string = baseDir): Promise<FileNode> {
-  console.error(`\n📁 SCAN DIRECTORY: ${currentDir}`);
-  console.error(`  - Base dir: ${baseDir}`);
+  log(`\n📁 SCAN DIRECTORY: ${currentDir}`);
+  log(`  - Base dir: ${baseDir}`);
 
   // Handle special case for current directory
   const normalizedBaseDir = path.normalize(baseDir);
   const normalizedDirPath = path.normalize(currentDir);
   
-  console.error(`  - Normalized base dir: ${normalizedBaseDir}`);
-  console.error(`  - Normalized current dir: ${normalizedDirPath}`);
+  log(`  - Normalized base dir: ${normalizedBaseDir}`);
+  log(`  - Normalized current dir: ${normalizedDirPath}`);
 
   // Create root node for this directory
   const rootNode: FileNode = {
@@ -405,9 +406,9 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
   let entries: fs.Dirent[];
   try {
     entries = await fsPromises.readdir(normalizedDirPath, { withFileTypes: true });
-    console.error(`  - Read ${entries.length} entries in directory`);
+    log(`  - Read ${entries.length} entries in directory`);
   } catch (error) {
-    console.error(`  - ❌ Error reading directory ${normalizedDirPath}:`, error);
+    log(`  - ❌ Error reading directory ${normalizedDirPath}:`, error);
     return rootNode;
   }
 
@@ -417,16 +418,16 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
   let dirProcessed = 0;
   let fileProcessed = 0;
   
-  console.error(`\n  Processing ${entries.length} entries in ${normalizedDirPath}...`);
+  log(`\n  Processing ${entries.length} entries in ${normalizedDirPath}...`);
   
   // ==================== CRITICAL CODE ====================
   // Log the global config status before processing entries
-  console.error(`\n🔍 BEFORE PROCESSING: Is config loaded? ${getConfig() !== null ? 'YES ✅' : 'NO ❌'}`);
+  log(`\n🔍 BEFORE PROCESSING: Is config loaded? ${getConfig() !== null ? 'YES ✅' : 'NO ❌'}`);
   if (getConfig()) {
     const excludePatternsLength = getConfig()?.excludePatterns?.length || 0;
-    console.error(`  - Exclude patterns count: ${excludePatternsLength}`);
+    log(`  - Exclude patterns count: ${excludePatternsLength}`);
     if (excludePatternsLength > 0) {
-      console.error(`  - First few patterns: ${getConfig()?.excludePatterns?.slice(0, 3).join(', ')}`);
+      log(`  - First few patterns: ${getConfig()?.excludePatterns?.slice(0, 3).join(', ')}`);
     }
   }
   // ======================================================
@@ -435,30 +436,30 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
     const fullPath = path.join(normalizedDirPath, entry.name);
     const normalizedFullPath = path.normalize(fullPath);
     
-    console.error(`\n  Entry: ${entry.name} (${entry.isDirectory() ? 'directory' : 'file'})`);
-    console.error(`  - Full path: ${normalizedFullPath}`);
+    log(`\n  Entry: ${entry.name} (${entry.isDirectory() ? 'directory' : 'file'})`);
+    log(`  - Full path: ${normalizedFullPath}`);
 
     // Here's the critical exclusion check
-    console.error(`  🔍 Checking if path should be excluded: ${normalizedFullPath}`);
+    log(`  🔍 Checking if path should be excluded: ${normalizedFullPath}`);
     const shouldExclude = isExcluded(normalizedFullPath, normalizedBaseDir);
-    console.error(`  🔍 Exclusion check result: ${shouldExclude ? 'EXCLUDE ✅' : 'INCLUDE ❌'}`);
+    log(`  🔍 Exclusion check result: ${shouldExclude ? 'EXCLUDE ✅' : 'INCLUDE ❌'}`);
     
     if (shouldExclude) {
-      console.error(`  - ✅ Skipping excluded path: ${normalizedFullPath}`);
+      log(`  - ✅ Skipping excluded path: ${normalizedFullPath}`);
       excluded++;
       continue;
     }
     
-    console.error(`  - ✅ Including path: ${normalizedFullPath}`);
+    log(`  - ✅ Including path: ${normalizedFullPath}`);
     included++;
 
     if (entry.isDirectory()) {
-      console.error(`  - Processing directory: ${normalizedFullPath}`);
+      log(`  - Processing directory: ${normalizedFullPath}`);
       const childNode = await scanDirectory(normalizedBaseDir, fullPath);
       rootNode.children?.push(childNode);
       dirProcessed++;
     } else {
-      console.error(`  - Processing file: ${normalizedFullPath}`);
+      log(`  - Processing file: ${normalizedFullPath}`);
       fileProcessed++;
       const ext = path.extname(entry.name);
       const importPattern = IMPORT_PATTERNS[ext];
@@ -469,7 +470,7 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
         try {
           const content = await fsPromises.readFile(fullPath, 'utf-8');
           const matches = content.match(importPattern);
-          console.error(`Found ${matches?.length || 0} potential imports in ${normalizedFullPath}`);
+          log(`Found ${matches?.length || 0} potential imports in ${normalizedFullPath}`);
 
           if (matches) {
             for (const match of matches) {
@@ -482,7 +483,7 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                   } else {
                     resolvedPath = path.resolve(path.dirname(fullPath), importPath);
                   }
-                  console.error(`Resolved path: ${resolvedPath}`);
+                  log(`Resolved path: ${resolvedPath}`);
                   
                   // Handle package imports
                   if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
@@ -538,7 +539,7 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                     const pathToCheck = resolvedPath + extension;
                     try {
                       await fsPromises.access(pathToCheck);
-                      console.error(`Found existing path: ${pathToCheck}`);
+                      log(`Found existing path: ${pathToCheck}`);
                       dependencies.push(pathToCheck);
                       break;
                     } catch {
@@ -546,13 +547,13 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                     }
                   }
                 } catch (error) {
-                  console.error(`Failed to resolve path for ${importPath}:`, error);
+                  log(`Failed to resolve path for ${importPath}:`, error);
                 }
               }
             }
           }
         } catch (error) {
-          console.error(`Failed to read or process file ${fullPath}:`, error);
+          log(`Failed to read or process file ${fullPath}:`, error);
         }
       }
 
@@ -571,13 +572,13 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
   }
   
   // Log summary for this directory
-  console.error(`\n  📊 DIRECTORY SCAN SUMMARY for ${normalizedDirPath}:`);
-  console.error(`    - Total entries: ${entries.length}`);
-  console.error(`    - Excluded: ${excluded}`);
-  console.error(`    - Included: ${included}`);
-  console.error(`    - Directories processed: ${dirProcessed}`);
-  console.error(`    - Files processed: ${fileProcessed}`);
-  console.error(`  📁 END SCAN DIRECTORY: ${currentDir}\n`);
+  log(`\n  📊 DIRECTORY SCAN SUMMARY for ${normalizedDirPath}:`);
+  log(`    - Total entries: ${entries.length}`);
+  log(`    - Excluded: ${excluded}`);
+  log(`    - Included: ${included}`);
+  log(`    - Directories processed: ${dirProcessed}`);
+  log(`    - Files processed: ${fileProcessed}`);
+  log(`  📁 END SCAN DIRECTORY: ${currentDir}\n`);
   
   return rootNode;
 }
@@ -667,30 +668,30 @@ export function calculateImportance(node: FileNode): void {
 // Add a function to manually set importance
 export function setFileImportance(fileTree: FileNode, filePath: string, importance: number): boolean {
   const normalizedInputPath = normalizePath(filePath);
-  console.error(`Setting importance for file: ${normalizedInputPath}`);
-  console.error(`Current tree root: ${fileTree.path}`);
+  log(`Setting importance for file: ${normalizedInputPath}`);
+  log(`Current tree root: ${fileTree.path}`);
   
   function findAndSetImportance(node: FileNode): boolean {
     const normalizedNodePath = normalizePath(node.path);
-    console.error(`Checking node: ${normalizedNodePath}`);
+    log(`Checking node: ${normalizedNodePath}`);
     
     // Try exact match
     if (normalizedNodePath === normalizedInputPath) {
-      console.error(`Found exact match for: ${normalizedInputPath}`);
+      log(`Found exact match for: ${normalizedInputPath}`);
       node.importance = Math.min(10, Math.max(0, importance));
       return true;
     }
     
     // Try case-insensitive match for Windows compatibility
     if (normalizedNodePath.toLowerCase() === normalizedInputPath.toLowerCase()) {
-      console.error(`Found case-insensitive match for: ${normalizedInputPath}`);
+      log(`Found case-insensitive match for: ${normalizedInputPath}`);
       node.importance = Math.min(10, Math.max(0, importance));
       return true;
     }
     
     // Check if the path ends with our target (to handle relative vs absolute paths)
     if (normalizedInputPath.endsWith(normalizedNodePath) || normalizedNodePath.endsWith(normalizedInputPath)) {
-      console.error(`Found path suffix match for: ${normalizedInputPath}`);
+      log(`Found path suffix match for: ${normalizedInputPath}`);
       node.importance = Math.min(10, Math.max(0, importance));
       return true;
     }
@@ -699,7 +700,7 @@ export function setFileImportance(fileTree: FileNode, filePath: string, importan
     const inputBasename = normalizedInputPath.split('/').pop() || '';
     const nodeBasename = normalizedNodePath.split('/').pop() || '';
     if (nodeBasename === inputBasename && nodeBasename !== '') {
-      console.error(`Found basename match for: ${inputBasename}`);
+      log(`Found basename match for: ${inputBasename}`);
       node.importance = Math.min(10, Math.max(0, importance));
       return true;
     }
@@ -747,7 +748,7 @@ export async function createFileTree(baseDir: string): Promise<FileNode> {
 
 export function getFileImportance(fileTree: FileNode, targetPath: string): FileNode | null {
   const normalizedInputPath = normalizePath(targetPath);
-  console.error(`Looking for file: ${normalizedInputPath}`);
+  log(`Looking for file: ${normalizedInputPath}`);
   
   function findNode(node: FileNode, targetPath: string): FileNode | null {
     // Normalize paths to handle both forward and backward slashes
@@ -807,7 +808,7 @@ export function findNodeByPath(tree: FileNode | null, targetPath: string): FileN
 // Placeholder for dependency analysis of a single new file
 // This needs to replicate the relevant logic from scanDirectory
 async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[] }> {
-  console.error(`[analyzeNewFile] Analyzing ${filePath}`);
+  log(`[analyzeNewFile] Analyzing ${filePath}`);
   const dependencies: string[] = [];
   const packageDependencies: PackageDependency[] = [];
   const ext = path.extname(filePath);
@@ -842,15 +843,15 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
                     }
                 }
             } catch (resolveError) {
-                 console.error(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}:`, resolveError);
+                 log(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}: ${resolveError}`);
             }
          }
        }
      } catch (readError) {
-       console.error(`[analyzeNewFile] Error reading file ${filePath}:`, readError);
+       log(`[analyzeNewFile] Error reading file ${filePath}: ${readError}`);
      }
   }
-  console.error(`[analyzeNewFile] Found deps for ${filePath}:`, { dependencies, packageDependencies });
+  log(`[analyzeNewFile] Found deps for ${filePath}: ${JSON.stringify({ dependencies, packageDependencies })}`);
   return { dependencies, packageDependencies };
 }
 
@@ -871,21 +872,21 @@ export async function addFileNode(
   const normalizedFilePath = normalizePath(filePath);
   // Removed reliance on getConfig() here
 
-  console.error(`[addFileNode] Attempting to add file: ${normalizedFilePath} to tree rooted at ${activeFileTree.path}`);
+  log(`[addFileNode] Attempting to add file: ${normalizedFilePath} to tree rooted at ${activeFileTree.path}`);
 
   // 1. Find the parent directory node within the provided active tree
   const parentDir = path.dirname(normalizedFilePath);
   const parentNode = findNodeByPath(activeFileTree, parentDir);
 
   if (!parentNode || !parentNode.isDirectory) {
-    console.error(`[addFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
+    log(`[addFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
     // Optionally: Handle cases where intermediate directories might also need creation
     return;
   }
 
   // 2. Check if node already exists (should not happen if watcher is correct, but good practice)
   if (parentNode.children?.some(child => normalizePath(child.path) === normalizedFilePath)) {
-    console.error(`[addFileNode] Node already exists: ${normalizedFilePath}`);
+    log(`[addFileNode] Node already exists: ${normalizedFilePath}`);
     return;
   }
 
@@ -929,13 +930,13 @@ export async function addFileNode(
 
     // 9. Global state update is handled by the caller (mcp-server) after saving
 
-    console.error(`[addFileNode] Successfully added node: ${normalizedFilePath}`);
+    log(`[addFileNode] Successfully added node: ${normalizedFilePath}`);
 
   } catch (error: any) {
     if (error.code === 'ENOENT') {
-       console.error(`[addFileNode] File not found during add operation (might have been deleted quickly): ${normalizedFilePath}`);
+       log(`[addFileNode] File not found during add operation (might have been deleted quickly): ${normalizedFilePath}`);
     } else {
-       console.error(`[addFileNode] Error adding file node ${normalizedFilePath}:`, error);
+       log(`[addFileNode] Error adding file node ${normalizedFilePath}:`, error);
     }
   }
 }
@@ -953,33 +954,58 @@ export async function removeFileNode(
     activeFileTree: FileNode,
     activeProjectRoot: string
 ): Promise<void> {
-  const normalizedFilePath = normalizePath(filePath);
-  // Removed reliance on getConfig() here
+  // Check if filePath is a relative path, and if so, resolve it to an absolute path
+  let absoluteFilePath = filePath;
+  if (!path.isAbsolute(filePath)) {
+    absoluteFilePath = path.join(activeProjectRoot, filePath);
+    log(`[removeFileNode] Converted relative path "${filePath}" to absolute path "${absoluteFilePath}"`);
+  }
+  
+  const normalizedFilePath = normalizePath(absoluteFilePath);
+  log(`[removeFileNode] Attempting to remove file: ${normalizedFilePath} from tree rooted at ${activeFileTree.path}`);
 
-  console.error(`[removeFileNode] Attempting to remove file: ${normalizedFilePath} from tree rooted at ${activeFileTree.path}`);
-
-  // Log the current state of the file tree
-  console.error('Current file tree state before removal:', JSON.stringify(activeFileTree, null, 2));
+  // Log the current state of the file tree - fix this by converting to string
+  // log(`Current file tree state before removal: ${JSON.stringify(activeFileTree, null, 2)}`);
 
   // 1. Find the node to remove within the provided active tree
   const nodeToRemove = findNodeByPath(activeFileTree, normalizedFilePath);
+  
+  // If node not found, try looking it up by basename as a fallback
   if (!nodeToRemove || nodeToRemove.isDirectory) {
-    // Handle case where node not found or it's unexpectedly a directory
-    console.error(`[removeFileNode] File node not found or is a directory: ${normalizedFilePath}`);
+    log(`[removeFileNode] Initial search failed for: ${normalizedFilePath}`);
+    
+    // Fallback: Find by basename in case of relative path issues
+    const basename = path.basename(normalizedFilePath);
+    log(`[removeFileNode] Trying fallback search by basename: ${basename}`);
+    
+    // Get all file nodes and search by basename
+    const allFileNodes = getAllFileNodes(activeFileTree);
+    const nodeByName = allFileNodes.find(node => 
+      !node.isDirectory && path.basename(node.path) === basename
+    );
+    
+    if (nodeByName) {
+      log(`[removeFileNode] Found node by basename: ${nodeByName.path}`);
+      // Call removeFileNode recursively with the found absolute path
+      return removeFileNode(nodeByName.path, activeFileTree, activeProjectRoot);
+    }
+    
+    // If still not found, report an error
+    log(`[removeFileNode] File node not found or is a directory: ${normalizedFilePath}`);
     return;
   }
 
-  console.error(`[removeFileNode] Found node to remove: ${nodeToRemove.path}`);
+  log(`[removeFileNode] Found node to remove: ${nodeToRemove.path}`);
 
   // 2. Find the parent directory node within the provided active tree
   const parentDir = path.dirname(normalizedFilePath);
   const parentNode = findNodeByPath(activeFileTree, parentDir);
   if (!parentNode || !parentNode.isDirectory || !parentNode.children) {
-    console.error(`[removeFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
+    log(`[removeFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
     return;
   }
 
-  console.error(`[removeFileNode] Found parent node: ${parentNode.path}`);
+  log(`[removeFileNode] Found parent node: ${parentNode.path}`);
 
   // 3. Store necessary info before removal (Ensure arrays exist)
   const dependenciesToRemoveFrom = [...(nodeToRemove.dependencies ?? [])];
@@ -989,22 +1015,17 @@ export async function removeFileNode(
   const index = parentNode.children.findIndex(child => normalizePath(child.path) === normalizedFilePath);
   if (index > -1) {
     parentNode.children.splice(index, 1);
-    console.error(`[removeFileNode] Node removed from parent's children: ${normalizedFilePath}`);
+    log(`[removeFileNode] Node removed from parent's children: ${normalizedFilePath}`);
   } else {
-     console.error(`[removeFileNode] Node not found in parent's children: ${normalizedFilePath}`);
+     log(`[removeFileNode] Node not found in parent's children: ${normalizedFilePath}`);
      // Continue removal process anyway, as the node might be detached elsewhere
   }
-
-  // Log the updated state of the file tree
-  console.error('Updated file tree state after removal:', JSON.stringify(activeFileTree, null, 2));
 
   // 5. Update the 'dependents' list of files the removed node imported
   await updateDependentsAfterRemoval(nodeToRemove, activeFileTree); // Pass active tree
 
-
   // 6. Update the 'dependencies' list of files that imported the removed node
   await updateDependersAfterRemoval(nodeToRemove, activeFileTree); // Pass active tree
-
 
   // 7. Recalculate importance for affected nodes (dependents and dependencies)
   const affectedPaths = [
@@ -1015,7 +1036,7 @@ export async function removeFileNode(
 
   // 8. Global state update is handled by the caller (mcp-server) after saving
 
-  console.error(`[removeFileNode] Successfully removed node: ${normalizedFilePath}`);
+  log(`[removeFileNode] Successfully removed node: ${normalizedFilePath}`);
 }
 
 
@@ -1060,7 +1081,7 @@ function calculateNodeImportance(node: FileNode, projectRoot: string): number {
  * @param activeFileTree The tree to search within.
  */
 async function updateDependentsForNewNode(newNode: FileNode, activeFileTree: FileNode): Promise<void> {
-   console.error(`[updateDependentsForNewNode] Updating dependents for new node ${newNode.path}`);
+   log(`[updateDependentsForNewNode] Updating dependents for new node ${newNode.path}`);
    // Removed reliance on getConfig()
 
    // Ensure dependencies is an array
@@ -1073,7 +1094,7 @@ async function updateDependentsForNewNode(newNode: FileNode, activeFileTree: Fil
            }
            if (!depNode.dependents.includes(newNode.path)) {
                depNode.dependents.push(newNode.path);
-               console.error(`[updateDependentsForNewNode] Added ${newNode.path} as dependent for ${depNode.path}`);
+               log(`[updateDependentsForNewNode] Added ${newNode.path} as dependent for ${depNode.path}`);
            }
        } else {
           // console.warn(`[updateDependentsForNewNode] Dependency node not found or is directory: ${depPath}`);
@@ -1088,7 +1109,7 @@ async function updateDependentsForNewNode(newNode: FileNode, activeFileTree: Fil
  * @param activeFileTree The tree to search within.
  */
 async function updateDependentsAfterRemoval(removedNode: FileNode, activeFileTree: FileNode): Promise<void> {
-   console.error(`[updateDependentsAfterRemoval] Updating dependents after removing ${removedNode.path}`);
+   log(`[updateDependentsAfterRemoval] Updating dependents after removing ${removedNode.path}`);
     // Removed reliance on getConfig()
 
     // Ensure dependencies is an array
@@ -1100,7 +1121,7 @@ async function updateDependentsAfterRemoval(removedNode: FileNode, activeFileTre
                 const index = depNode.dependents.indexOf(removedNode.path);
                 if (index > -1) {
                     depNode.dependents.splice(index, 1);
-                    console.error(`[updateDependentsAfterRemoval] Removed ${removedNode.path} from dependents of ${depNode.path}`);
+                    log(`[updateDependentsAfterRemoval] Removed ${removedNode.path} from dependents of ${depNode.path}`);
                 }
             }
         }
@@ -1113,7 +1134,7 @@ async function updateDependentsAfterRemoval(removedNode: FileNode, activeFileTre
  * @param activeFileTree The tree to search within.
  */
 async function updateDependersAfterRemoval(removedNode: FileNode, activeFileTree: FileNode): Promise<void> {
-   console.error(`[updateDependersAfterRemoval] Updating dependers after removing ${removedNode.path}`);
+   log(`[updateDependersAfterRemoval] Updating dependers after removing ${removedNode.path}`);
    // Removed reliance on getConfig()
 
    // Ensure dependents is an array
@@ -1126,7 +1147,7 @@ async function updateDependersAfterRemoval(removedNode: FileNode, activeFileTree
                const index = dependerNode.dependencies.findIndex(d => normalizePath(d) === normalizedRemovedPath);
                if (index > -1) {
                    dependerNode.dependencies.splice(index, 1);
-                   console.error(`[updateDependersAfterRemoval] Removed dependency on ${removedNode.path} from ${dependerNode.path}`);
+                   log(`[updateDependersAfterRemoval] Removed dependency on ${removedNode.path} from ${dependerNode.path}`);
                }
            }
        }
@@ -1145,7 +1166,7 @@ async function recalculateImportanceForAffected(
     activeFileTree: FileNode,
     activeProjectRoot: string
 ): Promise<void> {
-  console.error(`[recalculateImportanceForAffected] Recalculating importance for paths:`, affectedPaths);
+  log(`[recalculateImportanceForAffected] Recalculating importance for paths: ${JSON.stringify(affectedPaths)}`);
   // Removed reliance on getConfig()
 
   const uniquePaths = [...new Set(affectedPaths)]; // Ensure uniqueness
@@ -1157,7 +1178,7 @@ async function recalculateImportanceForAffected(
        // Use the corrected importance calculation function
        node.importance = calculateNodeImportance(node, activeProjectRoot);
        if(oldImportance !== node.importance) {
-          console.error(`[recalculateImportanceForAffected] Importance for ${node.path} changed from ${oldImportance} to ${node.importance}`);
+          log(`[recalculateImportanceForAffected] Importance for ${node.path} changed from ${oldImportance} to ${node.importance}`);
           // Potential future enhancement: trigger recursive recalculation if importance changed significantly
        }
     } else {
@@ -1176,13 +1197,21 @@ async function recalculateImportanceForAffected(
 
 export async function excludeAndRemoveFile(filePath: string, activeFileTree: FileNode, activeProjectRoot: string): Promise<void> {
   // Normalize the file path
-  const normalizedFilePath = normalizePath(filePath);
-  console.error(`Excluding and removing file: ${normalizedFilePath}`);
+  let absoluteFilePath = filePath;
+  if (!path.isAbsolute(filePath)) {
+    absoluteFilePath = path.join(activeProjectRoot, filePath);
+    log(`[excludeAndRemoveFile] Converted relative path "${filePath}" to absolute path "${absoluteFilePath}"`);
+  }
+  
+  const normalizedFilePath = normalizePath(absoluteFilePath);
+  log(`[excludeAndRemoveFile] Excluding and removing file: ${normalizedFilePath}`);
 
-  // Add the file path to the exclusion patterns
-  addExclusionPattern(normalizedFilePath);
+  // Add the file path to the exclusion patterns - use basename pattern to exclude anywhere it appears
+  const basenamePattern = `**/${path.basename(normalizedFilePath)}`;
+  log(`[excludeAndRemoveFile] Adding exclusion pattern: ${basenamePattern}`);
+  addExclusionPattern(basenamePattern);
 
   // Remove the file node from the file tree
   await removeFileNode(normalizedFilePath, activeFileTree, activeProjectRoot);
-  console.error(`File removed from tree and added to exclusion patterns: ${normalizedFilePath}`);
+  log(`[excludeAndRemoveFile] File removed from tree and added to exclusion patterns: ${normalizedFilePath}`);
 }

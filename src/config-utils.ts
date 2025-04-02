@@ -54,7 +54,7 @@ export async function loadConfig(configPath: string = 'config.json'): Promise<Co
     console.error(`  - Config file exists: ${exists ? '✅ YES' : '❌ NO'}`);
     
     if (!exists) {
-      console.error(`  - ⚠️ Using default config instead`);
+      console.error(`  - ! Using default config instead`);
       console.error(`  - Default config:`, JSON.stringify(DEFAULT_CONFIG, null, 2));
       return DEFAULT_CONFIG;
     }
@@ -73,7 +73,7 @@ export async function loadConfig(configPath: string = 'config.json'): Promise<Co
           console.error(`  - First 5 patterns:`, parsedConfig.excludePatterns.slice(0, 5));
         }
       } else {
-        console.error(`  - ⚠️ No exclude patterns found in config!`);
+        console.error(`  - ! No exclude patterns found in config!`);
       }
       
       // Validate config
@@ -81,18 +81,18 @@ export async function loadConfig(configPath: string = 'config.json'): Promise<Co
       console.error(`  - Config validation successful`);
       console.error(`  - Base directory: ${validatedConfig.baseDirectory}`);
       console.error(`  - Version: ${validatedConfig.version}`);
-      console.error(`🔧 CONFIG LOADED SUCCESSFULLY\n`);
+      console.error(`+ CONFIG LOADED SUCCESSFULLY\n`);
       
       return validatedConfig;
     } catch (parseError) {
-      console.error(`  - ❌ ERROR parsing config JSON:`, parseError);
+      console.error(`  - x ERROR parsing config JSON:`, parseError);
       console.error(`  - Raw config content:`, configContent);
-      console.error(`  - ⚠️ Using default config instead`);
+      console.error(`  - ! Using default config instead`);
       return DEFAULT_CONFIG;
     }
   } catch (error) {
-    console.error(`  - ❌ ERROR loading config:`, error);
-    console.error(`  - ⚠️ Using default config instead`);
+    console.error(`  - x ERROR loading config:`, error);
+    console.error(`  - ! Using default config instead`);
     console.error(`  - Default config:`, JSON.stringify(DEFAULT_CONFIG, null, 2));
     return DEFAULT_CONFIG;
   }
