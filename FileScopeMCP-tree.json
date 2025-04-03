@@ -1,648 +1,440 @@
 {
   "config": {
     "filename": "FileScopeMCP-tree.json",
-    "baseDirectory": "C:/Users/admica/code/mcp/FileScopeMCP",
-    "projectRoot": "C:/Users/admica/code/mcp/FileScopeMCP",
-    "lastUpdated": "2025-04-01T23:15:20.560Z"
+    "baseDirectory": "/home/user/mcp/FileScopeMCP",
+    "projectRoot": "/home/user/mcp/FileScopeMCP",
+    "lastUpdated": "2025-04-03T05:00:48.335Z"
   },
   "fileTree": {
-    "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP",
+    "path": "/home/user/mcp/FileScopeMCP",
     "name": "FileScopeMCP",
     "isDirectory": true,
     "children": [
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\.cursor",
-        "name": ".cursor",
-        "isDirectory": true,
-        "children": [
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\.cursor\\mcp.json",
-            "name": "mcp.json",
-            "isDirectory": false,
-            "importance": 1,
-            "dependencies": [],
-            "packageDependencies": [],
-            "dependents": []
-          }
-        ]
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\build.bat",
-        "name": "build.bat",
-        "isDirectory": false,
-        "importance": 0,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\build.sh",
-        "name": "build.sh",
-        "isDirectory": false,
-        "importance": 0,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\config.json",
-        "name": "config.json",
-        "isDirectory": false,
-        "importance": 3,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist",
-        "name": "dist",
-        "isDirectory": true,
-        "children": [
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\config-utils.js",
-            "name": "config-utils.js",
-            "isDirectory": false,
-            "importance": 4,
-            "dependencies": [],
-            "packageDependencies": [
-              {
-                "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
-              },
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              },
-              {
-                "name": "zod",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\zod",
-                "version": "^3.22.4"
-              }
-            ],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js"
-            ]
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-utils.js",
-            "name": "file-utils.js",
-            "isDirectory": false,
-            "importance": 7,
-            "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\types.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\global-state.js"
-            ],
-            "packageDependencies": [
-              {
-                "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
-              },
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              },
-              {
-                "name": "firebase",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\firebase\\auth"
-              }
-            ],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-watcher.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js"
-            ]
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-watcher.js",
-            "name": "file-watcher.js",
-            "isDirectory": false,
-            "importance": 6,
-            "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\global-state.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-utils.js"
-            ],
-            "packageDependencies": [
-              {
-                "name": "chokidar",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\chokidar",
-                "version": "^3.6.0"
-              },
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              }
-            ],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js"
-            ]
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\global-state.js",
-            "name": "global-state.js",
-            "isDirectory": false,
-            "importance": 5,
-            "dependencies": [],
-            "packageDependencies": [],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-utils.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-watcher.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\storage-utils.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\types.js"
-            ]
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\grouping-rules.js",
-            "name": "grouping-rules.js",
-            "isDirectory": false,
-            "importance": 3,
-            "dependencies": [],
-            "packageDependencies": [
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              }
-            ],
-            "dependents": []
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\layout-engine.js",
-            "name": "layout-engine.js",
-            "isDirectory": false,
-            "importance": 2,
-            "dependencies": [],
-            "packageDependencies": [],
-            "dependents": []
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js",
-            "name": "mcp-server.js",
-            "isDirectory": false,
-            "importance": 7,
-            "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-utils.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\storage-utils.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mermaid-generator.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\global-state.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\config-utils.js",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-watcher.js"
-            ],
-            "packageDependencies": [
-              {
-                "name": "@modelcontextprotocol/sdk",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\@modelcontextprotocol\\sdk\\server\\mcp.js",
-                "scope": "@modelcontextprotocol",
-                "version": "1.7.0"
-              },
-              {
-                "name": "@modelcontextprotocol/sdk",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\@modelcontextprotocol\\sdk\\shared\\stdio.js",
-                "scope": "@modelcontextprotocol",
-                "version": "1.7.0"
-              },
-              {
-                "name": "zod",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\zod",
-                "version": "^3.22.4"
-              },
-              {
-                "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
-              },
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              }
-            ],
-            "dependents": []
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mermaid-generator.js",
-            "name": "mermaid-generator.js",
-            "isDirectory": false,
-            "importance": 4,
-            "dependencies": [],
-            "packageDependencies": [
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              }
-            ],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js"
-            ]
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\storage-utils.js",
-            "name": "storage-utils.js",
-            "isDirectory": false,
-            "importance": 5,
-            "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\global-state.js"
-            ],
-            "packageDependencies": [
-              {
-                "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
-              },
-              {
-                "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
-              },
-              {
-                "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs"
-              }
-            ],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\mcp-server.js"
-            ]
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\types.js",
-            "name": "types.js",
-            "isDirectory": false,
-            "importance": 6,
-            "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\global-state.js"
-            ],
-            "packageDependencies": [],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\dist\\file-utils.js"
-            ]
-          }
-        ]
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\FileScopeMCP-diagram.html",
+        "path": "/home/user/mcp/FileScopeMCP/FileScopeMCP-diagram.html",
         "name": "FileScopeMCP-diagram.html",
         "isDirectory": false,
         "importance": 0,
         "dependencies": [],
         "packageDependencies": [],
-        "dependents": []
+        "dependents": [],
+        "summary": "HTML file containing a Mermaid-generated diagram of the project's file structure and dependencies. Provides a visual representation of the codebase architecture."
       },
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\FileScopeMCP-diagram.png",
+        "path": "/home/user/mcp/FileScopeMCP/FileScopeMCP-diagram.png",
         "name": "FileScopeMCP-diagram.png",
         "isDirectory": false,
         "importance": 0,
         "dependencies": [],
         "packageDependencies": [],
-        "dependents": []
+        "dependents": [],
+        "summary": "PNG image of the project's file structure and dependencies diagram. Provides a static visual representation of the codebase architecture in image format."
       },
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\LICENSE",
+        "path": "/home/user/mcp/FileScopeMCP/LICENSE",
         "name": "LICENSE",
         "isDirectory": false,
         "importance": 0,
         "dependencies": [],
         "packageDependencies": [],
-        "dependents": []
+        "dependents": [],
+        "summary": "Legal license document defining the terms under which the FileScopeMCP software can be used, modified, and distributed."
       },
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\mcp.json",
-        "name": "mcp.json",
-        "isDirectory": false,
-        "importance": 1,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\mcp.json.txt",
-        "name": "mcp.json.txt",
-        "isDirectory": false,
-        "importance": 0,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\mcp.json.win.txt",
-        "name": "mcp.json.win.txt",
-        "isDirectory": false,
-        "importance": 0,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\package.json",
-        "name": "package.json",
-        "isDirectory": false,
-        "importance": 3,
-        "dependencies": [],
-        "packageDependencies": [],
-        "dependents": []
-      },
-      {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\README.md",
+        "path": "/home/user/mcp/FileScopeMCP/README.md",
         "name": "README.md",
         "isDirectory": false,
         "importance": 2,
         "dependencies": [],
         "packageDependencies": [],
-        "dependents": []
+        "dependents": [],
+        "summary": "Project documentation explaining FileScopeMCP's purpose, features, and usage instructions. Includes setup guide and information about available tools and functionality."
       },
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\run.sh",
+        "path": "/home/user/mcp/FileScopeMCP/build.bat",
+        "name": "build.bat",
+        "isDirectory": false,
+        "importance": 0,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Batch script for building the project on Windows systems. Compiles TypeScript code to JavaScript and performs necessary setup steps."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/build.sh",
+        "name": "build.sh",
+        "isDirectory": false,
+        "importance": 0,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Shell script for building the project on Unix-like systems. Compiles TypeScript code to JavaScript and performs necessary setup steps."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/config.json",
+        "name": "config.json",
+        "isDirectory": false,
+        "importance": 3,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Application configuration file defining exclude patterns for files/directories and file watching settings. Controls which files are included in the file tree and how file system changes are handled."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/dist",
+        "name": "dist",
+        "isDirectory": true,
+        "children": []
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/logs",
+        "name": "logs",
+        "isDirectory": true,
+        "children": []
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/mcp.json",
+        "name": "mcp.json",
+        "isDirectory": false,
+        "importance": 1,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Configuration file for the Model Context Protocol integration. Defines the tool's metadata, command details, and parameters for Cursor integration."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/mcp.json.linux",
+        "name": "mcp.json.linux",
+        "isDirectory": false,
+        "importance": 0,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Linux-specific configuration file for the Model Context Protocol integration. Contains path adjustments and settings specific to Linux environments."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/mcp.json.win.txt",
+        "name": "mcp.json.win.txt",
+        "isDirectory": false,
+        "importance": 0,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Windows-specific configuration file for the Model Context Protocol integration. Contains path adjustments and settings specific to Windows environments."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/package.json",
+        "name": "package.json",
+        "isDirectory": false,
+        "importance": 3,
+        "dependencies": [],
+        "packageDependencies": [],
+        "dependents": [],
+        "summary": "Node.js package configuration defining dependencies, scripts, and metadata for the FileScopeMCP project. Lists required libraries including the Model Context Protocol SDK."
+      },
+      {
+        "path": "/home/user/mcp/FileScopeMCP/run.sh",
         "name": "run.sh",
         "isDirectory": false,
         "importance": 0,
         "dependencies": [],
         "packageDependencies": [],
-        "dependents": []
+        "dependents": [],
+        "summary": "Shell script for running the FileScopeMCP server. Sets up environment variables and launches the Node.js process with the compiled server code."
       },
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src",
+        "path": "/home/user/mcp/FileScopeMCP/src",
         "name": "src",
         "isDirectory": true,
         "children": [
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\config-utils.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/config-utils.ts",
             "name": "config-utils.ts",
             "isDirectory": false,
             "importance": 8,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts"
             ],
             "packageDependencies": [
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs/promises"
               },
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               },
               {
                 "name": "zod",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\zod",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/zod",
                 "version": "^3.22.4"
               }
             ],
             "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts"
             ],
-            "summary": "Handles configuration loading, validation, and saving. Uses Zod for schema validation, manages default configurations, and provides utilities for working with config files. Critical for file exclusion patterns and watcher settings."
+            "summary": "Provides utilities for loading, validating, and managing application configuration. Uses Zod for schema validation and handles configuration merging from CLI arguments and configuration files."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/file-utils.ts",
             "name": "file-utils.ts",
             "isDirectory": false,
-            "importance": 10,
+            "importance": 9,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts",
+              "/home/user/mcp/FileScopeMCP/src/storage-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/global-state.ts",
+              "/home/user/mcp/FileScopeMCP/src/storage-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/logger.ts"
             ],
             "packageDependencies": [
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs"
               },
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs/promises"
               },
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               },
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs"
               },
               {
                 "name": "firebase",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\firebase\\auth"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/firebase/auth"
               },
               {
                 "name": "${importPath}",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\${importPath}"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/${importPath}"
               }
             ],
             "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts"
             ],
-            "summary": "Core file handling utilities including file scanning, dependency analysis, importance calculation, and glob pattern matching. Contains critical functions like scanDirectory, isExcluded, and globToRegExp."
+            "summary": "Provides utility functions for file operations, such as scanning directories, resolving import paths, and calculating file importance. Handles file dependency analysis and implements safeguards against unresolved template literals."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts",
-            "name": "file-watcher.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/global-state.ts",
+            "name": "global-state.ts",
             "isDirectory": false,
-            "importance": 9,
+            "importance": 10,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts"
             ],
             "packageDependencies": [
               {
-                "name": "chokidar",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\chokidar",
-                "version": "^3.6.0"
+                "name": "fs",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs"
               },
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               }
             ],
             "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+              "/home/user/mcp/FileScopeMCP/src/file-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts",
+              "/home/user/mcp/FileScopeMCP/src/storage-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/types.ts"
             ],
-            "summary": "Implements real-time file system monitoring using chokidar. Handles file change events (add/remove/change), manages debouncing, and provides a clean API for file watching. Essential for keeping the file tree in sync with filesystem changes."
+            "summary": "Manages global application state including project root path and configuration. Provides functions to get and set configuration values and handles loading of custom exclusion patterns from external files."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
-            "name": "global-state.ts",
-            "isDirectory": false,
-            "importance": 9,
-            "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
-            ],
-            "packageDependencies": [],
-            "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
-            ],
-            "summary": "Manages global application state including project root path and configuration. Provides a centralized way to access and modify global settings used throughout the application."
-          },
-          {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\grouping-rules.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/grouping-rules.ts",
             "name": "grouping-rules.ts",
             "isDirectory": false,
             "importance": 7,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts"
             ],
             "packageDependencies": [
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               }
             ],
             "dependents": [],
-            "summary": "Defines default grouping logic for diagram generation. Includes functions to group `FileNode` arrays by directory (`groupByDirectory`), nearest `package.json` (`groupByPackage`), or dependency clusters (`groupByDependencyCluster`). Also includes condition functions (`hasMultiplePackages`, `hasComplexDependencies`) to determine when to apply specific grouping rules. Exports `defaultGroupingRules` array and individual functions."
+            "summary": "Defines rules for grouping nodes in diagrams based on different criteria such as directories, dependencies, or custom conditions. Used by the Mermaid diagram generator to organize complex file trees."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\layout-engine.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/layout-engine.ts",
             "name": "layout-engine.ts",
             "isDirectory": false,
             "importance": 6,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts"
             ],
             "packageDependencies": [],
             "dependents": [],
-            "summary": "Provides functions to analyze the structure of a file tree (`calculateGraphWidth`, `calculateGraphDepth`, `calculateDensity`, `findLevels`) and determine an optimal Mermaid layout strategy (`determineOptimalLayout`) based on these metrics (width, depth, density, clusters). Allows overriding with user configuration."
+            "summary": "Implements layouts for node positioning in diagrams, handling parent-child relationships and dependency relationships. Calculates optimal node placement and manages diagram layout direction."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/logger.ts",
+            "name": "logger.ts",
+            "isDirectory": false,
+            "importance": 8,
+            "dependencies": [],
+            "packageDependencies": [
+              {
+                "name": "fs",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs"
+              },
+              {
+                "name": "path",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
+              }
+            ],
+            "dependents": [
+              "/home/user/mcp/FileScopeMCP/src/file-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts"
+            ],
+            "summary": "Provides logging functionality for the application, writing messages to both console and file. Includes timestamp formatting and manages log file creation and rotation."
+          },
+          {
+            "path": "/home/user/mcp/FileScopeMCP/src/mcp-server.ts",
             "name": "mcp-server.ts",
             "isDirectory": false,
             "importance": 10,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\config-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts",
+              "/home/user/mcp/FileScopeMCP/src/file-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/storage-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/mermaid-generator.ts",
+              "/home/user/mcp/FileScopeMCP/src/global-state.ts",
+              "/home/user/mcp/FileScopeMCP/src/config-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/logger.ts"
             ],
             "packageDependencies": [
               {
                 "name": "@modelcontextprotocol/sdk",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\@modelcontextprotocol\\sdk\\server\\mcp.ts",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/@modelcontextprotocol/sdk/server/mcp.ts",
                 "scope": "@modelcontextprotocol",
-                "version": "1.7.0"
+                "version": "^1.8.0"
               },
               {
                 "name": "@modelcontextprotocol/sdk",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\@modelcontextprotocol\\sdk\\types.ts",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/@modelcontextprotocol/sdk/types.ts",
                 "scope": "@modelcontextprotocol",
-                "version": "1.7.0"
+                "version": "^1.8.0"
               },
               {
                 "name": "@modelcontextprotocol/sdk",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\@modelcontextprotocol\\sdk\\shared\\transport.ts",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/@modelcontextprotocol/sdk/shared/transport.ts",
                 "scope": "@modelcontextprotocol",
-                "version": "1.7.0"
+                "version": "^1.8.0"
               },
               {
                 "name": "@modelcontextprotocol/sdk",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\@modelcontextprotocol\\sdk\\shared\\stdio.ts",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/@modelcontextprotocol/sdk/shared/stdio.ts",
                 "scope": "@modelcontextprotocol",
-                "version": "1.7.0"
+                "version": "^1.8.0"
               },
               {
                 "name": "zod",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\zod",
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/zod",
                 "version": "^3.22.4"
               },
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs/promises"
               },
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               },
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs"
               }
             ],
             "dependents": [],
-            "summary": "Main MCP server implementation. Handles initialization, tool registration, file tree management, and communication with Cursor IDE. Entry point for the application."
+            "summary": "The main server implementation using the Model Context Protocol SDK. Handles CLI arguments, initializes the file tree, and exposes various tools for file management, tree manipulation, and diagram generation."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/mermaid-generator.ts",
             "name": "mermaid-generator.ts",
             "isDirectory": false,
-            "importance": 8,
+            "importance": 9,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts"
             ],
             "packageDependencies": [
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               }
             ],
             "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts"
             ],
-            "summary": "Generates Mermaid.js diagrams from the file tree. Supports multiple diagram styles (dependency, directory, hybrid), handles layout optimization, and provides customization options. Essential for visualizing project structure."
+            "summary": "Generates Mermaid diagrams from file trees to visualize dependencies and structures. Supports different diagram styles, layout configurations, and node grouping strategies."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/storage-utils.ts",
             "name": "storage-utils.ts",
             "isDirectory": false,
             "importance": 10,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts"
+              "/home/user/mcp/FileScopeMCP/src/types.ts",
+              "/home/user/mcp/FileScopeMCP/src/global-state.ts"
             ],
             "packageDependencies": [
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs\\promises"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs/promises"
               },
               {
                 "name": "path",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\path"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/path"
               },
               {
                 "name": "fs",
-                "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\node_modules\\fs"
+                "path": "/home/user/mcp/FileScopeMCP/node_modules/fs"
               }
             ],
             "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts"
+              "/home/user/mcp/FileScopeMCP/src/file-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts"
             ],
-            "summary": "Handles file tree persistence and management. Provides functions for saving/loading file trees, normalizing paths, and managing the file tree cache. Critical for maintaining state between server restarts."
+            "summary": "Provides utilities for saving and loading file trees to/from disk. Manages file path normalization, directory creation, and maintains a cache of loaded file trees for performance."
           },
           {
-            "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\types.ts",
+            "path": "/home/user/mcp/FileScopeMCP/src/types.ts",
             "name": "types.ts",
             "isDirectory": false,
             "importance": 10,
             "dependencies": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts"
+              "/home/user/mcp/FileScopeMCP/src/global-state.ts"
             ],
             "packageDependencies": [],
             "dependents": [
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\config-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-utils.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\file-watcher.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\global-state.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\grouping-rules.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\layout-engine.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mcp-server.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\mermaid-generator.ts",
-              "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\src\\storage-utils.ts"
+              "/home/user/mcp/FileScopeMCP/src/config-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/file-utils.ts",
+              "/home/user/mcp/FileScopeMCP/src/global-state.ts",
+              "/home/user/mcp/FileScopeMCP/src/grouping-rules.ts",
+              "/home/user/mcp/FileScopeMCP/src/layout-engine.ts",
+              "/home/user/mcp/FileScopeMCP/src/mcp-server.ts",
+              "/home/user/mcp/FileScopeMCP/src/mermaid-generator.ts",
+              "/home/user/mcp/FileScopeMCP/src/storage-utils.ts"
             ],
-            "summary": "Central type definitions for the entire project. Defines core interfaces and classes like FileNode, Config, FileWatchingConfig, and MermaidDiagramConfig. Most imported file in the project."
+            "summary": "Defines the core data structures and types used throughout the application, including FileNode, PackageDependency, and Mermaid diagram configuration classes. Contains implementations for handling template literals in import paths."
           }
         ]
       },
       {
-        "path": "C:\\Users\\admica\\code\\mcp\\FileScopeMCP\\tsconfig.json",
+        "path": "/home/user/mcp/FileScopeMCP/tsconfig.json",
         "name": "tsconfig.json",
         "isDirectory": false,
         "importance": 3,
         "dependencies": [],
         "packageDependencies": [],
         "dependents": [],
-        "summary": "TypeScript configuration file (`tsconfig.json`). Specifies compiler options: targets ES2020, uses ESNext modules with Node resolution, sets output (`dist`) and root (`src`) directories, enables strict type checking, allows ES module interop, and skips library checks. Includes all files within the `src` directory for compilation."
+        "summary": "TypeScript compiler configuration for the project. Sets module system, target ECMAScript version, output directory, and other compiler options."
       }
     ]
   }

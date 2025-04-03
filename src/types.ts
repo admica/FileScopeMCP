@@ -42,16 +42,33 @@ export class PackageDependency {
   scope?: string;            // Package scope (e.g., '@types' for '@types/node')
   isDevDependency?: boolean; // Whether this is a dev dependency
   
+  // Helper to check for unresolved template literals
+  private static isUnresolvedTemplateLiteral(str: string): boolean {
+    return typeof str === 'string' && 
+           str.includes('${') && 
+           str.includes('}');
+  }
+  
   // Create a PackageDependency from a path string
   static fromPath(path: string): PackageDependency {
     const pkg = new PackageDependency();
     pkg.path = path;
+    
+    // Skip processing if the path contains an unresolved template literal
+    if (this.isUnresolvedTemplateLiteral(path)) {
+      return pkg; // Return empty package dependency without setting name
+    }
     
     // Extract package name from path
     if (path.includes('node_modules')) {
       const parts = path.split('node_modules/');
       if (parts.length > 1) {
         const pkgPart = parts[1].split('/')[0];
+        
+        // Skip setting name if pkgPart is a template literal
+        if (this.isUnresolvedTemplateLiteral(pkgPart)) {
+          return pkg;
+        }
         
         // Handle scoped packages like @types/node
         if (pkgPart.startsWith('@')) {
@@ -112,10 +129,18 @@ export class PackageDependency {
           
           // If no common package was found, use the last part of the path
           if (!pkg.name && lastPart) {
-            pkg.name = lastPart;
+            // Avoid using lastPart if it's a template literal
+            if (!this.isUnresolvedTemplateLiteral(lastPart)) {
+              pkg.name = lastPart;
+            }
           }
         }
       }
+    }
+    
+    // Final sanity check on the name
+    if (this.isUnresolvedTemplateLiteral(pkg.name)) {
+      pkg.name = ''; // Clear the name if it's a template literal
     }
     
     return pkg;

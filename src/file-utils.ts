@@ -63,9 +63,27 @@ const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.phtml': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g
 };
 
+/**
+ * Utility function to detect unresolved template literals in strings
+ * This helps prevent treating template literals like ${importPath} as actual import paths
+ */
+function isUnresolvedTemplateLiteral(str: string): boolean {
+  // Check for ${...} pattern which indicates an unresolved template literal
+  return typeof str === 'string' && 
+         str.includes('${') && 
+         str.includes('}');
+}
+
 // Helper to resolve TypeScript/JavaScript import paths
 function resolveImportPath(importPath: string, currentFilePath: string, baseDir: string): string {
   log(`Resolving import path: ${importPath} from file: ${currentFilePath}`);
+  
+  // Check if the importPath is an unresolved template literal
+  if (isUnresolvedTemplateLiteral(importPath)) {
+    log(`Warning: Attempting to resolve unresolved template literal: ${importPath}`);
+    // We'll return a special path that's unlikely to exist or cause issues
+    return path.join(baseDir, '_UNRESOLVED_TEMPLATE_PATH_');
+  }
   
   // For TypeScript files, if the import ends with .js, convert it to .ts
   if (currentFilePath.endsWith('.ts') || currentFilePath.endsWith('.tsx')) {
@@ -476,6 +494,12 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
             for (const match of matches) {
               const importPath = extractImportPath(match);
               if (importPath) {
+                // Skip if the importPath looks like an unresolved template literal
+                if (isUnresolvedTemplateLiteral(importPath)) {
+                  log(`Skipping unresolved template literal: ${importPath}`);
+                  continue;
+                }
+                
                 try {
                   let resolvedPath;
                   if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
@@ -492,6 +516,12 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                     
                     // Set the package name directly from the import path if it's empty
                     if (!pkgDep.name) {
+                      // Skip if the importPath looks like an unresolved template literal
+                      if (isUnresolvedTemplateLiteral(importPath)) {
+                        log(`Skipping package dependency with template literal name: ${importPath}`);
+                        continue;
+                      }
+                      
                       // For imports like '@scope/package'
                       if (importPath.startsWith('@')) {
                         const parts = importPath.split('/');
@@ -506,6 +536,12 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                       } else {
                         pkgDep.name = importPath;
                       }
+                    }
+                    
+                    // Skip if the resolved package name is a template literal
+                    if (isUnresolvedTemplateLiteral(pkgDep.name)) {
+                      log(`Skipping package with template literal name: ${pkgDep.name}`);
+                      continue;
                     }
                     
                     // Try to extract version information
@@ -821,6 +857,12 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
        while ((match = pattern.exec(content)) !== null) {
          const importPath = match[1] || match[2] || match[3]; // Adjust indices based on specific regex
          if (importPath) {
+            // Skip if the importPath looks like an unresolved template literal
+            if (isUnresolvedTemplateLiteral(importPath)) {
+              log(`[analyzeNewFile] Skipping unresolved template literal: ${importPath}`);
+              continue;
+            }
+            
             try {
                 const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
                 const normalizedResolvedPath = normalizePath(resolvedPath);
@@ -828,10 +870,17 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
                 // Check if it's a package dependency (heuristic: includes node_modules or doesn't start with . or /)
                 if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
                     const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
-                     const version = await extractPackageVersion(pkgDep.name, projectRoot);
-                      if (version) {
-                        pkgDep.version = version;
-                      }
+                    
+                    // Skip if the package name is a template literal
+                    if (isUnresolvedTemplateLiteral(pkgDep.name)) {
+                      log(`[analyzeNewFile] Skipping package with template literal name: ${pkgDep.name}`);
+                      continue;
+                    }
+                    
+                    const version = await extractPackageVersion(pkgDep.name, projectRoot);
+                    if (version) {
+                      pkgDep.version = version;
+                    }
                     packageDependencies.push(pkgDep);
                 } else {
                     // Attempt to confirm local file exists (you might need more robust checking like in scanDirectory)
