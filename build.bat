@@ -41,7 +41,6 @@ if errorlevel 1 (
 
 echo.
 echo --- Ensuring TypeScript is installed...
-call "!NPM_CMD!" install typescript@5.4.5 --save-dev
 if errorlevel 1 (
     echo ERROR: Failed to install TypeScript.
     exit /b 1
