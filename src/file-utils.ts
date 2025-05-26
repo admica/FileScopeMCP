@@ -360,7 +360,7 @@ function isExcluded(filePath: string, baseDir: string): boolean {
 }
 
 // Helper function to convert glob pattern to RegExp
-function globToRegExp(pattern: string): RegExp {
+export function globToRegExp(pattern: string): RegExp {
   //log(`  Converting glob pattern: ${pattern}`); // Uncomment for debugging
 
   // Escape special regex characters except * and ?
