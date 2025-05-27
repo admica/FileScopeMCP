@@ -31,7 +31,7 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log, enableFileLogging } from './logger.js';
 
 // Enable file logging for debugging
-enableFileLogging(true, 'mcp-debug.log');
+enableFileLogging(false, 'mcp-debug.log');
 
 // Initialize server state
 let fileTree: FileNode | null = null;
@@ -88,24 +88,6 @@ async function findFileScopeMcpDirectory(): Promise<string | null> {
       return envProjectDir;
     } catch (error) {
       log(`Invalid environment directory: ${envProjectDir}`);
-    }
-  }
-  
-  // Look for common development directories with FileScopeMCP in the path
-  const commonDevPaths = [
-    'C:/Users/Adrian/code/mcp/FileScopeMCP',
-    '/Users/Adrian/code/mcp/FileScopeMCP',
-    path.join(process.env.HOME || '', 'code/mcp/FileScopeMCP'),
-    path.join(process.env.USERPROFILE || '', 'code/mcp/FileScopeMCP')
-  ];
-  
-  for (const testPath of commonDevPaths) {
-    try {
-      await fs.access(testPath);
-      log(`Found project directory in common paths: ${testPath}`);
-      return testPath;
-    } catch (error) {
-      // Path doesn't exist, try next one
     }
   }
   

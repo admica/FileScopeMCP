@@ -116,14 +116,16 @@ fi
 
 # Build run.sh for simple setup
 print_action "Creating run.sh..."
-echo "#!/bin/bash" > run.sh
-echo "# Adapt this for your needs in WSL/Linux." >> run.sh
-echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
-echo -n "$(which node) " >> run.sh
-MCP_SERVER_JS=$(find . -name mcp-server.js)
-echo -n "${PWD}${MCP_SERVER_JS:1} " >> run.sh
-echo "--base-dir=${PWD}" >> run.sh
-chmod +x run.sh
+if [[ ! -f run.sh ]]; then
+    echo "#!/bin/bash" > run.sh
+    echo "# Adapt this for your needs in WSL/Linux." >> run.sh
+    echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
+    echo -n "$(which node) " >> run.sh
+    MCP_SERVER_JS=$(find . -name mcp-server.js)
+    echo -n "${PWD}${MCP_SERVER_JS:1} " >> run.sh
+    echo "--base-dir=${PWD}" >> run.sh
+    chmod +x run.sh
+fi
 
 echo ">> run.sh:"
 echo -n -e "${PURPLE}"
