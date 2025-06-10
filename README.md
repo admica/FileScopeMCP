@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/admica-filescopemcp-badge.png)](https://mseep.ai/app/admica-filescopemcp)
+
 # FileScopeMCP (Model Context Protocol) Server
 
 **✨ Instantly understand and visualize your codebase structure & dependencies! ✨**
