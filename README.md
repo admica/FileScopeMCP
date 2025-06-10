@@ -29,7 +29,7 @@ This MCP server analyzes your codebase to identify the most important files base
   - Identify which files import a given file (dependents).
   - See which files are imported by a given file (dependencies).
   - Distinguish between local and package dependencies.
-  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig.
+  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig, C#, Java.
 
 - **📊 Visualization**
   - Generate Mermaid diagrams to visualize file relationships.
@@ -113,6 +113,8 @@ The tool scans source code for import statements and other language-specific pat
 - Rust: `use` and `mod` statements
 - Lua: `require` statements
 - Zig: `@import` directives
+- C#: `using` directives
+- Java: `import` statements
 
 ### Importance Calculation
 
@@ -277,9 +279,25 @@ The easiest way to get started is to enable this mcp in cursor and tell cursor t
    })
    ```
 
+### Testing
+
+A testing framework (Vitest) is now included. Initial unit tests cover path normalization, glob-to-regexp conversion, and platform-specific path handling.
+
+To run tests and check coverage:
+
+```bash
+npm test
+npm run coverage
+```
+
+### Recent Improvements
+
+- Improved exclusions logic, ignoring hidden virtual environments (e.g., `.venv`) and other common unwanted directories. This helps keep dependency graphs clean and relevant.
+- Testing framework
+- Added more programming languages
+
 ## Future Improvements
 
-- Add support for more programming languages
 - Add more sophisticated importance calculation algorithms
 - Enhance diagram customization options
 - Support for exporting diagrams to additional formats
