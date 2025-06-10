@@ -45,7 +45,10 @@ export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);
 }
 
-const SUPPORTED_EXTENSIONS = [".py", ".c", ".cpp", ".h", ".rs", ".lua", ".js", ".jsx", ".ts", ".tsx", ".zig", ".php", ".blade.php", ".phtml"];
+const SUPPORTED_EXTENSIONS = [
+  ".py", ".c", ".cpp", ".h", ".rs", ".lua", ".js", ".jsx", ".ts",
+  ".tsx", ".zig", ".php", ".blade.php", ".phtml", ".cs", ".java" ];
+
 const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.js': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
   '.jsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
@@ -60,7 +63,9 @@ const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.zig': /@import\s*\(['"][^'"]+['"]\)|const\s+[\w\s,{}]+\s*=\s*@import\s*\(['"][^'"]+['"]\)/g,
   '.php': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g,
   '.blade.php': /@(?:include|extends|component)\s*\(\s*["']([^"']+)["']\s*\)|@(?:include|extends|component)\s*\(\s*["']([^"']+)["']\s*,\s*\[.*?\]\s*\)|@(?:include|extends|component)\s*\(["']([^"']+)["']\)/g,
-  '.phtml': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g
+  '.phtml': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g,
+  '.cs': /using\s+[\w.]+;/g,
+  '.java': /import\s+[\w.]+;/g
 };
 
 /**
