@@ -86,6 +86,6 @@
     "watchForDeleted": true,
     "watchForChanged": true
   },
-  "baseDirectory": "",
+  "baseDirectory": "/home/user/festive",
   "version": "2.6.0"
 }

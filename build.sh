@@ -117,7 +117,7 @@ print_action "Generating MCP configuration..."
 if ! grep -q "{projectRoot}" "$MCP_TEMPLATE"; then
     print_warning "No {projectRoot} placeholder in $MCP_TEMPLATE. Output may be incorrect."
 fi
-if sed "s|{projectRoot}|${PROJECT_ROOT}|g" "$MCP_TEMPLATE" > "mcp.json" 2>> "$LOGFILE"; then
+if sed "s|{projectRoot}|$(dirname "${PROJECT_ROOT}")|g" "$MCP_TEMPLATE" > "mcp.json" 2>> "$LOGFILE"; then
     print_detail "MCP configuration generated at ./mcp.json"
 else
     print_error "Failed to generate mcp.json. Check $LOGFILE for details."
@@ -125,15 +125,13 @@ fi
 
 # Build run.sh for simple setup (Linux and macOS)
 print_action "Creating run.sh..."
-if [[ ! -f run.sh ]]; then
-    echo "#!/bin/bash" > run.sh
-    echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
-    echo -n "$(which node) " >> run.sh
-    MCP_SERVER_JS=$(find . -name mcp-server.js)
-    echo -n "${PWD}${MCP_SERVER_JS:1} " >> run.sh
-    echo "--base-dir=${PWD}" >> run.sh
-    chmod +x run.sh
-fi
+echo "#!/bin/bash" > run.sh
+echo "# Adapt this for your needs in WSL/Linux." >> run.sh
+echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
+echo -n "$(which node) " >> run.sh
+echo -n ""${PROJECT_ROOT}/dist/mcp-server.js" " >> run.sh
+echo "--base-dir="$(dirname "${PROJECT_ROOT}")"" >> run.sh
+chmod +x run.sh
 
 echo ">> run.sh:"
 echo -n -e "${PURPLE}"

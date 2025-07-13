@@ -96,85 +96,17 @@ async function findFileScopeMcpDirectory(): Promise<string | null> {
 
 // Server initialization
 async function initializeServer(): Promise<void> {
-  log('Starting FileScopeMCP server initialization');
+  log('Starting FileScopeMCP server initialization...');
   log('Initial working directory: ' + process.cwd());
   log('Command line args: ' + process.argv);
-  
-  // First try to get base directory from command line
-  const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
-  let projectRoot: string;
-  let config = await loadConfig();
-  
-  log('========== CONFIG DEBUGGING ==========');
-  log('Loaded config: ' + JSON.stringify(config, null, 2));
-  log('Exclude patterns count: ' + (config.excludePatterns?.length || 0));
-  log('=====================================');
-  
-  if (baseDirArg) {
-    // Use command line argument if provided
-    projectRoot = normalizeAndResolvePath(baseDirArg.split('=')[1]);
-    log(`Using base directory from command line: ${projectRoot}`);
-    // Update config with command line base directory
-    config.baseDirectory = projectRoot;
-  } else {
-    // Check if baseDirectory is set in config
-    if (!config.baseDirectory) {
-      log('Error: baseDirectory must be set in either config.json or via --base-dir parameter');
-      process.exit(1);
-    }
-    
-    projectRoot = normalizeAndResolvePath(config.baseDirectory);
-    log(`Using base directory from config: ${projectRoot}`);
-  }
-  
-  // Set the global project root and config
-  setProjectRoot(projectRoot);
+
+  // Load the base configuration file without setting a project root.
+  // The project root will be set by the `set_project_path` tool.
+  const config = await loadConfig();
   setConfig(config);
-  
-  log('Global state after initialization:');
-  log('- Project root: ' + getProjectRoot());
-  log('- Config loaded: ' + (getConfig() !== null));
-  if (getConfig()) {
-    log('- Exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
-    if (getConfig()?.excludePatterns?.length) {
-      log('- First few exclude patterns: ' + getConfig()?.excludePatterns?.slice(0, 5));
-    }
-  }
-  
-  // Verify the directory exists
-  try {
-    await fs.access(projectRoot);
-  } catch (error) {
-    log(`Error: Base directory ${projectRoot} does not exist`);
-    process.exit(1);
-  }
-  
-  process.chdir(projectRoot);
-  log('Changed working directory to: ' + process.cwd());
-  
-  // Now we can safely set the default config
-  DEFAULT_CONFIG = {
-    filename: "FileScopeMCP-tree.json",
-    baseDirectory: projectRoot,
-    projectRoot: projectRoot,
-    lastUpdated: new Date()
-  };
-  
-  // Try to load the default file tree
-  try {
-    await buildFileTree(DEFAULT_CONFIG);
-  } catch (error) {
-    log("Failed to build default file tree: " + error);
-  }
-  
-  // Initialize file watcher if enabled in config
-  const fileWatchingConfig = getConfig()?.fileWatching;
-  if (fileWatchingConfig?.enabled) {
-    log('File watching is enabled in config, initializing watcher...');
-    await initializeFileWatcher();
-  } else {
-    log('File watching is disabled in config');
-  }
+
+  log('Server initialized in a waiting state.');
+  log('Call the `set_project_path` tool to analyze a directory.');
 }
 
 /**
@@ -574,8 +506,70 @@ const server = new McpServer(serverInfo, {
   }
 });
 
+// Guard function to check if the project path is set
+function isProjectPathSet(): boolean {
+  const root = getProjectRoot();
+  // The project root is considered "set" if it's not the initial CWD.
+  // This is a simple heuristic and might need to be adjusted.
+  return root !== process.cwd();
+}
+
+const projectPathNotSetError = createMcpResponse("Project path not set. Please call 'set_project_path' first.", true);
+
 // Register tools
+server.tool("set_project_path", "Sets the project directory to analyze", {
+  path: z.string().describe("The absolute path to the project directory"),
+}, async (params: { path: string }) => {
+  const projectRoot = normalizeAndResolvePath(params.path);
+  log(`Setting project path to: ${projectRoot}`);
+
+  try {
+    await fs.access(projectRoot);
+  } catch (error) {
+    return createMcpResponse(`Error: Directory not found at ${projectRoot}`, true);
+  }
+
+  // Set the global project root and change the current working directory
+  setProjectRoot(projectRoot);
+  process.chdir(projectRoot);
+  log('Changed working directory to: ' + process.cwd());
+
+  // Update the base directory in the global config
+  let config = getConfig();
+  if (config) {
+    config.baseDirectory = projectRoot;
+    setConfig(config);
+  }
+
+  // Define the configuration for the new file tree
+  const newConfig: FileTreeConfig = {
+    filename: `FileScopeMCP-tree-${path.basename(projectRoot)}.json`,
+    baseDirectory: projectRoot,
+    projectRoot: projectRoot,
+    lastUpdated: new Date()
+  };
+  
+  DEFAULT_CONFIG = newConfig;
+
+  try {
+    await buildFileTree(newConfig);
+    
+    // Initialize file watcher if enabled
+    const fileWatchingConfig = getConfig()?.fileWatching;
+    if (fileWatchingConfig?.enabled) {
+      log('File watching is enabled, initializing watcher...');
+      await initializeFileWatcher();
+    }
+
+    return createMcpResponse(`Project path set to ${projectRoot}. File tree built and saved to ${newConfig.filename}.`);
+  } catch (error) {
+    log("Failed to build file tree: " + error);
+    return createMcpResponse(`Failed to build file tree for ${projectRoot}: ${error}`, true);
+  }
+});
+
 server.tool("list_saved_trees", "List all saved file trees", async () => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   const trees = await listSavedFileTrees();
   return createMcpResponse(trees);
 });
@@ -583,6 +577,7 @@ server.tool("list_saved_trees", "List all saved file trees", async () => {
 server.tool("delete_file_tree", "Delete a file tree configuration", {
   filename: z.string().describe("Name of the JSON file to delete")
 }, async (params: { filename: string }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   try {
     const normalizedPath = normalizeAndResolvePath(params.filename);
     await fs.unlink(normalizedPath);
@@ -606,6 +601,7 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
   filename: z.string().describe("Name of the JSON file to store the file tree"),
   baseDirectory: z.string().describe("Base directory to scan for files")
 }, async (params: { filename: string, baseDirectory: string }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   log('Create file tree called with params: ' + JSON.stringify(params));
   log('Current working directory: ' + process.cwd());
   
@@ -653,6 +649,7 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
 server.tool("select_file_tree", "Select an existing file tree to work with", {
   filename: z.string().describe("Name of the JSON file containing the file tree")
 }, async (params: { filename: string }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   const storage = await loadFileTree(params.filename);
   if (!storage) {
     return createMcpResponse(`File tree not found: ${params.filename}`, true);
@@ -668,25 +665,19 @@ server.tool("select_file_tree", "Select an existing file tree to work with", {
 });
 
 server.tool("list_files", "List all files in the project with their importance rankings", async () => {
-  if (!fileTree) {
-    await buildFileTree(DEFAULT_CONFIG);
-  }
+  if (!isProjectPathSet()) return projectPathNotSetError;
   return createMcpResponse(fileTree);
 });
 
 server.tool("get_file_importance", "Get the importance ranking of a specific file", {
   filepath: z.string().describe("The path to the file to check")
 }, async (params: { filepath: string }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   log('Get file importance called with params: ' + JSON.stringify(params));
   log('Current config: ' + JSON.stringify(currentConfig));
   log('File tree root path: ' + fileTree?.path);
   
   try {
-    if (!fileTree || !currentConfig) {
-      log('No file tree loaded, building default tree');
-      await buildFileTree(DEFAULT_CONFIG);
-    }
-    
     const normalizedPath = normalizePath(params.filepath);
     log('Normalized path: ' + normalizedPath);
     
@@ -719,9 +710,7 @@ server.tool("find_important_files", "Find the most important files in the projec
   limit: z.number().optional().describe("Number of files to return (default: 10)"),
   minImportance: z.number().optional().describe("Minimum importance score (0-10)")
 }, async (params: { limit?: number, minImportance?: number }) => {
-  if (!fileTree) {
-    await buildFileTree(DEFAULT_CONFIG);
-  }
+  if (!isProjectPathSet()) return projectPathNotSetError;
   
   const limit = params.limit || 10;
   const minImportance = params.minImportance || 0;
@@ -749,9 +738,7 @@ server.tool("find_important_files", "Find the most important files in the projec
 server.tool("get_file_summary", "Get the summary of a specific file", {
   filepath: z.string().describe("The path to the file to check")
 }, async (params: { filepath: string }) => {
-  if (!fileTree) {
-    await buildFileTree(DEFAULT_CONFIG);
-  }
+  if (!isProjectPathSet()) return projectPathNotSetError;
   
   const normalizedPath = normalizePath(params.filepath);
   const node = getFileNode(fileTree!, normalizedPath);
@@ -775,9 +762,7 @@ server.tool("set_file_summary", "Set the summary of a specific file", {
   filepath: z.string().describe("The path to the file to update"),
   summary: z.string().describe("The summary text to set")
 }, async (params: { filepath: string, summary: string }) => {
-  if (!fileTree || !currentConfig) {
-    await buildFileTree(DEFAULT_CONFIG);
-  }
+  if (!isProjectPathSet()) return projectPathNotSetError;
   
   const normalizedPath = normalizePath(params.filepath);
   const updated = updateFileNode(fileTree!, normalizedPath, {
@@ -802,6 +787,7 @@ server.tool("set_file_summary", "Set the summary of a specific file", {
 server.tool("read_file_content", "Read the content of a specific file", {
   filepath: z.string().describe("The path to the file to read")
 }, async (params: { filepath: string }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   try {
     const content = await readFileContent(params.filepath);
     
@@ -816,11 +802,8 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
   filepath: z.string().describe("The path to the file to update"),
   importance: z.number().min(0).max(10).describe("The importance value to set (0-10)")
 }, async (params: { filepath: string, importance: number }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   try {
-    if (!fileTree || !currentConfig) {
-      await buildFileTree(DEFAULT_CONFIG);
-    }
-    
     log('set_file_importance called with params: ' + JSON.stringify(params));
     log('Current file tree root: ' + fileTree?.path);
     
@@ -871,9 +854,7 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
 
 // Add a tool to recalculate importance for all files
 server.tool("recalculate_importance", "Recalculate importance values for all files based on dependencies", async () => {
-  if (!fileTree || !currentConfig) {
-    await buildFileTree(DEFAULT_CONFIG);
-  }
+  if (!isProjectPathSet()) return projectPathNotSetError;
 
   log('Recalculating importance values...');
   buildDependentMap(fileTree!);
@@ -897,6 +878,7 @@ server.tool("recalculate_importance", "Recalculate importance values for all fil
 
 // File watching tools
 server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   const config = getConfig();
   if (!config) {
     return createMcpResponse('No configuration loaded', true);
@@ -938,6 +920,7 @@ server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
 });
 
 server.tool("get_file_watching_status", "Get the current status of file watching", async () => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   const config = getConfig();
   const status = {
     enabled: config?.fileWatching?.enabled || false,
@@ -960,6 +943,7 @@ server.tool("update_file_watching_config", "Update file watching configuration",
     watchForChanged: z.boolean().optional()
   }).describe("File watching configuration options")
 }, async (params: { config: Partial<FileWatchingConfig> }) => {
+  if (!isProjectPathSet()) return projectPathNotSetError;
   const config = getConfig();
   if (!config) {
     return createMcpResponse('No configuration loaded', true);
@@ -1004,9 +988,7 @@ server.tool("update_file_watching_config", "Update file watching configuration",
 });
 
 server.tool("debug_list_all_files", "List all file paths in the current file tree", async () => {
-  if (!fileTree) {
-    await buildFileTree(DEFAULT_CONFIG);
-  }
+  if (!isProjectPathSet()) return projectPathNotSetError;
   
   // Get a flat list of all files
   const allFiles = getAllFileNodes(fileTree!);
