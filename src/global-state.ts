@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Global state management for the MCP server
-let _projectRoot: string = process.cwd(); // Default to current directory
+let _projectRoot: string = ''; // Default to empty string, will be set by initializeProject
 let _config: Config | null = null;
 
 export function setProjectRoot(root: string) {

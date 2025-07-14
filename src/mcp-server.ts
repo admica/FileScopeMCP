@@ -36,62 +36,61 @@ enableFileLogging(false, 'mcp-debug.log');
 // Initialize server state
 let fileTree: FileNode | null = null;
 let currentConfig: FileTreeConfig | null = null;
-let DEFAULT_CONFIG: FileTreeConfig;
 let fileWatcher: FileWatcher | null = null;
 // Map to hold debounce timers for file events
 const fileEventDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
 const DEBOUNCE_DURATION_MS = 2000; // 2 seconds
 
-// Check if we're running as an MCP server for Cursor
-function isRunningAsMcpServer(): boolean {
-  // Check if we were launched by Cursor's MCP client
-  const isMcpServerMode = process.argv.some(arg => 
-    arg.includes('mcp-server.js') || 
-    arg.includes('mcp.json')
-  );
-  
-  // Check if we're communicating over stdio
-  const isStdioMode = process.stdin.isTTY === false;
-  
-  return isMcpServerMode || isStdioMode;
-}
+/**
+ * Centralized function to initialize or re-initialize the project analysis.
+ * @param projectPath The absolute path to the project directory.
+ * @returns A ToolResponse indicating success or failure.
+ */
+async function initializeProject(projectPath: string): Promise<ToolResponse> {
+  const projectRoot = normalizeAndResolvePath(projectPath);
+  log(`Initializing project at: ${projectRoot}`);
 
-// Find the actual FileScopeMCP project directory
-async function findFileScopeMcpDirectory(): Promise<string | null> {
-  // Try to extract it from command line arguments
-  const scriptPath = process.argv[1] || '';
-  log('Script path: ' + scriptPath);
-  
-  if (scriptPath.includes('FileScopeMCP')) {
-    // Extract the project directory from script path
-    const match = scriptPath.match(/(.+?FileScopeMCP)/i);
-    if (match && match[1]) {
-      const mcpDir = match[1];
-      try {
-        // Verify this directory by checking for package.json
-        const packageJsonPath = path.join(mcpDir, 'package.json');
-        await fs.access(packageJsonPath);
-        log(`Verified FileScopeMCP directory: ${mcpDir}`);
-        return mcpDir;
-      } catch (error) {
-        log(`Could not verify directory ${mcpDir}`);
-      }
-    }
+  try {
+    await fs.access(projectRoot);
+  } catch (error) {
+    return createMcpResponse(`Error: Directory not found at ${projectRoot}`, true);
   }
-  
-  // Check environment variables (could be set by Cursor)
-  const envProjectDir = process.env.MCP_PROJECT_DIR;
-  if (envProjectDir) {
-    try {
-      await fs.access(envProjectDir);
-      log(`Found project directory from env: ${envProjectDir}`);
-      return envProjectDir;
-    } catch (error) {
-      log(`Invalid environment directory: ${envProjectDir}`);
-    }
+
+  // Set the global project root and change the current working directory
+  setProjectRoot(projectRoot);
+  process.chdir(projectRoot);
+  log('Changed working directory to: ' + process.cwd());
+
+  // Update the base directory in the global config
+  let config = getConfig();
+  if (config) {
+    config.baseDirectory = projectRoot;
+    setConfig(config);
   }
-  
-  return null;
+
+  // Define the configuration for the new file tree
+  const newConfig: FileTreeConfig = {
+    filename: `FileScopeMCP-tree-${path.basename(projectRoot)}.json`,
+    baseDirectory: projectRoot,
+    projectRoot: projectRoot,
+    lastUpdated: new Date()
+  };
+
+  try {
+    await buildFileTree(newConfig);
+    
+    // Initialize file watcher if enabled
+    const fileWatchingConfig = getConfig()?.fileWatching;
+    if (fileWatchingConfig?.enabled) {
+      log('File watching is enabled, initializing watcher...');
+      await initializeFileWatcher();
+    }
+
+    return createMcpResponse(`Project path set to ${projectRoot}. File tree built and saved to ${newConfig.filename}.`);
+  } catch (error) {
+    log("Failed to build file tree: " + error);
+    return createMcpResponse(`Failed to build file tree for ${projectRoot}: ${error}`, true);
+  }
 }
 
 // Server initialization
@@ -100,13 +99,24 @@ async function initializeServer(): Promise<void> {
   log('Initial working directory: ' + process.cwd());
   log('Command line args: ' + process.argv);
 
-  // Load the base configuration file without setting a project root.
-  // The project root will be set by the `set_project_path` tool.
+  // Load the base configuration file first
   const config = await loadConfig();
   setConfig(config);
 
-  log('Server initialized in a waiting state.');
-  log('Call the `set_project_path` tool to analyze a directory.');
+  // Check for --base-dir argument for auto-initialization
+  const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
+  if (baseDirArg) {
+    const projectPath = baseDirArg.split('=')[1];
+    if (projectPath) {
+      log(`Found --base-dir argument. Initializing project at: ${projectPath}`);
+      await initializeProject(projectPath);
+    } else {
+      log('--base-dir argument found but is empty. Server will wait for manual initialization.');
+    }
+  } else {
+    log('No --base-dir argument found. Server initialized in a waiting state.');
+    log('Call the `set_project_path` tool to analyze a directory.');
+  }
 }
 
 /**
@@ -508,64 +518,17 @@ const server = new McpServer(serverInfo, {
 
 // Guard function to check if the project path is set
 function isProjectPathSet(): boolean {
-  const root = getProjectRoot();
-  // The project root is considered "set" if it's not the initial CWD.
-  // This is a simple heuristic and might need to be adjusted.
-  return root !== process.cwd();
+  // The project is considered "set" if the file tree has been built.
+  return fileTree !== null;
 }
 
-const projectPathNotSetError = createMcpResponse("Project path not set. Please call 'set_project_path' first.", true);
+const projectPathNotSetError = createMcpResponse("Project path not set. Please call 'set_project_path' or initialize the server with --base-dir.", true);
 
 // Register tools
 server.tool("set_project_path", "Sets the project directory to analyze", {
   path: z.string().describe("The absolute path to the project directory"),
 }, async (params: { path: string }) => {
-  const projectRoot = normalizeAndResolvePath(params.path);
-  log(`Setting project path to: ${projectRoot}`);
-
-  try {
-    await fs.access(projectRoot);
-  } catch (error) {
-    return createMcpResponse(`Error: Directory not found at ${projectRoot}`, true);
-  }
-
-  // Set the global project root and change the current working directory
-  setProjectRoot(projectRoot);
-  process.chdir(projectRoot);
-  log('Changed working directory to: ' + process.cwd());
-
-  // Update the base directory in the global config
-  let config = getConfig();
-  if (config) {
-    config.baseDirectory = projectRoot;
-    setConfig(config);
-  }
-
-  // Define the configuration for the new file tree
-  const newConfig: FileTreeConfig = {
-    filename: `FileScopeMCP-tree-${path.basename(projectRoot)}.json`,
-    baseDirectory: projectRoot,
-    projectRoot: projectRoot,
-    lastUpdated: new Date()
-  };
-  
-  DEFAULT_CONFIG = newConfig;
-
-  try {
-    await buildFileTree(newConfig);
-    
-    // Initialize file watcher if enabled
-    const fileWatchingConfig = getConfig()?.fileWatching;
-    if (fileWatchingConfig?.enabled) {
-      log('File watching is enabled, initializing watcher...');
-      await initializeFileWatcher();
-    }
-
-    return createMcpResponse(`Project path set to ${projectRoot}. File tree built and saved to ${newConfig.filename}.`);
-  } catch (error) {
-    log("Failed to build file tree: " + error);
-    return createMcpResponse(`Failed to build file tree for ${projectRoot}: ${error}`, true);
-  }
+  return await initializeProject(params.path);
 });
 
 server.tool("list_saved_trees", "List all saved file trees", async () => {
@@ -1012,7 +975,8 @@ function createMermaidHtml(mermaidCode: string, title: string): string {
   const timestamp = `${now.toDateString()} ${now.toLocaleTimeString()}`;
   
   // Re-add escaping for backticks and dollar signs
-  const escapedMermaidCode = mermaidCode.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+  const escapedMermaidCode = mermaidCode.replace(/`/g, '\`').replace(/\$/g, '\
+);
   
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1542,7 +1506,14 @@ server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the
 }, async (params: { filepath: string }) => {
   try {
     if (!fileTree || !currentConfig) {
-      await buildFileTree(DEFAULT_CONFIG);
+      // Attempt to initialize with a default config if possible
+      const baseDirArg = process.argv.find(arg => arg.startsWith('--base-dir='));
+      if (baseDirArg) {
+        const projectPath = baseDirArg.split('=')[1];
+        await initializeProject(projectPath);
+      } else {
+        return projectPathNotSetError;
+      }
     }
 
     log('exclude_and_remove called with params: ' + JSON.stringify(params));
