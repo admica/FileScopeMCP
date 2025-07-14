@@ -2,8 +2,10 @@
   "mcpServers": {
     "FileScopeMCP": {
       "command": "wsl",
-      "args": ["-d", "Ubuntu-24.04", "{projectRoot}/run.sh"],
-      "transport": "stdio"
+      "args": ["-d", "Ubuntu-24.04", "{FILE_SCOPE_MCP_DIR}/run.sh", "--base-dir=${projectRoot}"],
+      "transport": "stdio",
+      "disabled": false,
+      "alwaysAllow": []
     }
   }
 }
