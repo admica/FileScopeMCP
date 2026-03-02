@@ -13,15 +13,16 @@ import {
   MermaidDiagramConfig,
   FileWatchingConfig
 } from "./types.js";
-import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, excludeAndRemoveFile } from "./file-utils.js";
-import { 
-  createFileTreeConfig, 
+import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, excludeAndRemoveFile, updateFileNodeOnChange, integrityCheck } from "./file-utils.js";
+import {
+  createFileTreeConfig,
   saveFileTree,
   loadFileTree,
   listSavedFileTrees,
   updateFileNode,
   getFileNode,
-  normalizeAndResolvePath
+  normalizeAndResolvePath,
+  clearTreeCache
 } from "./storage-utils.js";
 import * as fsSync from "fs";
 import { MermaidGenerator } from "./mermaid-generator.js";
@@ -40,6 +41,8 @@ let fileWatcher: FileWatcher | null = null;
 // Map to hold debounce timers for file events
 const fileEventDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
 const DEBOUNCE_DURATION_MS = 2000; // 2 seconds
+let integritySweepInterval: NodeJS.Timeout | null = null;
+const INTEGRITY_SWEEP_INTERVAL_MS = 30_000; // 30 seconds
 
 /**
  * Centralized function to initialize or re-initialize the project analysis.
@@ -79,12 +82,13 @@ async function initializeProject(projectPath: string): Promise<ToolResponse> {
   try {
     await buildFileTree(newConfig);
     
-    // Initialize file watcher if enabled
-    const fileWatchingConfig = getConfig()?.fileWatching;
-    if (fileWatchingConfig?.enabled) {
-      log('File watching is enabled, initializing watcher...');
-      await initializeFileWatcher();
-    }
+    // Always initialize file watcher for self-healing
+    log('Initializing file watcher for self-healing...');
+    await initializeFileWatcher();
+
+    // Start periodic integrity sweep
+    log('Starting periodic integrity sweep...');
+    startIntegritySweep();
 
     return createMcpResponse(`Project path set to ${projectRoot}. File tree built and saved to ${newConfig.filename}.`);
   } catch (error) {
@@ -194,12 +198,10 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
           break;
           
         case 'change':
-          // TODO: Implement incremental update for changed files if needed
           if (fileWatchingConfig.watchForChanged) {
-             log(`[MCP Server] CHANGE detected for ${filePath}, incremental handling not implemented. Triggering full rebuild as fallback.`);
-             // Fallback to full rebuild for now
-             await buildFileTree(activeConfig);
-             updated = true; // Assume tree changed
+             log(`[MCP Server] CHANGE detected for ${filePath}, performing incremental update.`);
+             const changed = await updateFileNodeOnChange(filePath, activeTree, projectRoot);
+             updated = changed;
           }
           break;
           
@@ -231,6 +233,42 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
   }, DEBOUNCE_DURATION_MS);
 
   fileEventDebounceTimers.set(debounceKey, newTimer);
+}
+
+/**
+ * Start periodic integrity sweep for self-healing.
+ * Runs every INTEGRITY_SWEEP_INTERVAL_MS to detect stale, missing, or new files.
+ */
+function startIntegritySweep(): void {
+  if (integritySweepInterval) clearInterval(integritySweepInterval);
+  integritySweepInterval = setInterval(async () => {
+    if (!fileTree || !currentConfig) return;
+    try {
+      const result = await integrityCheck(fileTree, getProjectRoot());
+      const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
+      if (totalIssues === 0) return;
+
+      log(`[Integrity Sweep] Found ${totalIssues} issues: ${result.staleFiles.length} stale, ${result.missingFiles.length} missing, ${result.newFiles.length} new`);
+
+      // Auto-heal stale files
+      for (const filePath of result.staleFiles) {
+        await updateFileNodeOnChange(filePath, fileTree, getProjectRoot());
+      }
+      // Auto-remove missing files
+      for (const filePath of result.missingFiles) {
+        await removeFileNode(filePath, fileTree, getProjectRoot());
+      }
+      // Auto-add new files
+      for (const filePath of result.newFiles) {
+        await addFileNode(filePath, fileTree, getProjectRoot());
+      }
+      // Save updated tree
+      await saveFileTree(currentConfig, fileTree);
+      log(`[Integrity Sweep] Healed: ${result.staleFiles.length} stale, ${result.missingFiles.length} removed, ${result.newFiles.length} added`);
+    } catch (error) {
+      log(`[Integrity Sweep] Error: ${error}`);
+    }
+  }, INTEGRITY_SWEEP_INTERVAL_MS);
 }
 
 /**
@@ -422,24 +460,60 @@ async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
     log('Global config exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
   }
   
-  // First try to load from file
+  // Try to load from file, but validate freshness before trusting it
   try {
     const savedTree = await loadFileTree(config.filename);
     if (savedTree) {
-      // Use the saved tree
       if (!savedTree.fileTree) {
         log('❌ Invalid file tree structure in saved file');
         throw new Error('Invalid file tree structure');
       }
-      log('✅ Using existing file tree from: ' + config.filename);
+      log('Loaded existing file tree from: ' + config.filename);
       log('Tree root path: ' + savedTree.fileTree.path);
       log('Tree has children: ' + (savedTree.fileTree.children?.length || 0));
-      fileTree = savedTree.fileTree;
-      currentConfig = savedTree.config;
-      
-      log('🌲 BUILD FILE TREE COMPLETED (loaded from file)');
-      log('==========================================\n');
-      return fileTree;
+
+      // Spot-check freshness: sample up to 10 file nodes and compare mtimes
+      let isFresh = true;
+      const allNodes = getAllFileNodes(savedTree.fileTree);
+      const sampleSize = Math.min(10, allNodes.length);
+      const sample = allNodes.length <= 10
+        ? allNodes
+        : allNodes.sort(() => Math.random() - 0.5).slice(0, sampleSize);
+
+      for (const node of sample) {
+        if (node.mtime === undefined) {
+          // No mtime stored — tree predates freshness tracking, force rescan
+          log('No mtime on node ' + node.path + ', forcing rescan');
+          isFresh = false;
+          break;
+        }
+        try {
+          const stat = fsSync.statSync(node.path);
+          if (Math.abs(stat.mtimeMs - node.mtime) > 1) {
+            log('Stale mtime on ' + node.path + ': tree=' + node.mtime + ' disk=' + stat.mtimeMs);
+            isFresh = false;
+            break;
+          }
+        } catch {
+          // File no longer exists
+          log('Missing file during freshness check: ' + node.path);
+          isFresh = false;
+          break;
+        }
+      }
+
+      if (isFresh) {
+        log('✅ Freshness check passed, using cached tree');
+        fileTree = savedTree.fileTree;
+        currentConfig = savedTree.config;
+        log('🌲 BUILD FILE TREE COMPLETED (loaded from file, freshness verified)');
+        log('==========================================\n');
+        return fileTree;
+      } else {
+        log('⚠️ Freshness check failed, clearing cache and rescanning');
+        clearTreeCache();
+        // Fall through to full rescan below
+      }
     }
   } catch (error) {
     log('❌ Failed to load existing file tree: ' + error);

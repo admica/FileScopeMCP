@@ -30,7 +30,7 @@ const DEFAULT_CONFIG: Config = {
   baseDirectory: "",
   excludePatterns: [],
   fileWatching: {
-    enabled: false,
+    enabled: true,
     debounceMs: 300,
     ignoreDotFiles: true,
     autoRebuildTree: true,

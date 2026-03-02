@@ -31,6 +31,7 @@ export class FileNode {
   dependents?: string[];     // Incoming dependencies (files that import this file)
   importance?: number;       // 0-10 scale
   summary?: string;          // Human-readable summary of the file
+  mtime?: number;            // File modification time (ms since epoch) for freshness tracking
   mermaidDiagram?: MermaidDiagram; // Optional Mermaid diagram for this node
 }
 

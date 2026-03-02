@@ -115,7 +115,9 @@ export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): 
     };
 
     fsSync.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    console.error('Successfully saved file tree');
+    // Invalidate the in-memory cache so next loadFileTree reads fresh from disk
+    loadedTrees.delete(config.filename);
+    console.error('Successfully saved file tree (cache invalidated)');
   } catch (error) {
     console.error('Error saving file tree:', error);
     console.error('Error details:', error instanceof Error ? error.stack : String(error));
@@ -254,4 +256,13 @@ export function getFileNode(fileTree: FileNode, filePath: string): FileNode | nu
   }
 
   return findNode(fileTree);
+}
+
+/**
+ * Clears all entries from the in-memory file tree cache.
+ * Forces subsequent loadFileTree() calls to read fresh from disk.
+ */
+export function clearTreeCache(): void {
+  loadedTrees.clear();
+  console.error('File tree cache cleared');
 }

@@ -598,6 +598,13 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
         }
       }
 
+      // Capture file modification time for freshness tracking
+      let fileMtime: number | undefined;
+      try {
+        const stat = fs.statSync(normalizedFullPath);
+        fileMtime = stat.mtimeMs;
+      } catch { /* ignore stat errors */ }
+
       const fileNode: FileNode = {
         path: normalizedFullPath,
         name: entry.name,
@@ -606,7 +613,8 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
         dependencies: dependencies,
         packageDependencies: packageDependencies,
         dependents: [],
-        summary: undefined
+        summary: undefined,
+        mtime: fileMtime
       };
       rootNode.children?.push(fileNode);
     }
@@ -911,6 +919,102 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
 
 
 /**
+ * Incrementally updates an existing file node when a file's content changes.
+ * Re-parses imports, diffs dependencies, updates reverse dependency map, recalculates importance.
+ * @param filePath The absolute path of the changed file.
+ * @param activeFileTree The currently active FileNode tree.
+ * @param activeProjectRoot The project root directory.
+ * @returns true if the tree was modified, false otherwise.
+ */
+export async function updateFileNodeOnChange(
+    filePath: string,
+    activeFileTree: FileNode,
+    activeProjectRoot: string
+): Promise<boolean> {
+  const normalizedFilePath = normalizePath(filePath);
+  log(`[updateFileNodeOnChange] Updating ${normalizedFilePath}`);
+
+  // Find existing node
+  const existingNode = findNodeByPath(activeFileTree, normalizedFilePath);
+  if (!existingNode) {
+    // File not in tree — treat as a new file
+    log(`[updateFileNodeOnChange] Node not found, delegating to addFileNode`);
+    await addFileNode(filePath, activeFileTree, activeProjectRoot);
+    return true;
+  }
+
+  if (existingNode.isDirectory) {
+    log(`[updateFileNodeOnChange] Skipping directory node`);
+    return false;
+  }
+
+  // Save old dependencies for diffing
+  const oldDeps = new Set(existingNode.dependencies || []);
+
+  // Re-analyze file content
+  const { dependencies: newDeps, packageDependencies: newPkgDeps } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+  const newDepsSet = new Set(newDeps);
+
+  // Update mtime
+  try {
+    const stat = fs.statSync(normalizedFilePath);
+    existingNode.mtime = stat.mtimeMs;
+  } catch { /* ignore stat errors */ }
+
+  // Check if anything actually changed
+  const depsChanged = oldDeps.size !== newDepsSet.size ||
+    [...oldDeps].some(d => !newDepsSet.has(d)) ||
+    [...newDepsSet].some(d => !oldDeps.has(d));
+
+  const pkgDepsChanged = JSON.stringify(existingNode.packageDependencies) !== JSON.stringify(newPkgDeps);
+
+  if (!depsChanged && !pkgDepsChanged) {
+    log(`[updateFileNodeOnChange] No dependency changes detected for ${normalizedFilePath}`);
+    return false;
+  }
+
+  // Update the node's dependencies
+  existingNode.dependencies = newDeps;
+  existingNode.packageDependencies = newPkgDeps;
+
+  // Diff old vs new deps and update reverse dependency map
+  // Removed deps: remove this file from those nodes' dependents[]
+  for (const removedDep of oldDeps) {
+    if (!newDepsSet.has(removedDep)) {
+      const depNode = findNodeByPath(activeFileTree, removedDep);
+      if (depNode && depNode.dependents) {
+        const idx = depNode.dependents.findIndex(d => normalizePath(d) === normalizedFilePath);
+        if (idx > -1) {
+          depNode.dependents.splice(idx, 1);
+          log(`[updateFileNodeOnChange] Removed ${normalizedFilePath} from dependents of ${removedDep}`);
+        }
+      }
+    }
+  }
+
+  // Added deps: add this file to those nodes' dependents[]
+  for (const addedDep of newDepsSet) {
+    if (!oldDeps.has(addedDep)) {
+      const depNode = findNodeByPath(activeFileTree, addedDep);
+      if (depNode) {
+        if (!depNode.dependents) depNode.dependents = [];
+        if (!depNode.dependents.some(d => normalizePath(d) === normalizedFilePath)) {
+          depNode.dependents.push(normalizedFilePath);
+          log(`[updateFileNodeOnChange] Added ${normalizedFilePath} to dependents of ${addedDep}`);
+        }
+      }
+    }
+  }
+
+  // Recalculate importance for this node and all affected nodes
+  const affectedPaths = [normalizedFilePath, ...oldDeps, ...newDepsSet];
+  await recalculateImportanceForAffected([...new Set(affectedPaths)], activeFileTree, activeProjectRoot);
+
+  log(`[updateFileNodeOnChange] Updated ${normalizedFilePath}: ${newDeps.length} deps, ${newPkgDeps.length} pkg deps`);
+  return true;
+}
+
+/**
  * Incrementally adds a new file node to the global file tree.
  * Analyzes the new file, calculates its importance, and updates relevant dependents.
  * Must be called with the currently active file tree and its config.
@@ -954,6 +1058,12 @@ export async function addFileNode(
     newNode.packageDependencies = [];
     newNode.dependents = [];
     newNode.summary = '';
+
+    // Capture file modification time for freshness tracking
+    try {
+      const stat = fs.statSync(normalizedFilePath);
+      newNode.mtime = stat.mtimeMs;
+    } catch { /* ignore stat errors */ }
 
     // 4. Analyze the new file's content for dependencies
     // Use the placeholder analysis function
@@ -1243,6 +1353,75 @@ async function recalculateImportanceForAffected(
 
 
 // --- End of New Functions ---
+
+/**
+ * Performs an integrity check comparing the in-memory tree against the live filesystem.
+ * Detects stale files (mtime changed), missing files (deleted), and new files (not in tree).
+ * @param fileTree The current in-memory file tree.
+ * @param projectRoot The project root directory.
+ * @returns Lists of stale, missing, and new file paths.
+ */
+export async function integrityCheck(
+    fileTree: FileNode,
+    projectRoot: string
+): Promise<{ staleFiles: string[], missingFiles: string[], newFiles: string[] }> {
+  const staleFiles: string[] = [];
+  const missingFiles: string[] = [];
+  const newFiles: string[] = [];
+
+  // 1. Collect all file paths and mtimes from the in-memory tree
+  const treeFiles = getAllFileNodes(fileTree);
+  const treePathSet = new Set<string>();
+
+  for (const node of treeFiles) {
+    const normalizedPath = normalizePath(node.path);
+    treePathSet.add(normalizedPath);
+
+    try {
+      const stat = fs.statSync(node.path);
+      // Check if mtime has changed (with 1ms tolerance for float precision)
+      if (node.mtime !== undefined && Math.abs(stat.mtimeMs - node.mtime) > 1) {
+        staleFiles.push(normalizedPath);
+      }
+    } catch {
+      // File doesn't exist on disk anymore
+      missingFiles.push(normalizedPath);
+    }
+  }
+
+  // 2. Walk the filesystem to find new files not in the tree
+  // Use a lightweight recursive readdir (not full scanDirectory)
+  async function walkDir(dir: string): Promise<void> {
+    try {
+      const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        const normalizedFullPath = normalizePath(fullPath);
+
+        // Skip excluded paths
+        if (isExcluded(fullPath, projectRoot)) continue;
+
+        if (entry.isDirectory()) {
+          await walkDir(fullPath);
+        } else {
+          if (!treePathSet.has(normalizedFullPath)) {
+            newFiles.push(normalizedFullPath);
+          }
+        }
+      }
+    } catch {
+      // Ignore directories we can't read
+    }
+  }
+
+  await walkDir(projectRoot);
+
+  if (staleFiles.length + missingFiles.length + newFiles.length > 0) {
+    log(`[integrityCheck] Found: ${staleFiles.length} stale, ${missingFiles.length} missing, ${newFiles.length} new files`);
+  }
+
+  return { staleFiles, missingFiles, newFiles };
+}
 
 /**
  * Recursively calculates importance scores for all file nodes in the tree.

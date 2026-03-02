@@ -2,7 +2,7 @@ import * as chokidar from 'chokidar';
 import * as path from 'path';
 import { FileWatchingConfig } from './types.js';
 import { getConfig, getProjectRoot } from './global-state.js';
-import { normalizePath } from './file-utils.js';
+import { normalizePath, globToRegExp } from './file-utils.js';
 
 /**
  * Types of file events that the watcher can emit
@@ -25,7 +25,9 @@ export class FileWatcher {
   private eventCallbacks: FileEventCallback[] = [];
   private throttleTimers: Map<string, NodeJS.Timeout> = new Map();
   private errorCount: number = 0;
-  
+  private restartAttempts: number = 0;
+  private readonly maxRestartDelay: number = 30_000;
+
   /**
    * Create a new FileWatcher instance
    * @param config The file watching configuration
@@ -133,16 +135,19 @@ export class FileWatcher {
   }
   
   /**
-   * Restart the file watcher
+   * Restart the file watcher with exponential backoff
    */
   public restart(): void {
-    console.error('FileWatcher: Restarting...');
+    const delay = Math.min(1000 * Math.pow(2, this.restartAttempts), this.maxRestartDelay);
+    this.restartAttempts++;
+    console.error(`FileWatcher: Restarting in ${delay}ms (attempt ${this.restartAttempts})...`);
     this.stop();
     setTimeout(() => {
       if (!this.isWatching) {
         this.start();
+        this.restartAttempts = 0; // Reset on successful start
       }
-    }, 1000); // Delay restart to avoid immediate errors
+    }, delay);
   }
   
   /**
@@ -204,8 +209,8 @@ export class FileWatcher {
 
     // Check if the file should be ignored
     const shouldIgnore = ignoredPatterns.some(pattern => {
-      const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
-      return regex.test(relativePath);
+      if (pattern instanceof RegExp) return pattern.test(relativePath);
+      return globToRegExp(pattern).test(relativePath);
     });
 
     console.error(`FileWatcher: Should ignore ${relativePath}? ${shouldIgnore ? 'YES' : 'NO'}`);
