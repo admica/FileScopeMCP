@@ -109,6 +109,30 @@ echo --- Creating run.bat...
 (echo."!NODE_EXE!" "%PROJECT_ROOT%\dist\mcp-server.js" --base-dir="%PARENT_DIR%") > run.bat
 
 echo.
+echo --- Registering with Claude Code...
+set "CLAUDE_CONFIG=%USERPROFILE%\.claude.json"
+set "TMPSCRIPT=%TEMP%\fscope-claude-%RANDOM%.cjs"
+
+(
+echo const fs = require^('fs'^);
+echo const [,,configPath, nodeBin, projectRoot] = process.argv;
+echo let config = {};
+echo if ^(fs.existsSync^(configPath^)^) { try { config = JSON.parse^(fs.readFileSync^(configPath, 'utf8'^)^); } catch^(e^) {} }
+echo if ^(!config.mcpServers^) config.mcpServers = {};
+echo config.mcpServers.FileScopeMCP = { command: nodeBin, args: [projectRoot + '\\dist\\mcp-server.js'] };
+echo fs.writeFileSync^(configPath, JSON.stringify^(config, null, 2^) + '\n'^);
+echo console.log^('FileScopeMCP registered in Claude Code config'^);
+) > "!TMPSCRIPT!"
+
+"!NODE_EXE!" "!TMPSCRIPT!" "!CLAUDE_CONFIG!" "!NODE_EXE!" "!PROJECT_ROOT!"
+if errorlevel 1 (
+    echo WARNING: Claude Code registration failed. Edit %CLAUDE_CONFIG% manually.
+) else (
+    echo --- Claude Code MCP registered at: !CLAUDE_CONFIG!
+)
+del "!TMPSCRIPT!" >nul 2>&1
+
+echo.
 echo === Setup Complete ===
 echo --- MCP configuration generated at ./mcp.json
 echo --- run.bat created.
@@ -117,6 +141,10 @@ echo.
 echo To integrate with Cursor AI:
 echo 1. Create a ".cursor" folder in your project root (%PARENT_DIR%) if it doesn't exist.
 echo 2. Copy mcp.json to the .cursor folder to enable MCP server integration.
+echo.
+echo To integrate with Claude Code:
+echo The server was registered automatically above.
+echo If it failed, add to %%USERPROFILE%%\.claude.json manually (see mcp.json.claude-code for format).
 echo.
 echo Or run the server manually with run.bat
 

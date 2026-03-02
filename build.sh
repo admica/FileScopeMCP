@@ -138,9 +138,19 @@ echo -n -e "${PURPLE}"
 cat run.sh
 echo -n -e "${NC}"
 
+# Register with Claude Code
+print_action "Registering with Claude Code..."
+if bash "${PROJECT_ROOT}/install-mcp-claude.sh" 2>&1 | tee -a "$LOGFILE"; then
+    print_detail "Claude Code MCP registration complete."
+else
+    print_warning "Claude Code registration failed. Run install-mcp-claude.sh manually after setup."
+fi
+
 # Final message
 print_header "Setup Complete"
 print_detail "Project root: $PROJECT_ROOT"
 print_detail "Log file: $LOGFILE"
 echo -e "${GREEN}MCP server configuration generated.${NC}"
-echo -e "${CYAN}Copy ./mcp.json to your project's .cursor/ to use with Cursor AI, or run the server manually with: run.sh${NC}"
+echo -e "${CYAN}Cursor AI: copy ./mcp.json to your project's .cursor/ directory.${NC}"
+echo -e "${CYAN}Claude Code: registration was attempted above (or run install-mcp-claude.sh manually).${NC}"
+echo -e "${CYAN}Run the server manually with: run.sh${NC}"

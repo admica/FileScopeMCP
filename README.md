@@ -59,50 +59,85 @@ This MCP server analyzes your codebase to identify the most important files base
 ## Installation
 
 1. Clone this repository
-2. Build the project:
+2. Build and register:
 
-   The build script will install all node dependencies and generate mcp.json for you.
-
-   Windows:
+   **Linux / macOS / WSL:**
    ```bash
+   ./build.sh
+   ```
+
+   **Windows:**
+   ```bat
    build.bat
    ```
 
-   Copy the generated mcp.json configuration to your project's `.cursor` directory:
+   Both scripts will:
+   - Install npm dependencies
+   - Compile TypeScript to `dist/`
+   - Generate `mcp.json` for Cursor AI
+   - Register the server with Claude Code (`~/.claude.json`)
 
-   ```json
-   {
-     "mcpServers": {
-       "FileScopeMCP": {
-         "command": "node",
-         "args": ["<build script sets this>/mcp-server.js","--base-dir=C:/Users/admica/my/project/base"],
-         "transport": "stdio",
-         "disabled": false,
-         "alwaysAllow": []
-       }
-     }
-   }
-   ```
-   
-   Linux: (Cursor in Windows, but your project is in Linux WSL, then put the MCP in Linux and build)
-   ```bash
-   build.sh
-   ```
-   
-   ```json
-   {
-     "mcpServers": {
-       "FileScopeMCP": {
-       "command": "wsl",
-       "args": ["-d", "Ubuntu-24.04", "/home/admica/FileScopeMCP/run.sh"],
-       "transport": "stdio",
-       "disabled": false,
-       "alwaysAllow": []
-       }
-     }
+### Claude Code
+
+The build script registers FileScopeMCP automatically. To register (or re-register) without rebuilding:
+
+```bash
+./install-mcp-claude.sh
+```
+
+The server is registered globally — no `--base-dir` is needed. When you start a session, tell Claude to run `create_file_tree` pointing at your project:
+
+```
+create_file_tree(filename: "my-project.json", baseDirectory: "/path/to/your/project")
+```
+
+### Cursor AI (Linux/WSL — Cursor running on Windows)
+
+Build inside WSL, then copy `mcp.json` to your project's `.cursor/` directory:
+
+```json
+{
+  "mcpServers": {
+    "FileScopeMCP": {
+      "command": "wsl",
+      "args": ["-d", "Ubuntu-24.04", "/home/yourname/FileScopeMCP/run.sh", "--base-dir=${projectRoot}"],
+      "transport": "stdio",
+      "disabled": false,
+      "alwaysAllow": []
     }
-    ```
-4. Update the arg path --base-dir to your project's base path.
+  }
+}
+```
+
+### Cursor AI (Windows native)
+
+```json
+{
+  "mcpServers": {
+    "FileScopeMCP": {
+      "command": "node",
+      "args": ["C:\\FileScopeMCP\\dist\\mcp-server.js", "--base-dir=${projectRoot}"],
+      "transport": "stdio",
+      "disabled": false,
+      "alwaysAllow": []
+    }
+  }
+}
+```
+
+### Cursor AI (macOS / Linux native)
+
+```json
+{
+  "mcpServers": {
+    "FileScopeMCP": {
+      "command": "node",
+      "args": ["/path/to/FileScopeMCP/dist/mcp-server.js", "--base-dir=${projectRoot}"],
+      "transport": "stdio"
+    }
+  }
+}
+```
 
 ## How It Works
 
