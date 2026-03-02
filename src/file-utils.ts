@@ -45,10 +45,6 @@ export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);
 }
 
-const SUPPORTED_EXTENSIONS = [
-  ".py", ".c", ".cpp", ".h", ".rs", ".lua", ".js", ".jsx", ".ts",
-  ".tsx", ".zig", ".php", ".blade.php", ".phtml", ".cs", ".java" ];
-
 const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.js': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
   '.jsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
@@ -62,8 +58,6 @@ const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.lua': /require\s*\(['"][^'"]+['"]\)/g,
   '.zig': /@import\s*\(['"][^'"]+['"]\)|const\s+[\w\s,{}]+\s*=\s*@import\s*\(['"][^'"]+['"]\)/g,
   '.php': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g,
-  '.blade.php': /@(?:include|extends|component)\s*\(\s*["']([^"']+)["']\s*\)|@(?:include|extends|component)\s*\(\s*["']([^"']+)["']\s*,\s*\[.*?\]\s*\)|@(?:include|extends|component)\s*\(["']([^"']+)["']\)/g,
-  '.phtml': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g,
   '.cs': /using\s+[\w.]+;/g,
   '.java': /import\s+[\w.]+;/g
 };
@@ -135,20 +129,7 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
       importance += 2;
       break;
     case '.php':
-      // PHP controllers and models are highly important
-      if (fileName.toLowerCase().includes('controller') || fileName.toLowerCase().includes('model')) {
-        importance += 3;
-      } else {
-        importance += 2;
-      }
-      break;
-    case '.blade.php':
-      // Blade layout files are more important than regular views
-      if (fileName.toLowerCase().includes('layout') || fileName.toLowerCase().includes('app')) {
-        importance += 3;
-      } else {
-        importance += 2;
-      }
+      importance += 2;
       break;
     case '.json':
       if (fileName === 'package' || fileName === 'tsconfig' || fileName === 'composer') {
@@ -173,17 +154,6 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
     importance += 2;
   } else if (parts[0] === 'test' || parts[0] === 'tests') {
     importance += 1;
-  }
-
-  // Laravel-specific directory importance
-  if (parts.includes('app')) {
-    if (parts.includes('Http') && parts.includes('Controllers')) {
-      importance += 2;
-    } else if (parts.includes('Models')) {
-      importance += 2;
-    } else if (parts.includes('Providers')) {
-      importance += 2;
-    }
   }
 
   // Importance by name significance
@@ -679,33 +649,11 @@ export function buildDependentMap(root: FileNode) {
 
 export function calculateImportance(node: FileNode): void {
   if (!node.isDirectory) {
-    // Start with initial importance
-    let importance = node.importance || calculateInitialImportance(node.path, process.cwd());
-    
-    // Add importance based on number of dependents (files that import this file)
-    if (node.dependents && node.dependents.length > 0) {
-      importance += Math.min(node.dependents.length, 3);
-    }
-    
-    // Add importance based on number of local dependencies (files this file imports)
-    if (node.dependencies && node.dependencies.length > 0) {
-      importance += Math.min(node.dependencies.length, 2);
-    }
-    
-    // Add importance based on number of package dependencies
-    if (node.packageDependencies && node.packageDependencies.length > 0) {
-      // Add more importance for SDK dependencies
-      const sdkDeps = node.packageDependencies.filter(dep => dep.name && dep.name.includes('@modelcontextprotocol/sdk'));
-      const otherDeps = node.packageDependencies.filter(dep => dep.name && !dep.name.includes('@modelcontextprotocol/sdk'));
-      
-      importance += Math.min(sdkDeps.length, 2); // SDK dependencies are more important
-      importance += Math.min(otherDeps.length, 1); // Other package dependencies
-    }
-    
-    // Cap importance at 10
-    node.importance = Math.min(importance, 10);
+    // Always recalculate from scratch using the canonical formula.
+    // Do NOT start from node.importance — that makes repeated calls non-idempotent.
+    node.importance = calculateNodeImportance(node, process.cwd());
   }
-  
+
   // Recursively calculate importance for children
   if (node.children) {
     for (const child of node.children) {
@@ -1229,10 +1177,7 @@ function calculateNodeImportance(node: FileNode, projectRoot: string): number {
    // Add importance based on number of package dependencies
    const pkgDeps = node.packageDependencies ?? [];
    if (pkgDeps.length > 0) {
-       const sdkDeps = pkgDeps.filter(dep => dep.name?.includes('@modelcontextprotocol/sdk'));
-       const otherDeps = pkgDeps.filter(dep => !dep.name?.includes('@modelcontextprotocol/sdk'));
-       importance += Math.min(sdkDeps.length, 2); // SDK dependencies are more important
-       importance += Math.min(otherDeps.length, 1); // Other package dependencies
+       importance += Math.min(pkgDeps.length, 1);
    }
 
    // Cap importance at 10

@@ -1,6 +1,6 @@
 # FileScopeMCP (Model Context Protocol) Server
 
-**✨ Instantly understand and visualize your codebase structure & dependencies! ✨**
+**Understand your codebase — ranked, related, summarized, and kept up to date automatically.**
 
 <!-- Add Badges Here (e.g., License, Version, Build Status) -->
 [![Build Status](https://github.com/admica/FileScopeMCP/actions/workflows/build.yml/badge.svg)](https://github.com/admica/FileScopeMCP/actions)
@@ -8,53 +8,49 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/admica/FileScopeMCP)](https://archestra.ai/mcp-catalog/admica__filescopemcp)
-<!-- Add other badges -->
 
-A TypeScript-based tool for ranking files in your codebase by importance, tracking dependencies, and providing summaries to help understand code structure.
+A TypeScript-based MCP server that ranks files by importance, tracks bidirectional dependencies, stores AI-generated summaries, and autonomously keeps all of that data fresh in the background as your codebase changes.
 
 ## Overview
 
-This MCP server analyzes your codebase to identify the most important files based on dependency relationships. It generates importance scores (0-10) for each file, tracks bidirectional dependencies, and allows you to add custom summaries for files. All this information is made available to AI tools through Cursor's Model Context Protocol.
+FileScopeMCP is an **active-listening backend**. Once pointed at a project it:
+
+1. Scans the codebase and builds a dependency graph with 0–10 importance scores for every file.
+2. Watches the filesystem with chokidar. When files are added, changed, or deleted it incrementally updates dependency lists, recalculates importance scores, and persists the result — no manual rescan needed.
+3. Runs a self-healing integrity sweep every 30 seconds to catch anything the watcher missed (e.g. changes made while the server was offline).
+
+All of this information is exposed to your AI assistant through the Model Context Protocol so it always has accurate, up-to-date context about your codebase structure.
 
 ## Features
 
-🚀 **Supercharge your Code Understanding!** FileScopeMCP provides insights directly to your AI assistant:
-
-- **🎯 File Importance Analysis**
-  - Rank files on a 0-10 scale based on their role in the codebase.
-  - Calculate importance using incoming/outgoing dependencies.
-  - Instantly pinpoint the most critical files in your project.
-  - Smart calculation considers file type, location, and name significance.
+- **🎯 File Importance Ranking**
+  - Rank every file on a 0–10 scale based on its role in the dependency graph.
+  - Weighted formula considers incoming dependents, outgoing dependencies, file type, location, and name significance.
+  - Instantly surface the most critical files in any project.
 
 - **🔗 Dependency Tracking**
-  - Map bidirectional dependency relationships between files.
-  - Identify which files import a given file (dependents).
-  - See which files are imported by a given file (dependencies).
-  - Distinguish between local and package dependencies.
-  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig, C#, Java.
+  - Bidirectional dependency relationships: which files import a given file (dependents) and which files it imports (dependencies).
+  - Distinguishes local file dependencies from package dependencies.
+  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig, PHP, C#, Java.
 
-- **📊 Visualization**
-  - Generate Mermaid diagrams to visualize file relationships.
-  - Color-coded visualization based on importance scores.
-  - Support for dependency graphs, directory trees, or hybrid views.
-  - HTML output with embedded rendering including theme toggle and responsive design.
-  - Customize diagram depth, filter by importance, and adjust layout options.
+- **🔄 Autonomous Background Updates**
+  - Filesystem watcher detects `add`, `change`, and `unlink` events in real time.
+  - Incremental updates: re-parses only the affected file, diffs old vs. new dependency lists, patches the reverse-dependency map, and recalculates importance — no full rescan.
+  - Periodic integrity sweep auto-heals stale, missing, or newly discovered files.
+  - All mutations are serialized through an async mutex to prevent concurrent corruption.
+  - Per-event-type enable/disable and `autoRebuildTree` master switch.
 
 - **📝 File Summaries**
-  - Add human or AI-generated summaries to any file.
-  - Retrieve stored summaries to quickly grasp file purpose.
-  - Summaries persist across server restarts.
+  - Store human- or AI-generated summaries on any file.
+  - Summaries persist across server restarts and are returned alongside importance data.
 
 - **📚 Multiple Project Support**
-  - Create and manage multiple file trees for different project areas.
-  - Configure separate trees with distinct base directories.
-  - Switch between different file trees effortlessly.
-  - Cached trees for faster subsequent operations.
+  - Create and manage separate file trees for different projects or subdirectories.
+  - Switch between trees at any time; each tree has its own JSON file on disk.
 
 - **💾 Persistent Storage**
-  - All data automatically saved to disk in JSON format.
-  - Load existing file trees without rescanning the filesystem.
-  - Track when file trees were last updated.
+  - All data saved to JSON files automatically after every mutation.
+  - Load existing trees without rescanning.
 
 ## Installation
 
@@ -85,11 +81,13 @@ The build script registers FileScopeMCP automatically. To register (or re-regist
 ./install-mcp-claude.sh
 ```
 
-The server is registered globally — no `--base-dir` is needed. When you start a session, tell Claude to run `create_file_tree` pointing at your project:
+The server is registered globally — no `--base-dir` is needed. When you start a session, tell Claude to run `set_project_path` pointing at your project. This builds the initial file tree, starts the file watcher, and starts the integrity sweep:
 
 ```
-create_file_tree(filename: "my-project.json", baseDirectory: "/path/to/your/project")
+set_project_path(path: "/path/to/your/project")
 ```
+
+After that you can optionally call `create_file_tree` to create additional named trees for sub-directories.
 
 ### Cursor AI (Linux/WSL — Cursor running on Windows)
 
@@ -145,37 +143,37 @@ Build inside WSL, then copy `mcp.json` to your project's `.cursor/` directory:
 
 The tool scans source code for import statements and other language-specific patterns:
 - Python: `import` and `from ... import` statements
-- JavaScript/TypeScript: `import` statements and `require()` calls
-- C/C++: `#include` directives
+- JavaScript/TypeScript: `import` statements, `require()` calls, and dynamic `import()` expressions
+- C/C++/Header: `#include` directives
 - Rust: `use` and `mod` statements
 - Lua: `require` statements
 - Zig: `@import` directives
+- PHP: `require`, `require_once`, `include`, `include_once`, and `use` statements
 - C#: `using` directives
 - Java: `import` statements
 
 ### Importance Calculation
 
-Files are assigned importance scores (0-10) based on a weighted formula that considers:
-- Number of files that import this file (dependents)
-- Number of files this file imports (dependencies)
-- File type and extension (with TypeScript/JavaScript files getting higher base scores)
-- Location in the project structure (files in `src/` are weighted higher)
-- File naming (files like 'index', 'main', 'server', etc. get additional points)
+Files are assigned importance scores (0–10) based on a weighted formula that considers:
+- Number of files that import this file (dependents) — up to +3
+- Number of files this file imports (dependencies) — up to +2
+- Number of package dependencies imported — up to +1
+- File type and extension — TypeScript/JavaScript get higher base scores; PHP +2; JSON config files (package.json, tsconfig.json) +3
+- Location in the project structure — files in `src/` or `app/` are weighted higher
+- File naming — `index`, `main`, `server`, `app`, `config`, `types`, etc. receive additional points
 
-A file that is central to the codebase (imported by many files) will have a higher score.
+The formula is evaluated from scratch on every calculation, so calling `recalculate_importance` is always idempotent. Manual overrides set via `set_file_importance` will be overwritten when importance is recalculated.
 
-### Diagram Generation
+### Autonomous Updates
 
-The system uses a three-phase approach to generate valid Mermaid syntax:
-1. Collection Phase: Register all nodes and relationships
-2. Node Definition Phase: Generate definitions for all nodes before any references
-3. Edge Generation Phase: Create edges between defined nodes
+When a file event fires, the update pipeline is:
 
-This ensures all diagrams have valid syntax and render correctly. HTML output includes:
-- Responsive design that works on any device
-- Light/dark theme toggle with system preference detection
-- Client-side Mermaid rendering for optimal performance
-- Timestamp of generation
+1. **Debounce** — events are coalesced per `filePath:eventType` key (default 2 s) to avoid thrashing on rapid saves.
+2. **Acquire mutex** — all tree mutations are serialized through `AsyncMutex` so the watcher and the integrity sweep can never corrupt the tree simultaneously.
+3. **Incremental update** — `updateFileNodeOnChange` re-parses the file, diffs old vs. new dependency lists, patches `dependents[]` on affected nodes, and calls `recalculateImportanceForAffected`.
+4. **Persist** — `saveFileTree` writes the updated JSON to disk.
+
+The integrity sweep runs every 30 seconds inside the same mutex and respects the `autoRebuildTree` flag, so users who disable auto-rebuild are fully opted out of both paths.
 
 ### Path Normalization
 
@@ -191,24 +189,28 @@ All file tree data is stored in JSON files with the following structure:
 - Configuration metadata (filename, base directory, last updated timestamp)
 - Complete file tree with dependencies, dependents, importance scores, and summaries
 
+**Persistent exclusions:** When you call `exclude_and_remove`, the pattern is written to `FileScopeMCP-excludes.json` in the project root. This file is loaded automatically on every server start, so exclusions survive restarts without needing to be re-applied.
+
 ## Technical Details
 
-- **TypeScript/Node.js**: Built with TypeScript for type safety and modern JavaScript features
-- **Model Context Protocol**: Implements the MCP specification for integration with Cursor
-- **Mermaid.js**: Uses Mermaid syntax for diagram generation
-- **JSON Storage**: Uses simple JSON files for persistence
-- **Path Normalization**: Cross-platform path handling to support Windows and Unix
-- **Caching**: Implements caching for faster repeated operations
+- **TypeScript/Node.js** — built with TypeScript for type safety and modern JavaScript features
+- **Model Context Protocol** — implements the MCP specification for integration with Claude Code, Cursor, and other MCP clients
+- **chokidar** — cross-platform filesystem watcher for real-time change detection
+- **esbuild** — fast TypeScript compilation to ESM
+- **JSON Storage** — simple JSON files for persistence; all writes happen after mutations complete
+- **AsyncMutex** — serializes concurrent tree mutations from the watcher and integrity sweep
+- **Path Normalization** — cross-platform path handling to support Windows and Unix
 
 ## Available Tools
 
 The MCP server exposes the following tools:
 
-### File Tree Management
+### Project Setup
 
-- **list_saved_trees**: List all saved file trees
+- **set_project_path**: Point the server at a project directory and initialize or reload its file tree
 - **create_file_tree**: Create a new file tree configuration for a specific directory
 - **select_file_tree**: Select an existing file tree to work with
+- **list_saved_trees**: List all saved file trees
 - **delete_file_tree**: Delete a file tree configuration
 
 ### File Analysis
@@ -216,8 +218,9 @@ The MCP server exposes the following tools:
 - **list_files**: List all files in the project with their importance rankings
 - **get_file_importance**: Get detailed information about a specific file, including dependencies and dependents
 - **find_important_files**: Find the most important files in the project based on configurable criteria
-- **read_file_content**: Read the content of a specific file
+- **set_file_importance**: Manually override the importance score for a specific file
 - **recalculate_importance**: Recalculate importance values for all files based on dependencies
+- **read_file_content**: Read the content of a specific file
 
 ### File Summaries
 
@@ -228,25 +231,22 @@ The MCP server exposes the following tools:
 
 - **toggle_file_watching**: Toggle file watching on/off
 - **get_file_watching_status**: Get the current status of file watching
-- **update_file_watching_config**: Update file watching configuration
+- **update_file_watching_config**: Update file watching configuration (per-event-type toggles, `autoRebuildTree`, `ignoreDotFiles`, etc.)
 
-### Diagram Generation
+### Utilities
 
-- **generate_diagram**: Create Mermaid diagrams with customizable options
-  - Output formats: Mermaid text (`.mmd`) or HTML with embedded rendering
-  - Diagram styles: default, dependency, directory, or hybrid views
-  - Filter options: max depth, minimum importance threshold
-  - Layout options: direction (TB, BT, LR, RL), node spacing, rank spacing
+- **exclude_and_remove**: Exclude a file or glob pattern from the tree and remove matching nodes
+- **debug_list_all_files**: List every file path currently tracked in the active tree (useful for debugging)
 
 ## Usage Examples
 
-The easiest way to get started is to enable this mcp in cursor and tell cursor to figure it out and use it. As soon as the mcp starts, it builds an initial json tree. Tell an LLM to make summaries of all your important files and use the mcp's set_file_summary to add them.
+The easiest way to get started is to enable this MCP in your AI client and let the AI figure it out. As soon as the MCP starts, it builds an initial JSON tree. Ask your AI to read important files and use `set_file_summary` to store summaries on them.
 
 ### Analyzing a Project
 
-1. Create a file tree for your project:
+1. Point the server at your project (builds the tree, starts file watching and the integrity sweep):
    ```
-   create_file_tree(filename: "my-project.json", baseDirectory: "/path/to/project")
+   set_project_path(path: "/path/to/project")
    ```
 
 2. Find the most important files:
@@ -276,39 +276,16 @@ The easiest way to get started is to enable this mcp in cursor and tell cursor t
    get_file_summary(filepath: "/path/to/project/src/main.ts")
    ```
 
-### Generating Diagrams
+### Configuring File Watching
 
-1. Create a basic project structure diagram:
-   ```
-   generate_diagram(style: "directory", maxDepth: 3, outputPath: "diagrams/project-structure", outputFormat: "mmd")
-   ```
-
-2. Generate an HTML diagram with dependency relationships:
-   ```
-   generate_diagram(style: "hybrid", maxDepth: 2, minImportance: 5, showDependencies: true, outputPath: "diagrams/important-files", outputFormat: "html")
-   ```
-
-3. Customize the diagram layout:
-   ```
-   generate_diagram(style: "dependency", layout: { direction: "LR", nodeSpacing: 50, rankSpacing: 70 }, outputPath: "diagrams/dependencies", outputFormat: "html")
-   ```
-
-### Using File Watching
-
-1. Enable file watching for your project:
-   ```
-   toggle_file_watching()
-   ```
-
-2. Check the current file watching status:
+1. Check the current file watching status:
    ```
    get_file_watching_status()
    ```
 
-3. Update file watching configuration:
+2. Update file watching configuration:
    ```
-   update_file_watching_config(config: { 
-     debounceMs: 500, 
+   update_file_watching_config(config: {
      autoRebuildTree: true,
      watchForNewFiles: true,
      watchForDeleted: true,
@@ -316,28 +293,17 @@ The easiest way to get started is to enable this mcp in cursor and tell cursor t
    })
    ```
 
+3. Disable watching entirely:
+   ```
+   toggle_file_watching()
+   ```
+
 ### Testing
-
-A testing framework (Vitest) is now included. Initial unit tests cover path normalization, glob-to-regexp conversion, and platform-specific path handling.
-
-To run tests and check coverage:
 
 ```bash
 npm test
 npm run coverage
 ```
-
-### Recent Improvements
-
-- Improved exclusions logic, ignoring hidden virtual environments (e.g., `.venv`) and other common unwanted directories. This helps keep dependency graphs clean and relevant.
-- Testing framework
-- Added more programming languages
-
-## Future Improvements
-
-- Add more sophisticated importance calculation algorithms
-- Enhance diagram customization options
-- Support for exporting diagrams to additional formats
 
 ## License
 

@@ -6,7 +6,6 @@ import { Config, FileWatchingConfig } from './types.js';
 // Define the FileWatchingConfig schema
 const FileWatchingSchema = z.object({
   enabled: z.boolean().default(false),
-  debounceMs: z.number().int().positive().default(300),
   ignoreDotFiles: z.boolean().default(true),
   autoRebuildTree: z.boolean().default(true),
   maxWatchedDirectories: z.number().int().positive().default(1000),
@@ -31,7 +30,6 @@ const DEFAULT_CONFIG: Config = {
   excludePatterns: [],
   fileWatching: {
     enabled: true,
-    debounceMs: 300,
     ignoreDotFiles: true,
     autoRebuildTree: true,
     maxWatchedDirectories: 1000,

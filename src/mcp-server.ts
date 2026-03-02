@@ -5,12 +5,11 @@ import { ReadBuffer, deserializeMessage, serializeMessage } from "@modelcontextp
 import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { 
-  FileNode, 
-  ToolResponse, 
+import {
+  FileNode,
+  ToolResponse,
   FileTreeConfig,
   FileTreeStorage,
-  MermaidDiagramConfig,
   FileWatchingConfig
 } from "./types.js";
 import { scanDirectory, calculateImportance, setFileImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, excludeAndRemoveFile, updateFileNodeOnChange, integrityCheck } from "./file-utils.js";
@@ -25,7 +24,6 @@ import {
   clearTreeCache
 } from "./storage-utils.js";
 import * as fsSync from "fs";
-import { MermaidGenerator } from "./mermaid-generator.js";
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, saveConfig } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
@@ -34,10 +32,38 @@ import { log, enableFileLogging } from './logger.js';
 // Enable file logging for debugging
 enableFileLogging(false, 'mcp-debug.log');
 
+// Simple async mutex to serialize all tree mutations.
+// Both the file-watcher callback and the integrity sweep mutate the same
+// in-memory fileTree; running them concurrently can corrupt dependency lists
+// or produce interleaved saves. All tree-mutation paths must acquire this lock.
+class AsyncMutex {
+  private _queue: Promise<void> = Promise.resolve();
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this._queue.then(() => fn());
+    // Keep the chain alive regardless of whether fn throws
+    this._queue = result.then(() => {}, () => {});
+    return result;
+  }
+}
+
+// Default file-watching config used when none exists yet
+const DEFAULT_FILE_WATCHING: FileWatchingConfig = {
+  enabled: false,
+  ignoreDotFiles: true,
+  autoRebuildTree: true,
+  maxWatchedDirectories: 1000,
+  watchForNewFiles: true,
+  watchForDeleted: true,
+  watchForChanged: true
+};
+
 // Initialize server state
 let fileTree: FileNode | null = null;
 let currentConfig: FileTreeConfig | null = null;
 let fileWatcher: FileWatcher | null = null;
+// Mutex that serializes all tree mutations (watcher events + integrity sweep)
+const treeMutex = new AsyncMutex();
 // Map to hold debounce timers for file events
 const fileEventDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
 const DEBOUNCE_DURATION_MS = 2000; // 2 seconds
@@ -182,54 +208,56 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
     clearTimeout(existingTimer);
   }
 
-  const newTimer = setTimeout(async () => {
+  const newTimer = setTimeout(() => {
     fileEventDebounceTimers.delete(debounceKey); // Remove timer reference once it executes
     log(`[MCP Server] Debounced processing for: ${eventType} - ${filePath}`);
 
-    try {
-      let updated = false;
-      switch (eventType) {
-        case 'add':
-          if (fileWatchingConfig.watchForNewFiles) {
-            log(`[MCP Server] Calling addFileNode for ${filePath}`);
-            await addFileNode(filePath, activeTree, projectRoot);
-            updated = true;
-          }
-          break;
-          
-        case 'change':
-          if (fileWatchingConfig.watchForChanged) {
-             log(`[MCP Server] CHANGE detected for ${filePath}, performing incremental update.`);
-             const changed = await updateFileNodeOnChange(filePath, activeTree, projectRoot);
-             updated = changed;
-          }
-          break;
-          
-        case 'unlink':
-          if (fileWatchingConfig.watchForDeleted) {
-             log(`[MCP Server] Calling removeFileNode for ${filePath}`);
-             await removeFileNode(filePath, activeTree, projectRoot);
-             updated = true;
-          }
-          break;
-      }
+    treeMutex.run(async () => {
+      try {
+        let updated = false;
+        switch (eventType) {
+          case 'add':
+            if (fileWatchingConfig.watchForNewFiles) {
+              log(`[MCP Server] Calling addFileNode for ${filePath}`);
+              await addFileNode(filePath, activeTree, projectRoot);
+              updated = true;
+            }
+            break;
 
-      // Save the potentially modified tree if an add/remove/rebuild happened
-      if (updated) {
-        // We need the latest references in case buildFileTree was called
-        const latestActiveConfig = currentConfig;
-        const latestActiveTree = fileTree;
-        if(latestActiveConfig && latestActiveTree){
-            log(`[MCP Server] Saving updated file tree after ${eventType} event.`);
-            await saveFileTree(latestActiveConfig, latestActiveTree);
-        } else {
-            log(`[MCP Server] Error saving tree after ${eventType} event: active config or tree became null.`);
+          case 'change':
+            if (fileWatchingConfig.watchForChanged) {
+               log(`[MCP Server] CHANGE detected for ${filePath}, performing incremental update.`);
+               const changed = await updateFileNodeOnChange(filePath, activeTree, projectRoot);
+               updated = changed;
+            }
+            break;
+
+          case 'unlink':
+            if (fileWatchingConfig.watchForDeleted) {
+               log(`[MCP Server] Calling removeFileNode for ${filePath}`);
+               await removeFileNode(filePath, activeTree, projectRoot);
+               updated = true;
+            }
+            break;
         }
-      }
 
-    } catch (error) {
-      log(`[MCP Server] Error processing debounced file event ${eventType} for ${filePath}: ${error}`);
-    }
+        // Save the potentially modified tree if an add/remove/rebuild happened
+        if (updated) {
+          // We need the latest references in case buildFileTree was called
+          const latestActiveConfig = currentConfig;
+          const latestActiveTree = fileTree;
+          if (latestActiveConfig && latestActiveTree) {
+              log(`[MCP Server] Saving updated file tree after ${eventType} event.`);
+              await saveFileTree(latestActiveConfig, latestActiveTree);
+          } else {
+              log(`[MCP Server] Error saving tree after ${eventType} event: active config or tree became null.`);
+          }
+        }
+
+      } catch (error) {
+        log(`[MCP Server] Error processing debounced file event ${eventType} for ${filePath}: ${error}`);
+      }
+    });
   }, DEBOUNCE_DURATION_MS);
 
   fileEventDebounceTimers.set(debounceKey, newTimer);
@@ -241,33 +269,43 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
  */
 function startIntegritySweep(): void {
   if (integritySweepInterval) clearInterval(integritySweepInterval);
-  integritySweepInterval = setInterval(async () => {
+  integritySweepInterval = setInterval(() => {
     if (!fileTree || !currentConfig) return;
-    try {
-      const result = await integrityCheck(fileTree, getProjectRoot());
-      const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
-      if (totalIssues === 0) return;
 
-      log(`[Integrity Sweep] Found ${totalIssues} issues: ${result.staleFiles.length} stale, ${result.missingFiles.length} missing, ${result.newFiles.length} new`);
-
-      // Auto-heal stale files
-      for (const filePath of result.staleFiles) {
-        await updateFileNodeOnChange(filePath, fileTree, getProjectRoot());
-      }
-      // Auto-remove missing files
-      for (const filePath of result.missingFiles) {
-        await removeFileNode(filePath, fileTree, getProjectRoot());
-      }
-      // Auto-add new files
-      for (const filePath of result.newFiles) {
-        await addFileNode(filePath, fileTree, getProjectRoot());
-      }
-      // Save updated tree
-      await saveFileTree(currentConfig, fileTree);
-      log(`[Integrity Sweep] Healed: ${result.staleFiles.length} stale, ${result.missingFiles.length} removed, ${result.newFiles.length} added`);
-    } catch (error) {
-      log(`[Integrity Sweep] Error: ${error}`);
+    const config = getConfig();
+    if (!config?.fileWatching?.autoRebuildTree) {
+      log('[Integrity Sweep] Skipping: autoRebuildTree is disabled.');
+      return;
     }
+
+    treeMutex.run(async () => {
+      if (!fileTree || !currentConfig) return;
+      try {
+        const result = await integrityCheck(fileTree, getProjectRoot());
+        const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
+        if (totalIssues === 0) return;
+
+        log(`[Integrity Sweep] Found ${totalIssues} issues: ${result.staleFiles.length} stale, ${result.missingFiles.length} missing, ${result.newFiles.length} new`);
+
+        // Auto-heal stale files
+        for (const filePath of result.staleFiles) {
+          await updateFileNodeOnChange(filePath, fileTree, getProjectRoot());
+        }
+        // Auto-remove missing files
+        for (const filePath of result.missingFiles) {
+          await removeFileNode(filePath, fileTree, getProjectRoot());
+        }
+        // Auto-add new files
+        for (const filePath of result.newFiles) {
+          await addFileNode(filePath, fileTree, getProjectRoot());
+        }
+        // Save updated tree
+        await saveFileTree(currentConfig, fileTree);
+        log(`[Integrity Sweep] Healed: ${result.staleFiles.length} stale, ${result.missingFiles.length} removed, ${result.newFiles.length} added`);
+      } catch (error) {
+        log(`[Integrity Sweep] Error: ${error}`);
+      }
+    });
   }, INTEGRITY_SWEEP_INTERVAL_MS);
 }
 
@@ -923,16 +961,7 @@ server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
   
   // Create default file watching config if it doesn't exist
   if (!config.fileWatching) {
-    config.fileWatching = {
-      enabled: true,
-      debounceMs: 300,
-      ignoreDotFiles: true,
-      autoRebuildTree: true,
-      maxWatchedDirectories: 1000,
-      watchForNewFiles: true,
-      watchForDeleted: true,
-      watchForChanged: true
-    };
+    config.fileWatching = { ...DEFAULT_FILE_WATCHING, enabled: true };
   } else {
     // Toggle the enabled status
     config.fileWatching.enabled = !config.fileWatching.enabled;
@@ -971,7 +1000,6 @@ server.tool("get_file_watching_status", "Get the current status of file watching
 server.tool("update_file_watching_config", "Update file watching configuration", {
   config: z.object({
     enabled: z.boolean().optional(),
-    debounceMs: z.number().int().positive().optional(),
     ignoreDotFiles: z.boolean().optional(),
     autoRebuildTree: z.boolean().optional(),
     maxWatchedDirectories: z.number().int().positive().optional(),
@@ -988,17 +1016,7 @@ server.tool("update_file_watching_config", "Update file watching configuration",
   
   // Create or update file watching config
   if (!config.fileWatching) {
-    config.fileWatching = {
-      enabled: false,
-      debounceMs: 300,
-      ignoreDotFiles: true,
-      autoRebuildTree: true,
-      maxWatchedDirectories: 1000,
-      watchForNewFiles: true,
-      watchForDeleted: true,
-      watchForChanged: true,
-      ...params.config
-    };
+    config.fileWatching = { ...DEFAULT_FILE_WATCHING, ...params.config };
   } else {
     config.fileWatching = {
       ...config.fileWatching,
@@ -1043,529 +1061,6 @@ server.tool("debug_list_all_files", "List all file paths in the current file tre
   });
 });
 
-
-// Create the HTML wrapper for a Mermaid diagram
-function createMermaidHtml(mermaidCode: string, title: string): string {
-  const now = new Date();
-  const timestamp = `${now.toDateString()} ${now.toLocaleTimeString()}`;
-
-  // Escape backticks and dollar signs for safe embedding in HTML
-  const escapedMermaidCode = mermaidCode.replace(/`/g, '\\`').replace(/\$/g, '\\$');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>${title}</title>
-  <!-- Load Mermaid from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
-  <style>
-    body {
-      font-family: 'Inter', sans-serif;
-      margin: 0;
-      padding: 0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.5s ease;
-    }
-    .dark-mode {
-      background: linear-gradient(135deg, #1e1e2f 0%, #1d2426 100%);
-    }
-    .light-mode {
-      background: linear-gradient(135deg, #f5f6fa 0%, #dcdde1 100%);
-    }
-    header {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      text-align: left;
-    }
-    #theme-toggle {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 50px;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-    }
-    #diagram-container {
-      width: 90%;
-      max-width: 1200px;
-      margin: 75px 0;
-      padding: 25px;
-      border-radius: 15px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      transition: all 0.5s ease;
-      position: relative;
-    }
-    #mermaid-graph {
-      overflow: auto;
-      max-height: 70vh;
-    }
-    #error-message {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      padding: 8px 16px;
-      border-radius: 8px;
-      font-size: 14px;
-      display: none;
-    }
-    /* Styles for collapsed nodes */
-    .collapsed-node text {
-      font-weight: bold;
-    }
-    .collapsed-node rect, .collapsed-node circle, .collapsed-node polygon {
-      stroke-width: 3px !important;
-    }
-    .collapsed-indicator {
-      fill: #4cd137;
-      font-weight: bold;
-    }
-    /* Add + symbol to collapsed nodes */
-    .collapsed-node .collapsed-icon {
-      fill: #4cd137;
-      font-size: 16px;
-      font-weight: bold;
-    }
-  </style>
-</head>
-<body class="light-mode">
-  <!-- Header -->
-  <header style="color: #2d3436;">
-    <h1 style="margin: 0; font-size: 28px;">${title}</h1>
-    <div style="font-size: 14px; margin-top: 5px;">Generated on ${timestamp}</div>
-  </header>
-
-  <!-- Theme Toggle Button - Initial state for light mode -->
-  <button id="theme-toggle" style="background: #dcdde1; color: #2d3436;">Switch to Dark Mode</button>
-
-  <!-- Diagram Container - Initial state for light mode -->
-  <div id="diagram-container" style="background: rgba(255, 255, 255, 0.8); border: 1px solid rgba(0, 0, 0, 0.1);">
-    <div id="mermaid-graph"></div>
-    <div id="error-message" style="background: rgba(45, 52, 54, 0.9); color: #ff7675;"></div>
-    <!-- Mermaid Code -->
-    <pre id="raw-code" style="display: none;">
-${escapedMermaidCode}
-    </pre>
-  </div>
-
-  <script>
-    // Unique render ID counter
-    let renderCount = 0;
-
-    // Track collapsible groups
-    const collapsibleGroups = {};
-    let expandedGroups = new Set();
-    let collapsedGroups = new Set();
-
-    // Initialize Mermaid with light theme by default
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'default',
-      securityLevel: 'loose',
-      flowchart: {
-        htmlLabels: true,
-        curve: 'basis',
-        nodeSpacing: 42,
-        rankSpacing: 60,
-        useMaxWidth: true
-      },
-      themeVariables: {
-        // Default light theme variables (adjust if needed)
-        nodeBorder: "#2d3436",
-        mainBkg: "#f8f9fa",    // Light background
-        nodeTextColor: "#333333", // Dark text
-        fontSize: "16px"
-      }
-    });
-
-    // Render on DOM load
-    document.addEventListener('DOMContentLoaded', () => {
-      if (typeof mermaid === 'undefined') {
-        console.error('Mermaid library failed to load. Check network or CDN URL.');
-        document.getElementById('error-message').style.display = 'block';
-        document.getElementById('error-message').textContent = 'Error: Mermaid library not loaded';
-        return;
-      }
-      renderMermaid();
-    });
-
-    // Handle node click events
-    window.toggleGroup = function(nodeId) {
-      if (expandedGroups.has(nodeId)) {
-        // Collapse the group
-        expandedGroups.delete(nodeId);
-        collapsedGroups.add(nodeId);
-      } else {
-        // Expand the group
-        collapsedGroups.delete(nodeId);
-        expandedGroups.add(nodeId);
-      }
-      renderMermaid();
-    };
-
-    // Process SVG after render
-    function processMermaidSvg(svgElement) {
-      // Process click events on nodes
-      const clickables = svgElement.querySelectorAll('[id^="flowchart-"]');
-      
-      clickables.forEach(node => {
-        const nodeId = node.id.replace('flowchart-', '');
-        
-        // Is this a collapsible group?
-        if (Object.keys(collapsibleGroups).includes(nodeId)) {
-          // Add visual indicator for collapsed/expanded state
-          const textElement = node.querySelector('text');
-          
-          if (textElement && collapsedGroups.has(nodeId)) {
-            // Add a + sign for collapsed groups
-            const currentText = textElement.textContent || '';
-            if (!currentText.includes('[+]')) {
-              textElement.textContent = currentText + ' [+]';
-            }
-            
-            // Add a class for styling
-            node.classList.add('collapsed-node');
-          }
-          
-          // Make nodes clickable visually
-          node.style.cursor = 'pointer';
-          
-          // Add the children count to the label
-          const childCount = collapsibleGroups[nodeId].length;
-          const childLabel = '(' + childCount + ' items)';
-          const label = node.querySelector('text');
-          
-          if (label && !label.textContent.includes(childLabel)) {
-            label.textContent += ' ' + childLabel;
-          }
-        }
-      });
-      
-      // Hide children of collapsed groups
-      collapsedGroups.forEach(groupId => {
-        const children = collapsibleGroups[groupId] || [];
-        children.forEach(childId => {
-          const childElement = svgElement.querySelector('#flowchart-' + childId);
-          if (childElement) {
-            childElement.style.display = 'none';
-            
-            // Also hide edges to/from this element
-            const edges = svgElement.querySelectorAll('path.flowchart-link');
-            edges.forEach(edge => {
-              const edgeId = edge.id;
-              if (edgeId.includes(childId)) {
-                edge.style.display = 'none';
-              }
-            });
-          }
-        });
-      });
-    }
-
-    // Detect collapsible groups in mermaid code
-    function detectCollapsibleGroups(mermaidCode) {
-      // Reset the collapsible groups
-      Object.keys(collapsibleGroups).forEach(key => delete collapsibleGroups[key]);
-
-      const clickHandlerRegex = /click\\s+(\\w+)\\s+toggleGroup\\s+"([^"]+)"/g;
-      let match;
-      
-      while ((match = clickHandlerRegex.exec(mermaidCode)) !== null) {
-        const nodeId = match[1];
-        
-        const subgraphRegex = new RegExp('subgraph\\\\s+' + nodeId + '.*?\\\\n([\\\\s\\\\S]*?)\\\\nend', 'g');
-        const subgraphMatch = subgraphRegex.exec(mermaidCode);
-        
-        if (subgraphMatch) {
-          const subgraphContent = subgraphMatch[1];
-          const nodeRegex = /\\s+(\\w+)/g;
-          const children = [];
-          let nodeMatch;
-          
-          while ((nodeMatch = nodeRegex.exec(subgraphContent)) !== null) {
-            const childId = nodeMatch[1].trim();
-            if (childId !== nodeId) {
-              children.push(childId);
-            }
-          }
-          
-          if (children.length > 0) {
-            collapsibleGroups[nodeId] = children;
-            // By default, all groups start expanded
-            expandedGroups.add(nodeId);
-          }
-        }
-      }
-      
-      console.log('Detected collapsible groups: ' + JSON.stringify(collapsibleGroups));
-    }
-
-    // Render Mermaid diagram
-    function renderMermaid() {
-      const mermaidDiv = document.getElementById('mermaid-graph');
-      const errorDiv = document.getElementById('error-message');
-      const rawCode = document.getElementById('raw-code').textContent.trim();
-      const uniqueId = 'mermaid-svg-' + Date.now() + '-' + renderCount++;
-
-      // Detect collapsible groups in the diagram
-      detectCollapsibleGroups(rawCode);
-
-      // Clear previous content
-      mermaidDiv.innerHTML = '';
-      errorDiv.style.display = 'none';
-
-      // Render using promise
-      mermaid.render(uniqueId, rawCode)
-        .then(({ svg }) => {
-          mermaidDiv.innerHTML = svg;
-          
-          // Process the SVG after it's been inserted into the DOM
-          const svgElement = mermaidDiv.querySelector('svg');
-          if (svgElement) {
-            processMermaidSvg(svgElement);
-          }
-        })
-        .catch(error => {
-          console.error('Mermaid rendering failed: ' + error);
-          errorDiv.style.display = 'block';
-          errorDiv.textContent = error.message;
-          
-          // Create a <pre> element and set its text content safely
-          const preElement = document.createElement('pre');
-          preElement.style.color = '#ff7675';
-          preElement.textContent = rawCode;
-          
-          // Clear mermaidDiv and append the new <pre> element
-          mermaidDiv.innerHTML = '';
-          mermaidDiv.appendChild(preElement);
-        });
-    }
-
-    // Theme toggle function
-    function toggleTheme() {
-      const body = document.body;
-      const toggleBtn = document.getElementById('theme-toggle');
-      const diagramContainer = document.getElementById('diagram-container');
-      const header = document.querySelector('header');
-      const isDarkMode = body.classList.contains('dark-mode');
-
-      if (isDarkMode) {
-        // Switch to Light Mode
-        body.classList.remove('dark-mode');
-        body.classList.add('light-mode');
-        toggleBtn.textContent = 'Switch to Dark Mode';
-        toggleBtn.style.background = '#dcdde1';
-        toggleBtn.style.color = '#2d3436';
-        diagramContainer.style.background = 'rgba(255, 255, 255, 0.8)';
-        diagramContainer.style.border = '1px solid rgba(0, 0, 0, 0.1)';
-        header.style.color = '#2d3436';
-        
-        // Update Mermaid theme to light with dark text
-        mermaid.initialize({
-          theme: 'default',
-          themeVariables: {
-            nodeBorder: "#2d3436",
-            mainBkg: "#f8f9fa",
-            nodeTextColor: "#333333",
-            fontSize: "16px"
-          }
-        });
-      } else {
-        // Switch to Dark Mode
-        body.classList.remove('light-mode');
-        body.classList.add('dark-mode');
-        toggleBtn.textContent = 'Switch to Light Mode';
-        toggleBtn.style.background = '#2d3436';
-        toggleBtn.style.color = '#ffffff';
-        diagramContainer.style.background = 'rgba(255, 255, 255, 0.05)';
-        diagramContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-        header.style.color = '#ffffff';
-        
-        // Update Mermaid theme to dark with bright white text
-        mermaid.initialize({
-          theme: 'dark',
-          themeVariables: {
-            nodeBorder: "#2d3436",
-            mainBkg: "#1e272e",
-            nodeTextColor: "#ffffff",
-            fontSize: "16px"
-          }
-        });
-      }
-
-      // Re-render diagram after theme change
-      renderMermaid();
-    }
-
-    // Attach theme toggle event
-    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
-  </script>
-</body>
-</html>`;
-}
-
-// Generate diagram tool
-server.tool("generate_diagram", "Generate a Mermaid diagram for the current file tree", {
-  style: z.enum(['default', 'dependency', 'directory', 'hybrid', 'package-deps']).describe('Diagram style'),
-  maxDepth: z.number().optional().describe('Maximum depth for directory trees (1-10)'),
-  minImportance: z.number().optional().describe('Only show files above this importance (0-10)'),
-  showDependencies: z.boolean().optional().describe('Whether to show dependency relationships'),
-  showPackageDeps: z.boolean().optional().describe('Whether to show package dependencies'),
-  packageGrouping: z.boolean().optional().describe('Whether to group packages by scope'),
-  autoGroupThreshold: z.number().optional().describe("Auto-group nodes when parent has more than this many direct children (default: 8)"),
-  excludePackages: z.array(z.string()).optional().describe('Packages to exclude from diagram'),
-  includeOnlyPackages: z.array(z.string()).optional().describe('Only include these packages (if specified)'),
-  outputPath: z.string().optional().describe('Full path or relative path where to save the diagram file (.mmd or .html)'),
-  outputFormat: z.enum(['mmd', 'html']).optional().describe('Output format (mmd or html)'),
-  layout: z.object({
-    direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional().describe("Graph direction"),
-    rankSpacing: z.number().min(10).max(100).optional().describe("Space between ranks"),
-    nodeSpacing: z.number().min(10).max(100).optional().describe("Space between nodes")
-  }).optional()
-}, async (params) => {
-  try {
-    if (!fileTree) {
-      return createMcpResponse("No file tree loaded. Please create or select a file tree first.", true);
-    }
-
-    // Use specialized config for package-deps style
-    if (params.style === 'package-deps') {
-      // Package-deps style should show package dependencies by default
-      params.showPackageDeps = params.showPackageDeps ?? true;
-      // Default to left-to-right layout for better readability of packages
-      if (!params.layout) {
-        params.layout = { direction: 'LR' };
-      } else if (!params.layout.direction) {
-        params.layout.direction = 'LR';
-      }
-    }
-
-    // Generate the diagram with added autoGroupThreshold parameter
-    const generator = new MermaidGenerator(fileTree, {
-      style: params.style,
-      maxDepth: params.maxDepth,
-      minImportance: params.minImportance,
-      showDependencies: params.showDependencies,
-      showPackageDeps: params.showPackageDeps,
-      packageGrouping: params.packageGrouping,
-      autoGroupThreshold: params.autoGroupThreshold,
-      excludePackages: params.excludePackages,
-      includeOnlyPackages: params.includeOnlyPackages,
-      layout: params.layout
-    });
-    const diagram = generator.generate();
-    const mermaidContent = diagram.code;
-
-    // Enhanced title based on diagram type
-    let titlePrefix = "File Scope Diagram";
-    switch (params.style) {
-      case 'package-deps':
-        titlePrefix = "Package Dependencies";
-        break;
-      case 'dependency':
-        titlePrefix = "Code Dependencies";
-        break;
-      case 'directory':
-        titlePrefix = "Directory Structure";
-        break;
-      case 'hybrid':
-        titlePrefix = "Hybrid View";
-        break;
-    }
-
-    // Save diagram to file if requested
-    if (params.outputPath) {
-      const outputFormat = params.outputFormat || 'mmd';
-      const baseOutputPath = path.resolve(process.cwd(), params.outputPath);
-      const outputDir = path.dirname(baseOutputPath);
-      
-      log(`Attempting to save diagram file(s):`);
-      log(`- Base output path: ${baseOutputPath}`);
-      log(`- Output directory: ${outputDir}`);
-      log(`- Output format: ${outputFormat}`);
-      
-      // Ensure output directory exists
-      try {
-        await fs.mkdir(outputDir, { recursive: true });
-      } catch (err: any) {
-        if (err.code !== 'EEXIST') {
-          log(`Error creating output directory: ` + err);
-          return createMcpResponse(`Failed to create output directory: ${err.message}`, true);
-        }
-      }
-
-      // Save the appropriate file based on format
-      if (outputFormat === 'mmd') {
-        // Save Mermaid file
-        const mmdPath = baseOutputPath.endsWith('.mmd') ? baseOutputPath : baseOutputPath + '.mmd';
-        try {
-          await fs.writeFile(mmdPath, mermaidContent, 'utf8');
-          log(`Successfully saved Mermaid file to: ${mmdPath}`);
-          
-          return createMcpResponse({
-            message: `Successfully generated diagram in mmd format`,
-            filePath: mmdPath,
-            stats: diagram.stats
-          });
-        } catch (err: any) {
-          log(`Error saving Mermaid file: ` + err);
-          return createMcpResponse(`Failed to save Mermaid file: ${err.message}`, true);
-        }
-      } else if (outputFormat === 'html') {
-        // Generate HTML with embedded Mermaid
-        const title = `${titlePrefix} - ${path.basename(baseOutputPath)}`;
-        const htmlContent = createMermaidHtml(mermaidContent, title);
-        
-        // Save HTML file
-        const htmlPath = baseOutputPath.endsWith('.html') ? baseOutputPath : baseOutputPath + '.html';
-        try {
-          await fs.writeFile(htmlPath, htmlContent, 'utf8');
-          log(`Successfully saved HTML file to: ${htmlPath}`);
-          
-          return createMcpResponse({
-            message: `Successfully generated diagram in html format`,
-            filePath: htmlPath,
-            stats: diagram.stats
-          });
-        } catch (err: any) {
-          log(`Error saving HTML file: ` + err);
-          return createMcpResponse(`Failed to save HTML file: ${err.message}`, true);
-        }
-      }
-    }
-
-    // Return both the diagram content and file information
-    return createMcpResponse([
-      {
-        type: "text",
-        text: JSON.stringify({
-          stats: diagram.stats,
-          style: diagram.style,
-          generated: diagram.timestamp
-        }, null, 2)
-      },
-      {
-        type: "resource" as const,
-        resource: {
-          uri: 'data:text/x-mermaid;base64,' + Buffer.from(mermaidContent).toString('base64'),
-          text: mermaidContent,
-          mimeType: "text/x-mermaid"
-        }
-      }
-    ]);
-  } catch (error) {
-    log('Error generating diagram: ' + error);
-    return createMcpResponse(`Failed to generate diagram: ` + error, true);
-  }
-});
 
 // Exclude and remove a file or pattern from the file tree
 server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {

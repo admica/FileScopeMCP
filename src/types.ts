@@ -3,7 +3,6 @@ import { getProjectRoot } from './global-state.js';
 // File watching configuration
 export interface FileWatchingConfig {
   enabled: boolean;               // Master switch for file watching
-  debounceMs: number;             // Debounce time for file change events
   ignoreDotFiles: boolean;        // Whether to ignore files/dirs starting with a dot
   autoRebuildTree: boolean;       // Whether to auto-rebuild the tree on file changes
   maxWatchedDirectories: number;  // Limit to prevent watching too many directories
@@ -32,7 +31,6 @@ export class FileNode {
   importance?: number;       // 0-10 scale
   summary?: string;          // Human-readable summary of the file
   mtime?: number;            // File modification time (ms since epoch) for freshness tracking
-  mermaidDiagram?: MermaidDiagram; // Optional Mermaid diagram for this node
 }
 
 // New type for package dependencies with version information
@@ -177,87 +175,3 @@ export class FileTreeStorage {
   fileTree: FileNode = new FileNode();
 }
 
-export class MermaidDiagramStyle {
-  nodeColors: {
-    highImportance: string;    // Color for nodes with importance >= 8
-    mediumImportance: string;  // Color for nodes with importance >= 5
-    lowImportance: string;     // Color for nodes with importance < 5
-    package: string;           // Color for package dependencies
-    packageScope: string;      // Color for package scope groups
-  } = {
-    highImportance: '',
-    mediumImportance: '',
-    lowImportance: '',
-    package: '',
-    packageScope: ''
-  };
-  edgeColors: {
-    dependency: string;        // Color for dependency relationships
-    directory: string;        // Color for directory relationships
-    circular: string;         // Color for circular dependencies
-    package: string;          // Color for package dependency relationships
-  } = {
-    dependency: '',
-    directory: '',
-    circular: '',
-    package: ''
-  };
-  nodeShapes: {
-    file: string;            // Shape for file nodes
-    directory: string;       // Shape for directory nodes
-    important: string;       // Shape for high-importance nodes
-    package: string;         // Shape for package nodes
-    packageScope: string;    // Shape for package scope nodes
-  } = {
-    file: '',
-    directory: '',
-    important: '',
-    package: '',
-    packageScope: ''
-  };
-}
-
-export class MermaidDiagramConfig {
-  style: 'default' | 'dependency' | 'directory' | 'hybrid' | 'package-deps' = 'default';
-  maxDepth?: number;         // Maximum depth for directory trees
-  minImportance?: number;    // Only show files above this importance (0-10)
-  showDependencies?: boolean; // Whether to show dependency relationships
-  showPackageDeps?: boolean; // Whether to show package dependencies
-  packageGrouping?: boolean; // Whether to group packages by scope
-  excludePackages?: string[]; // Packages to exclude from diagram
-  includeOnlyPackages?: string[]; // Only include these packages (if specified)
-  autoGroupThreshold?: number; // Auto-group nodes when parent has more than this many direct children (default: 8)
-  customStyle?: Partial<MermaidDiagramStyle>;
-  layout?: {
-    direction?: 'TB' | 'BT' | 'LR' | 'RL'; // Graph direction
-    rankSpacing?: number;    // Space between ranks
-    nodeSpacing?: number;    // Space between nodes
-  };
-}
-
-export class MermaidDiagramStats {
-  nodeCount: number = 0;         // Total number of nodes in diagram
-  edgeCount: number = 0;         // Total number of edges
-  maxDepth: number = 0;         // Maximum depth in the tree
-  importantFiles: number = 0;   // Number of files with importance >= minImportance
-  circularDeps: number = 0;     // Number of circular dependencies
-  packageCount: number = 0;     // Number of package dependencies
-  packageScopeCount: number = 0; // Number of package scopes
-}
-
-export class MermaidDiagram {
-  code: string = '';             // The Mermaid diagram code
-  style: MermaidDiagramStyle = new MermaidDiagramStyle();
-  stats: MermaidDiagramStats = new MermaidDiagramStats();
-  timestamp: Date = new Date();  // When the diagram was generated
-}
-
-export type GroupingRuleType = 'directory' | 'package' | 'dependency' | 'custom';
-
-export interface GroupingRule {
-  type: GroupingRuleType;
-  condition: (nodes: FileNode[]) => boolean;
-  groupBy: (nodes: FileNode[]) => Map<string, FileNode[]>;
-  threshold: number;
-  description: string;  // For debugging and logging
-}
