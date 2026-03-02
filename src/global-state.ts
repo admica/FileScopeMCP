@@ -8,6 +8,7 @@ let _config: Config | null = null;
 
 export function setProjectRoot(root: string) {
   _projectRoot = root;
+  _customExcludesLoaded = false; // Reset so custom excludes are re-read for the new project
   console.error(`Global project root set to: ${_projectRoot}`);
 }
 
@@ -17,23 +18,36 @@ export function getProjectRoot(): string {
 
 export function setConfig(config: Config) {
   _config = config;
+  _customExcludesLoaded = false; // Reset so custom excludes are re-merged with the new config
   console.error('Global config updated:', config);
 }
+
+// Cache for custom excludes so we don't re-read and re-append on every call
+let _customExcludesLoaded = false;
 
 export function getConfig(): Config | null {
   if (!_config) return null;
 
-  try {
-    const customExcludesPath = path.join(_projectRoot, 'FileScopeMCP-excludes.json');
-    if (fs.existsSync(customExcludesPath)) {
-      const customExcludes = JSON.parse(fs.readFileSync(customExcludesPath, 'utf-8'));
-      if (Array.isArray(customExcludes)) {
-        _config.excludePatterns = [..._config.excludePatterns, ...customExcludes];
-        console.error('Custom excludes loaded:', customExcludes);
+  // Only load and merge custom excludes once
+  if (!_customExcludesLoaded && _projectRoot) {
+    try {
+      const customExcludesPath = path.join(_projectRoot, 'FileScopeMCP-excludes.json');
+      if (fs.existsSync(customExcludesPath)) {
+        const customExcludes = JSON.parse(fs.readFileSync(customExcludesPath, 'utf-8'));
+        if (Array.isArray(customExcludes)) {
+          // Deduplicate: only add patterns not already present
+          const existingSet = new Set(_config.excludePatterns);
+          const newPatterns = customExcludes.filter((p: string) => !existingSet.has(p));
+          if (newPatterns.length > 0) {
+            _config.excludePatterns = [..._config.excludePatterns, ...newPatterns];
+          }
+          console.error('Custom excludes loaded:', newPatterns);
+        }
       }
+    } catch (error) {
+      console.error('Error loading custom excludes:', error);
     }
-  } catch (error) {
-    console.error('Error loading custom excludes:', error);
+    _customExcludesLoaded = true;
   }
 
   return _config;

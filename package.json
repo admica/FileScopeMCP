@@ -13,7 +13,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "chokidar": "^3.6.0",
-    "mermaid": "^11.6.0",
     "zod": "^3.25.28"
   },
   "devDependencies": {
