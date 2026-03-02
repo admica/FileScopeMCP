@@ -24,3 +24,4 @@ FileScopeMCP-tree.json
 *.csv
 run.sh
 
+.planning/
