@@ -46,7 +46,7 @@ Plans:
   2. `mcp-server.ts` is reduced to a thin tool-surface layer that delegates all orchestration to `src/coordinator.ts`
   3. The system running in MCP mode behaves identically to before the extraction — all tools work, watcher starts and stops correctly, file tree is maintained
   4. The file tree, dependency graph, importance scoring, and watching all function correctly with no LLM configured (structural metadata only)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 02-01-PLAN.md — Extract ServerCoordinator class from mcp-server.ts; rewire all tools to use coordinator via closure capture; drop in-memory FileNode tree
@@ -110,7 +110,7 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. SQLite Storage | 3/3 | Complete | 2026-03-02 |
-| 2. Coordinator + Daemon Mode | 0/2 | Not started | - |
+| 2. Coordinator + Daemon Mode | 1/2 | In Progress|  |
 | 3. Semantic Change Detection | 0/2 | Not started | - |
 | 4. Cascade Engine + Staleness | 0/2 | Not started | - |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |
