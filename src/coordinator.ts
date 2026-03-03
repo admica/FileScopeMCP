@@ -145,6 +145,9 @@ export class ServerCoordinator {
     // Store project root on instance
     this._projectRoot = projectRoot;
 
+    // Acquire PID file guard — prevents concurrent daemons from corrupting the DB
+    await this.acquirePidFile(projectRoot);
+
     // Update the base directory in the global config
     let config = getConfig();
     if (config) {
@@ -252,6 +255,11 @@ export class ServerCoordinator {
 
     this._initialized = false;
     log('ServerCoordinator shutdown complete.');
+
+    // Release PID file last — after DB is closed
+    if (this._projectRoot) {
+      this.releasePidFile(this._projectRoot);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -264,6 +272,41 @@ export class ServerCoordinator {
 
   private _errorResponse(text: string): ToolResponse {
     return { content: [{ type: 'text', text }], isError: true };
+  }
+
+  /**
+   * Acquire the PID file guard. Throws if another live daemon is already running
+   * for this project. Overwrites stale PID files (process no longer running).
+   */
+  private async acquirePidFile(projectRoot: string): Promise<void> {
+    const pidPath = path.join(projectRoot, '.filescope.pid');
+    try {
+      const existing = fsSync.readFileSync(pidPath, 'utf-8');
+      const existingPid = parseInt(existing.trim(), 10);
+      if (!isNaN(existingPid)) {
+        try {
+          process.kill(existingPid, 0); // throws ESRCH if not running
+          throw new Error(
+            `FileScopeMCP daemon already running (PID ${existingPid}). ` +
+            `Stop it first or delete ${pidPath}.`
+          );
+        } catch (e: any) {
+          if (e.code !== 'ESRCH') throw e;
+          log(`Stale PID file found (PID ${existingPid} not running). Overwriting.`);
+        }
+      }
+    } catch (e: any) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+    fsSync.writeFileSync(pidPath, String(process.pid), 'utf-8');
+  }
+
+  /**
+   * Release the PID file. Called as the final step of shutdown().
+   */
+  private releasePidFile(projectRoot: string): void {
+    const pidPath = path.join(projectRoot, '.filescope.pid');
+    try { fsSync.unlinkSync(pidPath); } catch { /* already gone */ }
   }
 
   /**
