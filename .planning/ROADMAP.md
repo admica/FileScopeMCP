@@ -17,6 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 3: Semantic Change Detection** - AST-level diff for TS/JS; LLM fallback for unsupported languages
 - [ ] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers
 - [ ] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact
+- [ ] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure)
 
 ## Phase Details
 
@@ -49,8 +50,8 @@ Plans:
 **Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 02-01-PLAN.md — Extract ServerCoordinator class from mcp-server.ts; rewire all tools to use coordinator via closure capture; drop in-memory FileNode tree
-- [ ] 02-02-PLAN.md — Wire --daemon entry point with PID file guard, graceful shutdown, and file-only logging
+- [x] 02-01-PLAN.md — Extract ServerCoordinator class from mcp-server.ts; rewire all tools to use coordinator via closure capture; drop in-memory FileNode tree
+- [x] 02-02-PLAN.md — Wire --daemon entry point with PID file guard, graceful shutdown, and file-only logging
 
 ### Phase 3: Semantic Change Detection
 **Goal**: When a file changes, the system classifies what semantically changed — exports, types, body, or comments — using AST-level diffing for TS/JS files and LLM-powered diff for unsupported languages
@@ -102,6 +103,23 @@ Plans:
 - [ ] 05-02: LLMPipeline — dequeue jobs, run prompts (summary, concepts, change impact), write results to SQLite, clear staleness flags; generation counter + pending-job map for race safety
 - [ ] 05-03: Rate limiting, token budget cap, circuit breaker, on/off toggle (config + MCP tool); exclude pattern enforcement in pipeline; end-to-end integration test
 
+### Phase 6: Verification & Tech Debt Cleanup
+**Goal:** Close all 9 partial requirements by creating VERIFICATION.md files for completed phases, and fix integration issues and tech debt identified in the v1.0 audit
+**Depends on**: Phase 2 (verifies Phase 1 and 2 work)
+**Requirements**: STOR-01, STOR-02, STOR-03, STOR-04, STOR-05, STOR-06, STOR-07, COMPAT-01, COMPAT-03
+**Gap Closure:** Closes gaps from v1.0 milestone audit
+**Success Criteria** (what must be TRUE):
+  1. VERIFICATION.md exists for Phase 1 with independent verification of STOR-01, STOR-02, STOR-03, STOR-04, STOR-07, COMPAT-01
+  2. VERIFICATION.md exists for Phase 2 with independent verification of STOR-05, STOR-06, COMPAT-03
+  3. DB double-open sequence in migration path is eliminated (single open/close lifecycle)
+  4. Dead import `getChildren` removed from storage-utils.ts
+  5. All `console.error` calls in storage-utils.ts and global-state.ts routed through logger to respect daemon log suppression
+**Plans**: TBD
+
+Plans:
+- [ ] 06-01: Verify Phase 1 (STOR-01–04, STOR-07, COMPAT-01) and Phase 2 (STOR-05, STOR-06, COMPAT-03); create VERIFICATION.md files
+- [ ] 06-02: Fix tech debt — DB double-open, dead import, console.error bypass
+
 ## Progress
 
 **Execution Order:**
@@ -114,3 +132,4 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | 3. Semantic Change Detection | 0/2 | Not started | - |
 | 4. Cascade Engine + Staleness | 0/2 | Not started | - |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |
+| 6. Verification & Tech Debt | 0/2 | Not started | - |
