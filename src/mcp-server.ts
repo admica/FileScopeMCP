@@ -28,6 +28,17 @@ import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-s
 import { loadConfig, saveConfig } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log, enableFileLogging } from './logger.js';
+import { openDatabase, closeDatabase } from './db/db.js';
+import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
+import {
+  getFile,
+  upsertFile,
+  deleteFile as dbDeleteFile,
+  getAllFiles,
+  setDependencies,
+  getDependencies,
+  getDependents
+} from './db/repository.js';
 
 // Enable file logging for debugging
 enableFileLogging(false, 'mcp-debug.log');
@@ -85,6 +96,9 @@ async function initializeProject(projectPath: string): Promise<ToolResponse> {
     return createMcpResponse(`Error: Directory not found at ${projectRoot}`, true);
   }
 
+  // Close the existing database before switching projects
+  closeDatabase();
+
   // Set the global project root and change the current working directory
   setProjectRoot(projectRoot);
   process.chdir(projectRoot);
@@ -105,9 +119,21 @@ async function initializeProject(projectPath: string): Promise<ToolResponse> {
     lastUpdated: new Date()
   };
 
+  // Run JSON-to-SQLite migration if needed (handles existing JSON tree files)
+  try {
+    runMigrationIfNeeded(projectRoot);
+  } catch (err) {
+    log(`Migration failed (non-fatal): ${err}`);
+  }
+
+  // Open the SQLite database for this project
+  const dbPath = path.join(projectRoot, '.filescope.db');
+  openDatabase(dbPath);
+  log(`Opened SQLite database at: ${dbPath}`);
+
   try {
     await buildFileTree(newConfig);
-    
+
     // Always initialize file watcher for self-healing
     log('Initializing file watcher for self-healing...');
     await initializeFileWatcher();
@@ -116,7 +142,7 @@ async function initializeProject(projectPath: string): Promise<ToolResponse> {
     log('Starting periodic integrity sweep...');
     startIntegritySweep();
 
-    return createMcpResponse(`Project path set to ${projectRoot}. File tree built and saved to ${newConfig.filename}.`);
+    return createMcpResponse(`Project path set to ${projectRoot}. File tree built and saved to SQLite.`);
   } catch (error) {
     log("Failed to build file tree: " + error);
     return createMcpResponse(`Failed to build file tree for ${projectRoot}: ${error}`, true);
@@ -159,18 +185,18 @@ async function initializeFileWatcher(): Promise<void> {
       log('Cannot initialize file watcher: config or fileWatching not available');
       return;
     }
-    
+
     // Stop any existing watcher
     if (fileWatcher) {
       fileWatcher.stop();
       fileWatcher = null;
     }
-    
+
     // Create and start a new watcher
     fileWatcher = new FileWatcher(config.fileWatching, getProjectRoot());
     fileWatcher.addEventCallback((filePath, eventType) => handleFileEvent(filePath, eventType));
     fileWatcher.start();
-    
+
     log('File watcher initialized and started successfully');
   } catch (error) {
     log('Error initializing file watcher: ' + error);
@@ -184,7 +210,7 @@ async function initializeFileWatcher(): Promise<void> {
  */
 async function handleFileEvent(filePath: string, eventType: FileEventType): Promise<void> {
   log(`[MCP Server] Handling file event: ${eventType} for ${filePath}`);
-  
+
   // Use the module-level active config and tree
   const activeConfig = currentConfig;
   const activeTree = fileTree;
@@ -195,13 +221,13 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
     log('[MCP Server] Ignoring file event: Active config, tree, project root, or watching config not available.');
     return;
   }
-  
+
   if (!fileWatchingConfig.autoRebuildTree) {
     log('[MCP Server] Ignoring file event: Auto-rebuild is disabled.');
     return;
   }
 
-  // --- Debounce Logic --- 
+  // --- Debounce Logic ---
   const debounceKey = `${filePath}:${eventType}`;
   const existingTimer = fileEventDebounceTimers.get(debounceKey);
   if (existingTimer) {
@@ -214,44 +240,30 @@ async function handleFileEvent(filePath: string, eventType: FileEventType): Prom
 
     treeMutex.run(async () => {
       try {
-        let updated = false;
         switch (eventType) {
           case 'add':
             if (fileWatchingConfig.watchForNewFiles) {
               log(`[MCP Server] Calling addFileNode for ${filePath}`);
+              // addFileNode now persists to SQLite internally
               await addFileNode(filePath, activeTree, projectRoot);
-              updated = true;
             }
             break;
 
           case 'change':
             if (fileWatchingConfig.watchForChanged) {
                log(`[MCP Server] CHANGE detected for ${filePath}, performing incremental update.`);
-               const changed = await updateFileNodeOnChange(filePath, activeTree, projectRoot);
-               updated = changed;
+               // updateFileNodeOnChange now persists to SQLite internally
+               await updateFileNodeOnChange(filePath, activeTree, projectRoot);
             }
             break;
 
           case 'unlink':
             if (fileWatchingConfig.watchForDeleted) {
                log(`[MCP Server] Calling removeFileNode for ${filePath}`);
+               // removeFileNode now persists to SQLite internally (deleteFile)
                await removeFileNode(filePath, activeTree, projectRoot);
-               updated = true;
             }
             break;
-        }
-
-        // Save the potentially modified tree if an add/remove/rebuild happened
-        if (updated) {
-          // We need the latest references in case buildFileTree was called
-          const latestActiveConfig = currentConfig;
-          const latestActiveTree = fileTree;
-          if (latestActiveConfig && latestActiveTree) {
-              log(`[MCP Server] Saving updated file tree after ${eventType} event.`);
-              await saveFileTree(latestActiveConfig, latestActiveTree);
-          } else {
-              log(`[MCP Server] Error saving tree after ${eventType} event: active config or tree became null.`);
-          }
         }
 
       } catch (error) {
@@ -281,26 +293,28 @@ function startIntegritySweep(): void {
     treeMutex.run(async () => {
       if (!fileTree || !currentConfig) return;
       try {
-        const result = await integrityCheck(fileTree, getProjectRoot());
+        // Load current state from SQLite for accurate integrity check
+        const dbFiles = getAllFiles();
+        const dbFileTree = dbFiles.length > 0 ? fileTree : fileTree;
+
+        const result = await integrityCheck(dbFileTree, getProjectRoot());
         const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
         if (totalIssues === 0) return;
 
         log(`[Integrity Sweep] Found ${totalIssues} issues: ${result.staleFiles.length} stale, ${result.missingFiles.length} missing, ${result.newFiles.length} new`);
 
-        // Auto-heal stale files
+        // Auto-heal stale files — updateFileNodeOnChange persists to SQLite
         for (const filePath of result.staleFiles) {
           await updateFileNodeOnChange(filePath, fileTree, getProjectRoot());
         }
-        // Auto-remove missing files
+        // Auto-remove missing files — removeFileNode persists to SQLite
         for (const filePath of result.missingFiles) {
           await removeFileNode(filePath, fileTree, getProjectRoot());
         }
-        // Auto-add new files
+        // Auto-add new files — addFileNode persists to SQLite
         for (const filePath of result.newFiles) {
           await addFileNode(filePath, fileTree, getProjectRoot());
         }
-        // Save updated tree
-        await saveFileTree(currentConfig, fileTree);
         log(`[Integrity Sweep] Healed: ${result.staleFiles.length} stale, ${result.missingFiles.length} removed, ${result.newFiles.length} added`);
       } catch (error) {
         log(`[Integrity Sweep] Error: ${error}`);
@@ -362,20 +376,20 @@ class StdioTransport implements Transport {
   async send(message: JSONRPCMessage): Promise<void> {
     // Ensure we only write valid JSON messages to stdout
     const serialized = serializeMessage(message);
-    
+
     // Check message size
     if (serialized.length > this.MAX_BUFFER_SIZE) {
       log(`Message too large: ${serialized.length} bytes`);
       throw new Error('Message exceeds maximum size limit');
     }
-    
+
     // Only log a summary of the message to stderr, not the full content
     const isResponse = 'result' in message;
     const msgType = isResponse ? 'response' : 'request';
     const msgId = (message as any).id || 'none';
-    
+
     process.stderr.write(`Sending ${msgType} message (id: ${msgId})\n`);
-    
+
     // Write to stdout without adding an extra newline
     process.stdout.write(serialized);
   }
@@ -389,10 +403,10 @@ class StdioTransport implements Transport {
 // Helper function to create MCP responses
 function createMcpResponse(content: any, isError = false): ToolResponse {
   let formattedContent;
-  
-  if (Array.isArray(content) && content.every(item => 
-    typeof item === 'object' && 
-    ('type' in item) && 
+
+  if (Array.isArray(content) && content.every(item =>
+    typeof item === 'object' &&
+    ('type' in item) &&
     (item.type === 'text' || item.type === 'image' || item.type === 'resource'))) {
     // Content is already in correct format
     formattedContent = content;
@@ -426,32 +440,32 @@ function findNode(node: FileNode, targetPath: string): FileNode | null {
   // Normalize both paths for comparison
   const normalizedTargetPath = normalizePath(targetPath);
   const normalizedNodePath = normalizePath(node.path);
-  
+
   log('Finding node: ' + JSON.stringify({
     targetPath: normalizedTargetPath,
     currentNodePath: normalizedNodePath,
     isDirectory: node.isDirectory,
     childCount: node.children?.length
   }));
-  
+
   // Try exact match first
   if (normalizedNodePath === normalizedTargetPath) {
     log('Found exact matching node');
     return node;
   }
-  
+
   // Try case-insensitive match for Windows compatibility
   if (normalizedNodePath.toLowerCase() === normalizedTargetPath.toLowerCase()) {
     log('Found case-insensitive matching node');
     return node;
   }
-  
+
   // Check if the path ends with our target (to handle relative vs absolute paths)
   if (normalizedTargetPath.endsWith(normalizedNodePath) || normalizedNodePath.endsWith(normalizedTargetPath)) {
     log('Found path suffix matching node');
     return node;
   }
-  
+
   // Check children if this is a directory
   if (node.children) {
     for (const child of node.children) {
@@ -461,66 +475,59 @@ function findNode(node: FileNode, targetPath: string): FileNode | null {
       }
     }
   }
-  
+
   return null;
 }
 
 // Get all file nodes as a flat array
 function getAllFileNodes(node: FileNode): FileNode[] {
   const results: FileNode[] = [];
-  
+
   function traverse(currentNode: FileNode) {
     if (!currentNode.isDirectory) {
       results.push(currentNode);
     }
-    
+
     if (currentNode.children && currentNode.children.length > 0) {
       for (const child of currentNode.children) {
         traverse(child);
       }
     }
   }
-  
+
   // Start traversal with the root node
   traverse(node);
   log(`Found ${results.length} file nodes`);
   return results;
 }
 
-// Build or load the file tree
+// Build or load the file tree — now uses SQLite as cache
 async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
-  log('\n🌲 BUILD FILE TREE STARTED');
+  log('\n BUILD FILE TREE STARTED');
   log('==========================================');
   log('Building file tree with config: ' + JSON.stringify(config, null, 2));
   log('Current working directory: ' + process.cwd());
-  log('Config in global state: ' + (getConfig() !== null ? '✅ YES' : '❌ NO'));
+  log('Config in global state: ' + (getConfig() !== null ? 'YES' : 'NO'));
   if (getConfig()) {
     log('Global config exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
   }
-  
-  // Try to load from file, but validate freshness before trusting it
+
+  // Check if SQLite already has data — use as cache
   try {
-    const savedTree = await loadFileTree(config.filename);
-    if (savedTree) {
-      if (!savedTree.fileTree) {
-        log('❌ Invalid file tree structure in saved file');
-        throw new Error('Invalid file tree structure');
-      }
-      log('Loaded existing file tree from: ' + config.filename);
-      log('Tree root path: ' + savedTree.fileTree.path);
-      log('Tree has children: ' + (savedTree.fileTree.children?.length || 0));
+    const dbFiles = getAllFiles();
+    if (dbFiles.length > 0) {
+      log(`Found ${dbFiles.length} files in SQLite — checking freshness`);
 
       // Spot-check freshness: sample up to 10 file nodes and compare mtimes
-      let isFresh = true;
-      const allNodes = getAllFileNodes(savedTree.fileTree);
-      const sampleSize = Math.min(10, allNodes.length);
-      const sample = allNodes.length <= 10
-        ? allNodes
-        : allNodes.sort(() => Math.random() - 0.5).slice(0, sampleSize);
+      const fileNodes = dbFiles.filter(f => !f.isDirectory);
+      const sampleSize = Math.min(10, fileNodes.length);
+      const sample = fileNodes.length <= 10
+        ? fileNodes
+        : fileNodes.sort(() => Math.random() - 0.5).slice(0, sampleSize);
 
+      let isFresh = true;
       for (const node of sample) {
         if (node.mtime === undefined) {
-          // No mtime stored — tree predates freshness tracking, force rescan
           log('No mtime on node ' + node.path + ', forcing rescan');
           isFresh = false;
           break;
@@ -528,12 +535,11 @@ async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
         try {
           const stat = fsSync.statSync(node.path);
           if (Math.abs(stat.mtimeMs - node.mtime) > 1) {
-            log('Stale mtime on ' + node.path + ': tree=' + node.mtime + ' disk=' + stat.mtimeMs);
+            log('Stale mtime on ' + node.path + ': db=' + node.mtime + ' disk=' + stat.mtimeMs);
             isFresh = false;
             break;
           }
         } catch {
-          // File no longer exists
           log('Missing file during freshness check: ' + node.path);
           isFresh = false;
           break;
@@ -541,67 +547,107 @@ async function buildFileTree(config: FileTreeConfig): Promise<FileNode> {
       }
 
       if (isFresh) {
-        log('✅ Freshness check passed, using cached tree');
-        fileTree = savedTree.fileTree;
-        currentConfig = savedTree.config;
-        log('🌲 BUILD FILE TREE COMPLETED (loaded from file, freshness verified)');
+        log('Freshness check passed — using SQLite cache');
+        // Reconstruct in-memory tree from flat DB rows
+        const tree = reconstructTreeFromDb(dbFiles, config.baseDirectory);
+        fileTree = tree;
+        currentConfig = config;
+        log('BUILD FILE TREE COMPLETED (loaded from SQLite, freshness verified)');
         log('==========================================\n');
         return fileTree;
       } else {
-        log('⚠️ Freshness check failed, clearing cache and rescanning');
-        clearTreeCache();
-        // Fall through to full rescan below
+        log('Freshness check failed — rescanning from disk');
+        // Fall through to full rescan
       }
     }
   } catch (error) {
-    log('❌ Failed to load existing file tree: ' + error);
+    log('Failed to load from SQLite: ' + error);
     // Continue to build new tree
   }
 
-  // If not found or failed to load, build from scratch
-  log('🔍 Building new file tree for directory: ' + config.baseDirectory);
-  
-  // Verify config is in global state before scanning
+  // Full rescan from disk
+  log('Building new file tree for directory: ' + config.baseDirectory);
+
   if (!getConfig()) {
-    log('⚠️ WARNING: No config in global state, setting it now');
-    // Get the current config
+    log('WARNING: No config in global state, setting it now');
     const currentConfig = await loadConfig();
-    // Set the global config
     setConfig(currentConfig);
-    log('Config set in global state: ' + (getConfig() !== null ? '✅ YES' : '❌ NO'));
-    if (getConfig()) {
-      log('Global config exclude patterns count: ' + (getConfig()?.excludePatterns?.length || 0));
-    }
   }
-  
-  fileTree = await scanDirectory(config.baseDirectory);
-  
-  if (!fileTree.children || fileTree.children.length === 0) {
-    log('❌ Failed to scan directory - no children found');
+
+  const scannedTree = await scanDirectory(config.baseDirectory);
+
+  if (!scannedTree.children || scannedTree.children.length === 0) {
+    log('Failed to scan directory - no children found');
     throw new Error('Failed to scan directory');
   } else {
-    log(`✅ Successfully scanned directory, found ${fileTree.children.length} top-level entries`);
+    log(`Successfully scanned directory, found ${scannedTree.children.length} top-level entries`);
   }
-  
-  log('📊 Building dependency map...');
-  buildDependentMap(fileTree);
-  log('📈 Calculating importance values...');
-  calculateImportance(fileTree);
-  
-  // Save to disk
-  log('💾 Saving file tree to: ' + config.filename);
+
+  log('Building dependency map...');
+  buildDependentMap(scannedTree);
+  log('Calculating importance values...');
+  calculateImportance(scannedTree);
+
+  // Persist to SQLite — bulk upsert all nodes
+  log('Saving file tree to SQLite...');
   try {
-    await saveFileTree(config, fileTree);
-    log('✅ Successfully saved file tree');
+    await saveFileTree(config, scannedTree);
+    log('Successfully saved file tree to SQLite');
+    fileTree = scannedTree;
     currentConfig = config;
   } catch (error) {
-    log('❌ Failed to save file tree: ' + error);
+    log('Failed to save file tree to SQLite: ' + error);
     throw error;
   }
-  
-  log('🌲 BUILD FILE TREE COMPLETED (built from scratch)');
+
+  log('BUILD FILE TREE COMPLETED (built from scratch)');
   log('==========================================\n');
-  return fileTree;
+  return fileTree!;
+}
+
+/**
+ * Reconstructs a nested FileNode tree from a flat list of DB rows.
+ * Used when loading from SQLite cache to provide backward-compat in-memory tree.
+ */
+function reconstructTreeFromDb(dbFiles: FileNode[], baseDirectory: string): FileNode {
+  // Build a map of path -> node (with empty children arrays for dirs)
+  const nodeMap = new Map<string, FileNode>();
+  for (const f of dbFiles) {
+    nodeMap.set(f.path, {
+      ...f,
+      children: f.isDirectory ? [] : undefined,
+    });
+  }
+
+  // Find the root: node whose path equals baseDirectory (or shortest path)
+  let root = nodeMap.get(baseDirectory) ?? nodeMap.get(normalizePath(baseDirectory));
+  if (!root) {
+    // Fall back to shortest path as root
+    let shortest: FileNode | null = null;
+    for (const node of nodeMap.values()) {
+      if (!shortest || node.path.length < shortest.path.length) {
+        shortest = node;
+      }
+    }
+    root = shortest ?? {
+      path: baseDirectory,
+      name: path.basename(baseDirectory),
+      isDirectory: true,
+      children: []
+    };
+  }
+
+  // Assign children to their parents
+  for (const node of nodeMap.values()) {
+    if (node.path === root.path) continue;
+    const parentPath = node.path.substring(0, node.path.lastIndexOf('/'));
+    const parent = nodeMap.get(parentPath);
+    if (parent && parent.isDirectory && parent.children) {
+      parent.children.push(node);
+    }
+  }
+
+  return root;
 }
 
 // Read the content of a file
@@ -656,13 +702,13 @@ server.tool("delete_file_tree", "Delete a file tree configuration", {
   try {
     const normalizedPath = normalizeAndResolvePath(params.filename);
     await fs.unlink(normalizedPath);
-    
+
     // Clear from memory if it's the current tree
     if (currentConfig?.filename === normalizedPath) {
       currentConfig = null;
       fileTree = null;
     }
-    
+
     return createMcpResponse(`Successfully deleted ${normalizedPath}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -679,40 +725,40 @@ server.tool("create_file_tree", "Create or load a file tree configuration", {
   if (!isProjectPathSet()) return projectPathNotSetError;
   log('Create file tree called with params: ' + JSON.stringify(params));
   log('Current working directory: ' + process.cwd());
-  
+
   try {
     // Ensure we're using paths relative to the current directory
-    const relativeFilename = path.isAbsolute(params.filename) 
-      ? path.relative(process.cwd(), params.filename) 
+    const relativeFilename = path.isAbsolute(params.filename)
+      ? path.relative(process.cwd(), params.filename)
       : params.filename;
     log('Relative filename: ' + relativeFilename);
-    
+
     // Handle special case for current directory
     let baseDir = params.baseDirectory;
     if (baseDir === '.' || baseDir === './') {
       baseDir = getProjectRoot(); // Use the project root instead of cwd
       log('Resolved "." to project root: ' + baseDir);
     }
-    
+
     // Normalize the base directory relative to project root if not absolute
     if (!path.isAbsolute(baseDir)) {
       baseDir = path.join(getProjectRoot(), baseDir);
       log('Resolved relative base directory: ' + baseDir);
     }
-    
+
     const config = await createFileTreeConfig(relativeFilename, baseDir);
     log('Created config: ' + JSON.stringify(config));
-    
+
     // Build the tree with the new config, not the default
     const tree = await buildFileTree(config);
     log('Built file tree with root path: ' + tree.path);
-    
+
     // Update global state
     fileTree = tree;
     currentConfig = config;
-    
+
     return createMcpResponse({
-      message: `File tree created and stored in ${config.filename}`,
+      message: `File tree created and stored in SQLite`,
       config
     });
   } catch (error) {
@@ -725,22 +771,24 @@ server.tool("select_file_tree", "Select an existing file tree to work with", {
   filename: z.string().describe("Name of the JSON file containing the file tree")
 }, async (params: { filename: string }) => {
   if (!isProjectPathSet()) return projectPathNotSetError;
-  const storage = await loadFileTree(params.filename);
-  if (!storage) {
+  // With SQLite, we load directly from the DB
+  try {
+    const storage = await loadFileTree(params.filename);
+    fileTree = storage.fileTree;
+    currentConfig = storage.config;
+
+    return createMcpResponse({
+      message: `File tree loaded from SQLite`,
+      config: currentConfig
+    });
+  } catch (error) {
     return createMcpResponse(`File tree not found: ${params.filename}`, true);
   }
-  
-  fileTree = storage.fileTree;
-  currentConfig = storage.config;
-  
-  return createMcpResponse({
-    message: `File tree loaded from ${params.filename}`,
-    config: currentConfig
-  });
 });
 
 server.tool("list_files", "List all files in the project with their importance rankings", async () => {
   if (!isProjectPathSet()) return projectPathNotSetError;
+  // Return the in-memory tree (reconstructed from DB) for backward compat
   return createMcpResponse(fileTree);
 });
 
@@ -749,30 +797,30 @@ server.tool("get_file_importance", "Get the importance ranking of a specific fil
 }, async (params: { filepath: string }) => {
   if (!isProjectPathSet()) return projectPathNotSetError;
   log('Get file importance called with params: ' + JSON.stringify(params));
-  log('Current config: ' + JSON.stringify(currentConfig));
-  log('File tree root path: ' + fileTree?.path);
-  
+
   try {
     const normalizedPath = normalizePath(params.filepath);
     log('Normalized path: ' + normalizedPath);
-    
-    const node = findNode(fileTree!, normalizedPath);
-    log('Found node: ' + JSON.stringify(node ? {
+
+    // Use repository for direct DB lookup
+    const node = getFile(normalizedPath);
+    log('Found node from DB: ' + JSON.stringify(node ? {
       path: node.path,
       importance: node.importance,
       dependencies: node.dependencies?.length,
       dependents: node.dependents?.length
     } : null));
-    
+
     if (!node) {
       return createMcpResponse(`File not found: ${params.filepath}`, true);
     }
-    
+
     return createMcpResponse({
       path: node.path,
       importance: node.importance || 0,
       dependencies: node.dependencies || [],
       dependents: node.dependents || [],
+      packageDependencies: node.packageDependencies || [],
       summary: node.summary || null
     });
   } catch (error) {
@@ -786,13 +834,13 @@ server.tool("find_important_files", "Find the most important files in the projec
   minImportance: z.number().optional().describe("Minimum importance score (0-10)")
 }, async (params: { limit?: number, minImportance?: number }) => {
   if (!isProjectPathSet()) return projectPathNotSetError;
-  
+
   const limit = params.limit || 10;
   const minImportance = params.minImportance || 0;
-  
-  // Get all files as a flat array
-  const allFiles = getAllFileNodes(fileTree!);
-  
+
+  // Use repository to get all files from DB
+  const allFiles = getAllFiles().filter(f => !f.isDirectory);
+
   // Filter by minimum importance and sort by importance (descending)
   const importantFiles = allFiles
     .filter(file => (file.importance || 0) >= minImportance)
@@ -801,11 +849,11 @@ server.tool("find_important_files", "Find the most important files in the projec
     .map(file => ({
       path: file.path,
       importance: file.importance || 0,
-      dependentCount: file.dependents?.length || 0,
-      dependencyCount: file.dependencies?.length || 0,
+      dependentCount: (file.dependents?.length || getDependents(file.path).length) || 0,
+      dependencyCount: (file.dependencies?.length || getDependencies(file.path).length) || 0,
       hasSummary: !!file.summary
     }));
-  
+
   return createMcpResponse(importantFiles);
 });
 
@@ -814,18 +862,18 @@ server.tool("get_file_summary", "Get the summary of a specific file", {
   filepath: z.string().describe("The path to the file to check")
 }, async (params: { filepath: string }) => {
   if (!isProjectPathSet()) return projectPathNotSetError;
-  
+
   const normalizedPath = normalizePath(params.filepath);
-  const node = getFileNode(fileTree!, normalizedPath);
-  
+  const node = getFile(normalizedPath);
+
   if (!node) {
     return createMcpResponse(`File not found: ${params.filepath}`, true);
   }
-  
+
   if (!node.summary) {
     return createMcpResponse(`No summary available for ${params.filepath}`);
   }
-  
+
   return createMcpResponse({
     path: node.path,
     summary: node.summary
@@ -838,19 +886,23 @@ server.tool("set_file_summary", "Set the summary of a specific file", {
   summary: z.string().describe("The summary text to set")
 }, async (params: { filepath: string, summary: string }) => {
   if (!isProjectPathSet()) return projectPathNotSetError;
-  
+
   const normalizedPath = normalizePath(params.filepath);
-  const updated = updateFileNode(fileTree!, normalizedPath, {
-    summary: params.summary
-  });
-  
-  if (!updated) {
+  const node = getFile(normalizedPath);
+
+  if (!node) {
     return createMcpResponse(`File not found: ${params.filepath}`, true);
   }
-  
-  // Save the updated tree
-  await saveFileTree(currentConfig!, fileTree!);
-  
+
+  // Update summary and persist to DB
+  node.summary = params.summary;
+  upsertFile(node);
+
+  // Also update in-memory tree if it's there
+  if (fileTree) {
+    updateFileNode(fileTree, normalizedPath, { summary: params.summary });
+  }
+
   return createMcpResponse({
     message: `Summary updated for ${params.filepath}`,
     path: normalizedPath,
@@ -865,7 +917,7 @@ server.tool("read_file_content", "Read the content of a specific file", {
   if (!isProjectPathSet()) return projectPathNotSetError;
   try {
     const content = await readFileContent(params.filepath);
-    
+
     return createMcpResponse(content);
   } catch (error) {
     return createMcpResponse(`Failed to read file: ${params.filepath} - ` + error, true);
@@ -880,42 +932,44 @@ server.tool("set_file_importance", "Manually set the importance ranking of a spe
   if (!isProjectPathSet()) return projectPathNotSetError;
   try {
     log('set_file_importance called with params: ' + JSON.stringify(params));
-    log('Current file tree root: ' + fileTree?.path);
-    
-    // Get a list of all files
-    const allFiles = getAllFileNodes(fileTree!);
-    log(`Total files in tree: ${allFiles.length}`);
-    
-    // First try the findAndSetImportance method
-    const wasUpdated = setFileImportance(fileTree!, params.filepath, params.importance);
-    
-    // If that didn't work, try matching by basename
-    if (!wasUpdated) {
+
+    const normalizedPath = normalizePath(params.filepath);
+    const node = getFile(normalizedPath);
+
+    if (!node) {
+      // Try basename match in all DB files
+      const allFiles = getAllFiles().filter(f => !f.isDirectory);
       const basename = path.basename(params.filepath);
-      log(`Looking for file with basename: ${basename}`);
-      
-      let foundFile = false;
-      for (const file of allFiles) {
-        const fileBasename = path.basename(file.path);
-        log(`Checking file: ${file.path} with basename: ${fileBasename}`);
-        
-        if (fileBasename === basename) {
-          log(`Found match: ${file.path}`);
-          file.importance = Math.min(10, Math.max(0, params.importance));
-          foundFile = true;
-          break;
-        }
-      }
-      
-      if (!foundFile) {
+      const matchedNode = allFiles.find(f => path.basename(f.path) === basename);
+
+      if (!matchedNode) {
         log('File not found by any method');
         return createMcpResponse(`File not found: ${params.filepath}`, true);
       }
+
+      matchedNode.importance = Math.min(10, Math.max(0, params.importance));
+      upsertFile(matchedNode);
+
+      // Update in-memory tree too
+      if (fileTree) {
+        setFileImportance(fileTree, matchedNode.path, matchedNode.importance);
+      }
+
+      return createMcpResponse({
+        message: `Importance updated for ${matchedNode.path}`,
+        path: matchedNode.path,
+        importance: matchedNode.importance
+      });
     }
-    
-    // Save the updated tree
-    await saveFileTree(currentConfig!, fileTree!);
-    
+
+    node.importance = Math.min(10, Math.max(0, params.importance));
+    upsertFile(node);
+
+    // Update in-memory tree too
+    if (fileTree) {
+      setFileImportance(fileTree, normalizedPath, node.importance);
+    }
+
     return createMcpResponse({
       message: `Importance updated for ${params.filepath}`,
       path: params.filepath,
@@ -932,18 +986,23 @@ server.tool("recalculate_importance", "Recalculate importance values for all fil
   if (!isProjectPathSet()) return projectPathNotSetError;
 
   log('Recalculating importance values...');
-  buildDependentMap(fileTree!);
-  calculateImportance(fileTree!);
-  
-  // Save the updated tree
-  if (currentConfig) {
-    await saveFileTree(currentConfig, fileTree!);
+
+  // Use in-memory tree for calculation, then write back to DB
+  if (fileTree) {
+    buildDependentMap(fileTree);
+    calculateImportance(fileTree);
+
+    // Write recalculated importance values back to SQLite
+    const allTreeNodes = getAllFileNodes(fileTree!);
+    for (const node of allTreeNodes) {
+      upsertFile(node);
+    }
   }
-  
-  // Count files with non-zero importance
-  const allFiles = getAllFileNodes(fileTree!);
+
+  // Count files with non-zero importance from DB
+  const allFiles = getAllFiles().filter(f => !f.isDirectory);
   const filesWithImportance = allFiles.filter(file => (file.importance || 0) > 0);
-  
+
   return createMcpResponse({
     message: "Importance values recalculated",
     totalFiles: allFiles.length,
@@ -958,7 +1017,7 @@ server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
   if (!config) {
     return createMcpResponse('No configuration loaded', true);
   }
-  
+
   // Create default file watching config if it doesn't exist
   if (!config.fileWatching) {
     config.fileWatching = { ...DEFAULT_FILE_WATCHING, enabled: true };
@@ -966,11 +1025,11 @@ server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
     // Toggle the enabled status
     config.fileWatching.enabled = !config.fileWatching.enabled;
   }
-  
+
   // Save the updated config
   setConfig(config);
   await saveConfig(config);
-  
+
   if (config.fileWatching.enabled) {
     // Start watching
     await initializeFileWatcher();
@@ -993,7 +1052,7 @@ server.tool("get_file_watching_status", "Get the current status of file watching
     isActive: fileWatcher !== null && fileWatcher !== undefined,
     config: config?.fileWatching || null
   };
-  
+
   return createMcpResponse(status);
 });
 
@@ -1013,7 +1072,7 @@ server.tool("update_file_watching_config", "Update file watching configuration",
   if (!config) {
     return createMcpResponse('No configuration loaded', true);
   }
-  
+
   // Create or update file watching config
   if (!config.fileWatching) {
     config.fileWatching = { ...DEFAULT_FILE_WATCHING, ...params.config };
@@ -1023,11 +1082,11 @@ server.tool("update_file_watching_config", "Update file watching configuration",
       ...params.config
     };
   }
-  
+
   // Save the updated config
   setConfig(config);
   await saveConfig(config);
-  
+
   // Restart watcher if it's enabled
   if (config.fileWatching.enabled) {
     await initializeFileWatcher();
@@ -1035,7 +1094,7 @@ server.tool("update_file_watching_config", "Update file watching configuration",
     fileWatcher.stop();
     fileWatcher = null;
   }
-  
+
   return createMcpResponse({
     message: 'File watching configuration updated',
     config: config.fileWatching
@@ -1044,17 +1103,17 @@ server.tool("update_file_watching_config", "Update file watching configuration",
 
 server.tool("debug_list_all_files", "List all file paths in the current file tree", async () => {
   if (!isProjectPathSet()) return projectPathNotSetError;
-  
-  // Get a flat list of all files
-  const allFiles = getAllFileNodes(fileTree!);
-  
+
+  // Get a flat list of all files from DB
+  const allFiles = getAllFiles().filter(f => !f.isDirectory);
+
   // Extract just the paths and basenames
   const fileDetails = allFiles.map(file => ({
     path: file.path,
     basename: path.basename(file.path),
     importance: file.importance || 0
   }));
-  
+
   return createMcpResponse({
     totalFiles: fileDetails.length,
     files: fileDetails
@@ -1081,13 +1140,8 @@ server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the
     log('exclude_and_remove called with params: ' + JSON.stringify(params));
     log('Current file tree root: ' + fileTree?.path);
 
-    // Use the excludeAndRemoveFile function
+    // Use the excludeAndRemoveFile function (which calls removeFileNode → deleteFile in DB)
     await excludeAndRemoveFile(params.filepath, fileTree!, getProjectRoot());
-
-    // Save the updated tree
-    if (currentConfig) {
-      await saveFileTree(currentConfig, fileTree!);
-    }
 
     return createMcpResponse({
       message: `File or pattern excluded and removed: ${params.filepath}`

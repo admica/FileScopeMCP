@@ -7,6 +7,7 @@ import { normalizeAndResolvePath } from "./storage-utils.js";
 import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.js';
 import { saveFileTree } from './storage-utils.js'; // Import saveFileTree
 import { log } from './logger.js'; // Import the logger
+import { upsertFile, deleteFile, setDependencies } from './db/repository.js';
 
 /**
  * Normalizes a file path for consistent comparison across platforms
@@ -958,6 +959,11 @@ export async function updateFileNodeOnChange(
   const affectedPaths = [normalizedFilePath, ...oldDeps, ...newDepsSet];
   await recalculateImportanceForAffected([...new Set(affectedPaths)], activeFileTree, activeProjectRoot);
 
+  // Persist to SQLite
+  upsertFile(existingNode);
+  setDependencies(existingNode.path, existingNode.dependencies ?? [], existingNode.packageDependencies ?? []);
+  log(`[updateFileNodeOnChange] Persisted updated node to SQLite: ${normalizedFilePath}`);
+
   log(`[updateFileNodeOnChange] Updated ${normalizedFilePath}: ${newDeps.length} deps, ${newPkgDeps.length} pkg deps`);
   return true;
 }
@@ -1040,7 +1046,10 @@ export async function addFileNode(
     const depPaths = (newNode.dependencies ?? []).map(d => normalizePath(d));
     await recalculateImportanceForAffected([newNode.path, ...depPaths], activeFileTree, activeProjectRoot); // Pass active tree & root
 
-    // 9. Global state update is handled by the caller (mcp-server) after saving
+    // 9. Persist to SQLite
+    upsertFile(newNode);
+    setDependencies(newNode.path, newNode.dependencies ?? [], newNode.packageDependencies ?? []);
+    log(`[addFileNode] Persisted node to SQLite: ${normalizedFilePath}`);
 
     log(`[addFileNode] Successfully added node: ${normalizedFilePath}`);
 
@@ -1146,7 +1155,9 @@ export async function removeFileNode(
   ];
   await recalculateImportanceForAffected(affectedPaths, activeFileTree, activeProjectRoot); // Pass active tree & root
 
-  // 8. Global state update is handled by the caller (mcp-server) after saving
+  // 8. Delete from SQLite
+  deleteFile(normalizedFilePath);
+  log(`[removeFileNode] Deleted node from SQLite: ${normalizedFilePath}`);
 
   log(`[removeFileNode] Successfully removed node: ${normalizedFilePath}`);
 }

@@ -3,9 +3,12 @@ import * as path from "path";
 import * as fsSync from "fs";
 import { FileNode, FileTreeConfig, FileTreeStorage } from "./types.js";
 import { getProjectRoot } from "./global-state.js";
-
-// Keep a map of all loaded file trees
-const loadedTrees = new Map<string, FileTreeStorage>();
+import {
+  getFile,
+  upsertFile,
+  getAllFiles,
+  getChildren,
+} from "./db/repository.js";
 
 /**
  * Normalizes paths to use forward slashes and handles URL encoding
@@ -98,73 +101,97 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
 }
 
 /**
- * Saves a file tree to disk
+ * Saves a file tree to SQLite (replaces JSON write).
+ * Bulk-upserts all nodes from the in-memory tree.
+ * Signature kept for backward compatibility.
  */
 export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): Promise<void> {
   try {
-    // Save in the project's root directory
-    const filePath = path.join(getProjectRoot(), config.filename);
-    console.error('Saving file tree to:', filePath);
-
-    const data = {
-      config: {
-        ...config,
-        lastUpdated: new Date()
-      },
-      fileTree
-    };
-
-    fsSync.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    // Invalidate the in-memory cache so next loadFileTree reads fresh from disk
-    loadedTrees.delete(config.filename);
-    console.error('Successfully saved file tree (cache invalidated)');
+    console.error('Saving file tree to SQLite...');
+    // Flatten the tree and upsert all nodes
+    function collectNodes(node: FileNode): FileNode[] {
+      const results: FileNode[] = [node];
+      for (const child of node.children ?? []) {
+        results.push(...collectNodes(child));
+      }
+      return results;
+    }
+    const allNodes = collectNodes(fileTree);
+    for (const node of allNodes) {
+      upsertFile(node);
+    }
+    console.error(`Successfully saved ${allNodes.length} nodes to SQLite`);
   } catch (error) {
-    console.error('Error saving file tree:', error);
+    console.error('Error saving file tree to SQLite:', error);
     console.error('Error details:', error instanceof Error ? error.stack : String(error));
     throw error;
   }
 }
 
 /**
- * Loads a file tree from disk, or returns null if it doesn't exist
+ * Loads a file tree from SQLite (replaces JSON read).
+ * Reconstructs a FileTreeStorage with a nested FileNode tree.
+ * Signature kept for backward compatibility.
  */
 export async function loadFileTree(filename: string): Promise<FileTreeStorage> {
   try {
-    // Check if we have a cached version
-    const cached = loadedTrees.get(filename);
-    if (cached) {
-      console.error(`Using cached file tree for ${filename}`);
-      return cached;
+    console.error(`Loading file tree from SQLite (filename param ignored: ${filename})`);
+    const allNodes = getAllFiles();
+    if (allNodes.length === 0) {
+      throw new Error('No files in SQLite database');
     }
 
-    // Load from file in the project's root directory
-    const filePath = path.resolve(getProjectRoot(), filename);
-    console.error(`Loading file tree from: ${filePath}`);
+    // Build a map for O(1) lookup by path
+    const nodeMap = new Map<string, FileNode>();
+    for (const node of allNodes) {
+      nodeMap.set(node.path, { ...node, children: node.isDirectory ? [] : undefined });
+    }
 
-    const content = await fs.readFile(filePath, 'utf-8');
-    const storage: FileTreeStorage = JSON.parse(content);
+    // Reconstruct tree: assign each node to its parent
+    let root: FileNode | null = null;
+    for (const node of nodeMap.values()) {
+      const parentPath = node.path.substring(0, node.path.lastIndexOf('/'));
+      const parentNode = nodeMap.get(parentPath);
+      if (parentNode && parentNode.isDirectory) {
+        if (!parentNode.children) parentNode.children = [];
+        parentNode.children.push(node);
+      } else {
+        // No parent found — this is (or is a candidate for) the root
+        if (!root || node.path.length < root.path.length) {
+          root = node;
+        }
+      }
+    }
 
-    // Update the cache
-    loadedTrees.set(filename, storage);
+    if (!root) {
+      throw new Error('Could not determine root node from SQLite data');
+    }
 
-    return storage;
+    const config = new (await import('./types.js')).FileTreeConfig();
+    config.filename = filename;
+    config.baseDirectory = root.path;
+    config.projectRoot = getProjectRoot();
+    config.lastUpdated = new Date();
+
+    return { config, fileTree: root };
   } catch (error) {
-    console.error(`Failed to load file tree from ${filename}:`, error);
+    console.error(`Failed to load file tree from SQLite:`, error);
     throw error;
   }
 }
 
 /**
- * Gets a list of all saved file trees
+ * Gets a list of all saved file trees.
+ * Now returns a single entry representing the SQLite database.
  */
 export async function listSavedFileTrees(): Promise<{type: "text", text: string}[]> {
   try {
-    const files = await fs.readdir(getProjectRoot());
-    const jsonFiles = files.filter(file => file.endsWith('.json'));
-    return jsonFiles.map(file => ({
-      type: 'text' as const,
-      text: file
-    }));
+    const projectRoot = getProjectRoot();
+    const dbPath = path.join(projectRoot, '.filescope.db');
+    if (fsSync.existsSync(dbPath)) {
+      return [{ type: 'text' as const, text: '.filescope.db' }];
+    }
+    return [];
   } catch (error) {
     console.error('Error listing file trees:', error);
     return [];
@@ -172,8 +199,8 @@ export async function listSavedFileTrees(): Promise<{type: "text", text: string}
 }
 
 /**
- * Updates a specific file node in the tree
- * Returns true if the node was found and updated, false otherwise
+ * Updates a specific file node in the tree AND persists to SQLite.
+ * Returns true if the node was found and updated, false otherwise.
  */
 export function updateFileNode(fileTree: FileNode, filePath: string, updates: Partial<FileNode>): boolean {
   // Normalize the path for consistent comparison
@@ -186,18 +213,22 @@ export function updateFileNode(fileTree: FileNode, filePath: string, updates: Pa
     // Try exact match
     if (normalizedNodePath === normalizedInputPath) {
       Object.assign(node, updates);
+      // Persist to SQLite
+      upsertFile(node);
       return true;
     }
 
     // Try case-insensitive match for Windows compatibility
     if (normalizedNodePath.toLowerCase() === normalizedInputPath.toLowerCase()) {
       Object.assign(node, updates);
+      upsertFile(node);
       return true;
     }
 
     // Check if the path ends with our target (to handle relative vs absolute paths)
     if (normalizedInputPath.endsWith(normalizedNodePath) || normalizedNodePath.endsWith(normalizedInputPath)) {
       Object.assign(node, updates);
+      upsertFile(node);
       return true;
     }
 
@@ -217,13 +248,18 @@ export function updateFileNode(fileTree: FileNode, filePath: string, updates: Pa
 }
 
 /**
- * Retrieves a specific file node from the tree
+ * Retrieves a specific file node from SQLite by path.
+ * Falls back to in-memory tree traversal for directories (not stored with children).
  */
 export function getFileNode(fileTree: FileNode, filePath: string): FileNode | null {
+  // Try SQLite first for file nodes
+  const dbNode = getFile(filePath);
+  if (dbNode) return dbNode;
+
   // Normalize the path for consistent comparison
   const normalizedInputPath = filePath.split(path.sep).join('/');
 
-  // Function to recursively find the node
+  // Function to recursively find the node in-memory (for directories)
   function findNode(node: FileNode): FileNode | null {
     const normalizedNodePath = node.path.split(path.sep).join('/');
 
@@ -259,10 +295,9 @@ export function getFileNode(fileTree: FileNode, filePath: string): FileNode | nu
 }
 
 /**
- * Clears all entries from the in-memory file tree cache.
- * Forces subsequent loadFileTree() calls to read fresh from disk.
+ * No-op: cache has been removed. SQLite is the single source of truth.
+ * Kept for backward compatibility.
  */
 export function clearTreeCache(): void {
-  loadedTrees.clear();
-  console.error('File tree cache cleared');
+  console.error('clearTreeCache: no-op (SQLite is source of truth)');
 }
