@@ -56,6 +56,94 @@ describe('ServerCoordinator', () => {
     }
   });
 
+  // ─── Test 6: PID file written on init ──────────────────────────────────────
+
+  it('PID file written during init and contains current process PID', async () => {
+    tmpDir = makeTmpProject();
+
+    await coordinator.init(tmpDir);
+
+    const pidPath = path.join(tmpDir, '.filescope.pid');
+    expect(fs.existsSync(pidPath)).toBe(true);
+    expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe(String(process.pid));
+  });
+
+  // ─── Test 7: PID file removed on shutdown ──────────────────────────────────
+
+  it('PID file removed after shutdown', async () => {
+    tmpDir = makeTmpProject();
+
+    await coordinator.init(tmpDir);
+
+    const pidPath = path.join(tmpDir, '.filescope.pid');
+    expect(fs.existsSync(pidPath)).toBe(true);
+
+    await coordinator.shutdown();
+
+    expect(fs.existsSync(pidPath)).toBe(false);
+  });
+
+  // ─── Test 8: Stale PID is overwritten ──────────────────────────────────────
+
+  it('Stale PID file (non-running PID) is overwritten on init', async () => {
+    tmpDir = makeTmpProject();
+
+    // Write a stale PID that is almost certainly not running
+    const pidPath = path.join(tmpDir, '.filescope.pid');
+    fs.writeFileSync(pidPath, '99999999', 'utf-8');
+
+    await coordinator.init(tmpDir);
+
+    // PID file should now contain our process PID
+    expect(fs.existsSync(pidPath)).toBe(true);
+    expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe(String(process.pid));
+  });
+
+  // ─── Test 9: Live PID refuses start ────────────────────────────────────────
+
+  it('init throws "already running" error when PID file contains a live PID', async () => {
+    tmpDir = makeTmpProject();
+
+    // Write the current process PID — this process IS running
+    const pidPath = path.join(tmpDir, '.filescope.pid');
+    fs.writeFileSync(pidPath, String(process.pid), 'utf-8');
+
+    const coordinator2 = new ServerCoordinator();
+    let threw = false;
+    try {
+      await coordinator2.init(tmpDir);
+    } catch (err: any) {
+      threw = true;
+      expect(err.message).toContain('already running');
+    }
+    expect(threw).toBe(true);
+
+    // Cleanup coordinator2 manually
+    try { closeDatabase(); } catch { /* ignore */ }
+    // Restore PID file so afterEach cleanup works
+    fs.writeFileSync(pidPath, String(process.pid), 'utf-8');
+  });
+
+  // ─── Test 10: Daemon mode without MCP transport ────────────────────────────
+
+  it('Daemon mode: init() runs standalone without initServer() or MCP transport', async () => {
+    tmpDir = makeTmpProject();
+
+    // Call init() directly, no initServer(), no MCP transport
+    const result = await coordinator.init(tmpDir);
+
+    expect(result.isError).toBeFalsy();
+    expect(coordinator.isInitialized()).toBe(true);
+    expect(coordinator.getFileWatcher()).not.toBeNull();
+
+    await coordinator.shutdown();
+
+    expect(coordinator.isInitialized()).toBe(false);
+    // PID file should be removed after shutdown
+    const pidPath = path.join(tmpDir, '.filescope.pid');
+    expect(fs.existsSync(pidPath)).toBe(false);
+  });
+
   // ─── Test 1: init() opens DB and sets initialized ──────────────────────────
 
   it('init() opens DB and sets isInitialized() to true', async () => {
