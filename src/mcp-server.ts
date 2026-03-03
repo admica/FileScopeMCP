@@ -25,7 +25,7 @@ import {
 import * as fsSync from "fs";
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, saveConfig } from './config-utils.js';
-import { log, enableFileLogging } from './logger.js';
+import { log, enableFileLogging, enableDaemonFileLogging } from './logger.js';
 import {
   getFile,
   upsertFile,
@@ -652,16 +652,83 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
   });
 }
 
-// Start the server
-(async () => {
-  try {
-    const coordinator = new ServerCoordinator();
-    await coordinator.initServer();
-    registerTools(server, coordinator);
-    const transport = new StdioTransport();
-    await server.connect(transport);
-  } catch (error) {
-    log('Server error: ' + error);
+/**
+ * Graceful shutdown: wait for coordinator to shut down cleanly, or force-exit
+ * after 5 seconds. Used for both daemon mode and MCP mode.
+ */
+async function gracefulShutdown(coordinator: ServerCoordinator, signal: string): Promise<void> {
+  log(`Received ${signal}. Shutting down...`);
+  const forceExit = setTimeout(() => {
+    log('Force exit: shutdown timed out after 5s');
     process.exit(1);
+  }, 5000);
+  forceExit.unref(); // Don't keep the event loop alive for this timer
+
+  try {
+    await coordinator.shutdown();
+    log('Shutdown complete.');
+    process.exit(0);
+  } catch (err) {
+    log(`Shutdown error: ${err}`);
+    process.exit(1);
+  }
+}
+
+// Entry point: daemon mode or MCP mode
+(async () => {
+  const isDaemon = process.argv.includes('--daemon');
+  const baseDirArg = process.argv.find(a => a.startsWith('--base-dir='));
+
+  if (isDaemon) {
+    // Daemon mode: --base-dir is required
+    if (!baseDirArg) {
+      process.stderr.write('Error: --daemon requires --base-dir=<path>\n');
+      process.exit(1);
+    }
+    const projectPath = baseDirArg.split('=')[1];
+    if (!projectPath) {
+      process.stderr.write('Error: --base-dir value is empty\n');
+      process.exit(1);
+    }
+
+    // Enable daemon file-only logging BEFORE any log calls
+    const logPath = path.join(projectPath, '.filescope-daemon.log');
+    enableDaemonFileLogging(logPath);
+
+    try {
+      const coordinator = new ServerCoordinator();
+      await coordinator.init(projectPath);
+
+      // Startup banner (stdout only, then silent)
+      process.stdout.write(
+        `FileScopeMCP daemon started \u2014 watching ${projectPath} (PID ${process.pid})\n`
+      );
+
+      // Register signal handlers
+      process.on('SIGTERM', () => gracefulShutdown(coordinator, 'SIGTERM'));
+      process.on('SIGINT', () => gracefulShutdown(coordinator, 'SIGINT'));
+
+      // chokidar persistent:true keeps the event loop alive — no setInterval needed
+    } catch (error) {
+      log('Daemon startup error: ' + error);
+      process.exit(1);
+    }
+  } else {
+    // MCP mode: standard MCP server with stdio transport
+    try {
+      const coordinator = new ServerCoordinator();
+      await coordinator.initServer();
+      registerTools(server, coordinator);
+
+      // Register signal handlers for MCP mode too (consistent lifecycle)
+      process.on('SIGTERM', () => gracefulShutdown(coordinator, 'SIGTERM'));
+      process.on('SIGINT', () => gracefulShutdown(coordinator, 'SIGINT'));
+
+      const transport = new StdioTransport();
+      await server.connect(transport);
+    } catch (error) {
+      log('Server error: ' + error);
+      process.exit(1);
+    }
   }
 })();
