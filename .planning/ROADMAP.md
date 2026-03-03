@@ -13,7 +13,7 @@ This milestone transforms FileScopeMCP from a static-metadata system into an aut
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: SQLite Storage** - Replace JSON flat-file storage with SQLite; migrate existing users transparently
-- [ ] **Phase 2: Coordinator + Daemon Mode** - Extract coordinator from mcp-server.ts; enable standalone daemon operation
+- [x] **Phase 2: Coordinator + Daemon Mode** - Extract coordinator from mcp-server.ts; enable standalone daemon operation (completed 2026-03-03)
 - [ ] **Phase 3: Semantic Change Detection** - AST-level diff for TS/JS; LLM fallback for unsupported languages
 - [ ] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers
 - [ ] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact
@@ -46,7 +46,7 @@ Plans:
   2. `mcp-server.ts` is reduced to a thin tool-surface layer that delegates all orchestration to `src/coordinator.ts`
   3. The system running in MCP mode behaves identically to before the extraction — all tools work, watcher starts and stops correctly, file tree is maintained
   4. The file tree, dependency graph, importance scoring, and watching all function correctly with no LLM configured (structural metadata only)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 02-01-PLAN.md — Extract ServerCoordinator class from mcp-server.ts; rewire all tools to use coordinator via closure capture; drop in-memory FileNode tree
@@ -110,7 +110,7 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. SQLite Storage | 3/3 | Complete | 2026-03-02 |
-| 2. Coordinator + Daemon Mode | 1/2 | In Progress|  |
+| 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
 | 3. Semantic Change Detection | 0/2 | Not started | - |
 | 4. Cascade Engine + Staleness | 0/2 | Not started | - |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |

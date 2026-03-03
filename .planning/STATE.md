@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-03T06:03:00Z"
+last_updated: "2026-03-03T06:13:00Z"
 progress:
   total_phases: 5
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -23,28 +23,28 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 ## Current Position
 
 Phase: 2 of 5 (Coordinator Daemon Mode)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-03 — Plan 02-01 complete: ServerCoordinator extracted from mcp-server.ts, mcp-server.ts is now thin tool surface, STOR-05 and COMPAT-03 fulfilled
+Last activity: 2026-03-03 — Plan 02-02 complete: PID file guard, --daemon entry point, graceful SIGTERM/SIGINT shutdown wired; STOR-06 fulfilled
 
-Progress: [████░░░░░░] 27%
+Progress: [█████░░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: ~16 min
-- Total execution time: ~43 min
+- Total plans completed: 5
+- Average duration: ~12 min
+- Total execution time: ~49 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-sqlite-storage | 3/3 | ~43 min | ~14 min |
-| 02-coordinator-daemon-mode | 1/3 | ~6 min | ~6 min |
+| 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
 
 **Recent Trend:**
-- Last 5 plans: 10 min, 3 min, ~30 min, 6 min
+- Last 5 plans: 10 min, 3 min, ~30 min, 6 min, 4 min
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -73,6 +73,10 @@ Recent decisions affecting current work:
 - [Phase 02-coordinator-daemon-mode]: In-memory fileTree module variable fully removed from mcp-server.ts; getFileTree() reconstructs from DB on-demand for COMPAT-01
 - [Phase 02-coordinator-daemon-mode]: shutdown() drains mutex via treeMutex.run(async () => {}) to prevent DB close racing with in-flight file events
 - [Phase 02-coordinator-daemon-mode]: AsyncMutex kept as module-private class in coordinator.ts (not exported)
+- [Phase 02-coordinator-daemon-mode]: PID file acquired after _projectRoot is set but before DB open — prevents second instance from corrupting DB
+- [Phase 02-coordinator-daemon-mode]: releasePidFile called as final step in shutdown() after DB close — consistent cleanup order
+- [Phase 02-coordinator-daemon-mode]: enableDaemonFileLogging() called before coordinator.init() so all init logs go to file only; banner uses process.stdout.write for one stdout line only
+- [Phase 02-coordinator-daemon-mode]: forceExit.unref() prevents graceful shutdown timer from keeping event loop alive
 
 ### Pending Todos
 
@@ -86,5 +90,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Completed 02-coordinator-daemon-mode 02-01-PLAN.md — ServerCoordinator extracted, mcp-server.ts is thin tool surface, STOR-05 and COMPAT-03 fulfilled
+Stopped at: Completed 02-coordinator-daemon-mode 02-02-PLAN.md — PID file guard, --daemon entry point, graceful shutdown; STOR-06 fulfilled
 Resume file: None

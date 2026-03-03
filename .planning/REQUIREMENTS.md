@@ -14,7 +14,7 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 - [x] **STOR-03**: SQLite schema supports per-file staleness flags, dependency relationships as a join table, and structured metadata fields
 - [x] **STOR-04**: All existing MCP tools continue to work identically after storage migration (backward compatibility)
 - [x] **STOR-05**: Coordinator logic is extracted from mcp-server.ts into a standalone module that can run without MCP transport
-- [ ] **STOR-06**: System can run as a standalone daemon via `--daemon` flag, watching and maintaining metadata 24/7 without an MCP client connected
+- [x] **STOR-06**: System can run as a standalone daemon via `--daemon` flag, watching and maintaining metadata 24/7 without an MCP client connected
 - [x] **STOR-07**: Pending LLM jobs persist in SQLite and survive process restarts — work resumes on startup
 
 ### Change Detection
@@ -91,7 +91,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-03 | Phase 1 | Complete |
 | STOR-04 | Phase 1 | Complete |
 | STOR-05 | Phase 2 | Complete |
-| STOR-06 | Phase 2 | Pending |
+| STOR-06 | Phase 2 | Complete |
 | STOR-07 | Phase 1 | Complete |
 | CHNG-01 | Phase 3 | Pending |
 | CHNG-02 | Phase 3 | Pending |
