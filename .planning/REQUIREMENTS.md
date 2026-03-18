@@ -19,10 +19,10 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 ### Change Detection
 
-- [ ] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
-- [ ] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
+- [x] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
+- [x] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
 - [ ] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
-- [ ] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
+- [x] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
 - [ ] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
 
 ### Cascade & Staleness
@@ -93,10 +93,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-05 | Phase 2 → Phase 6 | Pending |
 | STOR-06 | Phase 2 → Phase 6 | Pending |
 | STOR-07 | Phase 1 → Phase 6 | Pending |
-| CHNG-01 | Phase 3 | Pending |
-| CHNG-02 | Phase 3 | Pending |
+| CHNG-01 | Phase 3 | Complete (03-01) |
+| CHNG-02 | Phase 3 | Complete (03-01) |
 | CHNG-03 | Phase 3 | Pending |
-| CHNG-04 | Phase 3 | Pending |
+| CHNG-04 | Phase 3 | Complete (03-01) |
 | CHNG-05 | Phase 3 | Pending |
 | CASC-01 | Phase 4 | Pending |
 | CASC-02 | Phase 4 | Pending |

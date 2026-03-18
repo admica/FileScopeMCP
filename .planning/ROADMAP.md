@@ -66,7 +66,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Types, tree-sitter AST parser, semantic diff engine, SQLite schema extension for exports snapshot
+- [x] 03-01-PLAN.md — Types, tree-sitter AST parser, semantic diff engine, SQLite schema extension for exports snapshot
 - [ ] 03-02-PLAN.md — ChangeDetector class, LLM diff fallback, replace TS/JS regex imports with AST, wire into coordinator
 
 ### Phase 4: Cascade Engine + Staleness
@@ -129,7 +129,7 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. SQLite Storage | 3/3 | Complete | 2026-03-02 |
 | 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
-| 3. Semantic Change Detection | 0/2 | Not started | - |
+| 3. Semantic Change Detection | 1/2 | In progress | - |
 | 4. Cascade Engine + Staleness | 0/2 | Not started | - |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |
 | 6. Verification & Tech Debt | 0/2 | Not started | - |

@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-03T06:14:29.475Z"
+last_updated: "2026-03-17T20:28:41Z"
 progress:
-  total_phases: 2
+  total_phases: 5
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 6
+  completed_plans: 6
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 2 — Coordinator Daemon Mode
+**Current focus:** Phase 3 — Semantic Change Detection
 
 ## Current Position
 
-Phase: 2 of 5 (Coordinator Daemon Mode)
-Plan: 2 of 3 in current phase
+Phase: 3 of 5 (Semantic Change Detection)
+Plan: 1 of 3 in current phase (03-01 complete)
 Status: In progress
-Last activity: 2026-03-03 — Plan 02-02 complete: PID file guard, --daemon entry point, graceful SIGTERM/SIGINT shutdown wired; STOR-06 fulfilled
+Last activity: 2026-03-17 — Plan 03-01 complete: tree-sitter AST parser, semantic diff engine, exports_snapshot schema, ExportSnapshot/SemanticChangeSummary types; CHNG-01, CHNG-02, CHNG-04 fulfilled
 
-Progress: [█████░░░░░] 33%
+Progress: [██████░░░░] 40%
 
 ## Performance Metrics
 
@@ -42,9 +42,10 @@ Progress: [█████░░░░░] 33%
 |-------|-------|-------|----------|
 | 01-sqlite-storage | 3/3 | ~43 min | ~14 min |
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
+| 03-semantic-change-detection | 1/3 | ~7 min | ~7 min |
 
 **Recent Trend:**
-- Last 5 plans: 10 min, 3 min, ~30 min, 6 min, 4 min
+- Last 6 plans: 10 min, 3 min, ~30 min, 6 min, 4 min, 7 min
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -77,6 +78,11 @@ Recent decisions affecting current work:
 - [Phase 02-coordinator-daemon-mode]: releasePidFile called as final step in shutdown() after DB close — consistent cleanup order
 - [Phase 02-coordinator-daemon-mode]: enableDaemonFileLogging() called before coordinator.init() so all init logs go to file only; banner uses process.stdout.write for one stdout line only
 - [Phase 02-coordinator-daemon-mode]: forceExit.unref() prevents graceful shutdown timer from keeping event loop alive
+- [Phase 03-semantic-change-detection]: tree-sitter loaded via createRequire (CJS from ESM), no --external flag needed since build script does not use --bundle
+- [Phase 03-semantic-change-detection]: export default class/function detected via 'default' keyword child scan — AST puts declaration in 'declaration' field not 'value' for named defaults
+- [Phase 03-semantic-change-detection]: setExportsSnapshot uses UPSERT pattern (UPDATE first, INSERT minimal row if 0 rows updated)
+- [Phase 03-semantic-change-detection]: insertLlmJob uses new payload TEXT column on llm_jobs (not error_message hack)
+- [Phase 03-semantic-change-detection]: Tree traversal via recursive visitNode() used instead of Language.query() S-expressions for simpler, more debuggable export extraction
 
 ### Pending Todos
 
@@ -84,11 +90,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 3] tree-sitter native addon handling in esbuild + ESM + Node.js 22 combination is not fully verified — research recommends a build spike before designing the full ChangeDetector
 - [Phase 5] Vercel AI SDK structured output (generateObject) compatibility with Ollama needs verification before adapter is built
 
 ## Session Continuity
 
-Last session: 2026-03-03
-Stopped at: Completed 02-coordinator-daemon-mode 02-02-PLAN.md — PID file guard, --daemon entry point, graceful shutdown; STOR-06 fulfilled
+Last session: 2026-03-17
+Stopped at: Completed 03-semantic-change-detection 03-01-PLAN.md — tree-sitter AST parser, semantic diff engine, exports_snapshot schema; CHNG-01, CHNG-02, CHNG-04 fulfilled
 Resume file: None
