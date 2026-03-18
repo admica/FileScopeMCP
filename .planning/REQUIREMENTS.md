@@ -11,10 +11,10 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 - [x] **STOR-01**: System stores all file metadata in SQLite instead of JSON, with non-breaking migration for existing users
 - [x] **STOR-02**: Existing JSON trees are automatically migrated to SQLite on first startup after upgrade
-- [ ] **STOR-03**: SQLite schema supports per-file staleness flags, dependency relationships as a join table, and structured metadata fields
-- [ ] **STOR-04**: All existing MCP tools continue to work identically after storage migration (backward compatibility)
-- [ ] **STOR-05**: Coordinator logic is extracted from mcp-server.ts into a standalone module that can run without MCP transport
-- [ ] **STOR-06**: System can run as a standalone daemon via `--daemon` flag, watching and maintaining metadata 24/7 without an MCP client connected
+- [x] **STOR-03**: SQLite schema supports per-file staleness flags, dependency relationships as a join table, and structured metadata fields
+- [x] **STOR-04**: All existing MCP tools continue to work identically after storage migration (backward compatibility)
+- [x] **STOR-05**: Coordinator logic is extracted from mcp-server.ts into a standalone module that can run without MCP transport
+- [x] **STOR-06**: System can run as a standalone daemon via `--daemon` flag, watching and maintaining metadata 24/7 without an MCP client connected
 - [x] **STOR-07**: Pending LLM jobs persist in SQLite and survive process restarts — work resumes on startup
 
 ### Change Detection
@@ -46,9 +46,9 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 ### Compatibility & Degradation
 
-- [ ] **COMPAT-01**: All 20+ existing MCP tool names, parameter schemas, and response shapes remain identical
+- [x] **COMPAT-01**: All 20+ existing MCP tool names, parameter schemas, and response shapes remain identical
 - [x] **COMPAT-02**: Existing exclude patterns are honored by the LLM pipeline (no LLM calls on excluded files)
-- [ ] **COMPAT-03**: System functions correctly with no LLM configured — file tree, dependencies, importance, and watching all work as before
+- [x] **COMPAT-03**: System functions correctly with no LLM configured — file tree, dependencies, importance, and watching all work as before
 
 ## v2 Requirements
 
@@ -86,13 +86,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STOR-01 | Phase 1 → Phase 6 | Complete |
-| STOR-02 | Phase 1 → Phase 6 | Complete |
-| STOR-03 | Phase 1 → Phase 6 | Pending |
-| STOR-04 | Phase 1 → Phase 6 | Pending |
-| STOR-05 | Phase 2 → Phase 6 | Pending |
-| STOR-06 | Phase 2 → Phase 6 | Pending |
-| STOR-07 | Phase 1 → Phase 6 | Complete |
+| STOR-01 | Phase 1 → Phase 6 | Complete (06) |
+| STOR-02 | Phase 1 → Phase 6 | Complete (06) |
+| STOR-03 | Phase 1 → Phase 6 | Complete (06) |
+| STOR-04 | Phase 1 → Phase 6 | Complete (06) |
+| STOR-05 | Phase 2 → Phase 6 | Complete (06) |
+| STOR-06 | Phase 2 → Phase 6 | Complete (06) |
+| STOR-07 | Phase 1 → Phase 6 | Complete (06) |
 | CHNG-01 | Phase 3 | Complete (03-01) |
 | CHNG-02 | Phase 3 | Complete (03-01) |
 | CHNG-03 | Phase 3 | Complete |
@@ -111,9 +111,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LLM-06 | Phase 5 | Complete |
 | LLM-07 | Phase 5 | Complete |
 | LLM-08 | Phase 5 | Complete |
-| COMPAT-01 | Phase 1 → Phase 6 | Pending |
+| COMPAT-01 | Phase 1 → Phase 6 | Complete (06) |
 | COMPAT-02 | Phase 5 | Complete |
-| COMPAT-03 | Phase 2 → Phase 6 | Pending |
+| COMPAT-03 | Phase 2 → Phase 6 | Complete (06) |
 
 **Coverage:**
 - v1 requirements: 28 total
@@ -122,4 +122,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-03-02*
-*Last updated: 2026-03-03 — 9 partial requirements reset to Pending and reassigned to Phase 6 gap closure after v1.0 audit*
+*Last updated: 2026-03-18 — All 9 partial requirements verified and marked Complete (06) in Phase 6 plan 02*
