@@ -125,13 +125,13 @@ Plans:
 **Goal:** Wire the LLM diff fallback into the production code path so change_impact jobs carry proper payloads and the LLM pipeline can assess them — fixing the silent failure identified in the v1.0 audit
 **Depends on**: Phase 3, Phase 5
 **Requirements**: CHNG-03, LLM-03
-**Gap Closure:** Closes integration gap (Phase 3 → Phase 5 change_impact pipeline) and broken E2E flow #7 from v1.0 audit
+**Gap Closure:** Closes integration gap (Phase 3 -> Phase 5 change_impact pipeline) and broken E2E flow #7 from v1.0 audit
 **Success Criteria** (what must be TRUE):
   1. `queueLlmDiffJob` is called in production when a non-TS/JS file changes, producing a diff payload for the LLM
   2. `change_impact` jobs queued by cascadeStale carry non-null payloads and are processed by LLMPipeline.runJob
-  3. E2E flow: non-TS/JS file change → heuristic fallback → cascadeStale → change_impact job with payload → LLM processes job
+  3. E2E flow: non-TS/JS file change -> heuristic fallback -> cascadeStale -> change_impact job with payload -> LLM processes job
   4. `console.warn` in ast-parser.ts replaced with `logger.warn`
-**Plans:** 0/1 plans created
+**Plans:** 1/1 plans created
 
 Plans:
 - [ ] 07-01-PLAN.md — Wire queueLlmDiffJob, fix change_impact payload, logger cleanup
@@ -139,7 +139,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
