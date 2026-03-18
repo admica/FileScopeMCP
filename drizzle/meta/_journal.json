@@ -15,6 +15,13 @@
       "when": 1773796883000,
       "tag": "0001_add_exports_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1742313600000,
+      "tag": "0002_add_llm_columns",
+      "breakpoints": true
     }
   ]
 }

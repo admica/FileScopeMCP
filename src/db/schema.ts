@@ -16,6 +16,8 @@ export const files = sqliteTable('files', {
   concepts_stale_since:       integer('concepts_stale_since'),     // NULL = not stale
   change_impact_stale_since:  integer('change_impact_stale_since'), // NULL = not stale
   exports_snapshot:           text('exports_snapshot'),             // JSON blob: ExportSnapshot | null
+  concepts:                   text('concepts'),                     // JSON blob: ConceptsResult | null
+  change_impact:              text('change_impact'),                // JSON blob: ChangeImpactResult | null
 }, (t) => [
   index('files_is_directory_idx').on(t.is_directory),
 ]);
@@ -66,4 +68,12 @@ export const llm_jobs = sqliteTable('llm_jobs', {
 // Future phases check this and apply upgrade logic as needed
 export const schema_version = sqliteTable('schema_version', {
   version: integer('version').primaryKey().notNull(),
+});
+
+// Generic key-value store for LLM runtime state that must survive restarts.
+// Keys: 'lifetime_tokens_used' (INTEGER as text), 'budget_exhausted_at' (timestamp ms as text).
+// Per RESEARCH.md Pitfall 4 — token budget must be persisted to prevent budget bypass on restart.
+export const llm_runtime_state = sqliteTable('llm_runtime_state', {
+  key:   text('key').primaryKey().notNull(),
+  value: text('value').notNull(),
 });

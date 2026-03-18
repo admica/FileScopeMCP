@@ -411,3 +411,163 @@ export function insertLlmJob(params: {
     })
     .run();
 }
+
+// ─── LLM pipeline job management ──────────────────────────────────────────────
+
+/**
+ * Dequeues the next pending LLM job ordered by priority_tier ASC, created_at ASC.
+ * Returns null if the queue is empty.
+ * Uses a raw prepared statement for minimal latency on the hot dequeue path.
+ */
+export function dequeueNextJob(): {
+  job_id: number;
+  file_path: string;
+  job_type: string;
+  priority_tier: number;
+  payload: string | null;
+} | null {
+  const sqlite = getSqlite();
+  const row = sqlite
+    .prepare(
+      "SELECT job_id, file_path, job_type, priority_tier, payload FROM llm_jobs WHERE status = 'pending' ORDER BY priority_tier ASC, created_at ASC LIMIT 1"
+    )
+    .get() as {
+      job_id: number;
+      file_path: string;
+      job_type: string;
+      priority_tier: number;
+      payload: string | null;
+    } | undefined;
+
+  return row ?? null;
+}
+
+/**
+ * Marks a job as in_progress, recording the start timestamp.
+ */
+export function markJobInProgress(jobId: number): void {
+  const sqlite = getSqlite();
+  sqlite
+    .prepare(
+      "UPDATE llm_jobs SET status = 'in_progress', started_at = ? WHERE job_id = ?"
+    )
+    .run(Date.now(), jobId);
+}
+
+/**
+ * Marks a job as done, recording the completion timestamp.
+ */
+export function markJobDone(jobId: number): void {
+  const sqlite = getSqlite();
+  sqlite
+    .prepare(
+      "UPDATE llm_jobs SET status = 'done', completed_at = ? WHERE job_id = ?"
+    )
+    .run(Date.now(), jobId);
+}
+
+/**
+ * Marks a job as failed, recording the completion timestamp and error message.
+ */
+export function markJobFailed(jobId: number, errorMessage: string): void {
+  const sqlite = getSqlite();
+  sqlite
+    .prepare(
+      "UPDATE llm_jobs SET status = 'failed', completed_at = ?, error_message = ? WHERE job_id = ?"
+    )
+    .run(Date.now(), errorMessage, jobId);
+}
+
+/**
+ * Writes an LLM result to the appropriate column in the files table.
+ * Maps jobType to column: 'summary' → summary, 'concepts' → concepts, 'change_impact' → change_impact.
+ * Silently does nothing if the file path doesn't exist.
+ */
+export function writeLlmResult(filePath: string, jobType: string, result: string): void {
+  const sqlite = getSqlite();
+  let column: string;
+  switch (jobType) {
+    case 'summary':
+      column = 'summary';
+      break;
+    case 'concepts':
+      column = 'concepts';
+      break;
+    case 'change_impact':
+      column = 'change_impact';
+      break;
+    default:
+      throw new Error(`writeLlmResult: unknown jobType '${jobType}'`);
+  }
+  sqlite
+    .prepare(`UPDATE files SET ${column} = ? WHERE path = ?`)
+    .run(result, filePath);
+}
+
+/**
+ * Clears the staleness timestamp for the given job type on the given file.
+ * Maps jobType to the corresponding stale_since column.
+ * Silently does nothing if the file path doesn't exist.
+ */
+export function clearStaleness(filePath: string, jobType: string): void {
+  const sqlite = getSqlite();
+  let column: string;
+  switch (jobType) {
+    case 'summary':
+      column = 'summary_stale_since';
+      break;
+    case 'concepts':
+      column = 'concepts_stale_since';
+      break;
+    case 'change_impact':
+      column = 'change_impact_stale_since';
+      break;
+    default:
+      throw new Error(`clearStaleness: unknown jobType '${jobType}'`);
+  }
+  sqlite
+    .prepare(`UPDATE files SET ${column} = NULL WHERE path = ?`)
+    .run(filePath);
+}
+
+/**
+ * Recovers orphaned in_progress jobs left by a previous crashed process.
+ * Sets status back to 'pending' and clears started_at.
+ * Returns the number of jobs recovered.
+ * Per RESEARCH.md Pitfall 3.
+ */
+export function recoverOrphanedJobs(): number {
+  const sqlite = getSqlite();
+  const result = sqlite
+    .prepare(
+      "UPDATE llm_jobs SET status = 'pending', started_at = NULL WHERE status = 'in_progress'"
+    )
+    .run();
+  return result.changes;
+}
+
+// ─── LLM runtime state persistence ────────────────────────────────────────────
+
+/**
+ * Loads a value from the llm_runtime_state key-value table.
+ * Returns null if the key does not exist.
+ * Used to persist token budget state across process restarts (RESEARCH.md Pitfall 4).
+ */
+export function loadLlmRuntimeState(key: string): string | null {
+  const sqlite = getSqlite();
+  const row = sqlite
+    .prepare('SELECT value FROM llm_runtime_state WHERE key = ?')
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/**
+ * Saves a value to the llm_runtime_state key-value table.
+ * Uses INSERT OR REPLACE for upsert semantics.
+ */
+export function saveLlmRuntimeState(key: string, value: string): void {
+  const sqlite = getSqlite();
+  sqlite
+    .prepare('INSERT OR REPLACE INTO llm_runtime_state (key, value) VALUES (?, ?)')
+    .run(key, value);
+}
