@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T04:11:14.068Z"
+last_updated: "2026-03-18T05:34:33.595Z"
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 12
+  completed_plans: 11
 ---
 
 # Project State
@@ -18,14 +18,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 4 — CascadeEngine Staleness
+**Current focus:** Phase 5 — LLM Processing Pipeline
 
 ## Current Position
 
 Phase: 5 of 5 (LLM Processing Pipeline) — IN PROGRESS
-Plan: 1 of 3 in current phase (05-01 complete)
-Status: Phase 5 Plan 1 complete; ready for Plan 2 (LLMPipeline dequeue loop)
-Last activity: 2026-03-18 — Plan 05-01 complete: src/llm/ module (types, adapter, rate-limiter, prompts), Config.llm Zod schema, files.concepts/change_impact columns, llm_runtime_state table, repository job management functions; LLM-04/05/07 fulfilled
+Plan: 2 of 3 in current phase (05-01, 05-02 complete)
+Status: Phase 5 Plan 2 complete; ready for Plan 3 (LLMPipeline persistence wiring)
+Last activity: 2026-03-18 — Plan 05-02 complete: LLMPipeline dequeue loop (summary/concepts/change_impact), rate limiting, COMPAT-02 exclude check, 7 unit tests; LLM-01/02/03/08/COMPAT-02 fulfilled
 
 Progress: [██████████] 100%
 
@@ -44,7 +44,7 @@ Progress: [██████████] 100%
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
 | 03-semantic-change-detection | 2/3 | ~11 min | ~5.5 min |
 | 04-cascade-engine-staleness | 2/2 | ~19 min | ~9.5 min |
-| 05-llm-processing-pipeline | 1/3 | ~15 min | ~15 min |
+| 05-llm-processing-pipeline | 2/3 | ~27 min | ~13 min |
 
 **Recent Trend:**
 - Last 8 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min, 12 min, 7 min
@@ -99,6 +99,8 @@ Recent decisions affecting current work:
 - [Phase 05-llm-processing-pipeline]: LanguageModel (not LanguageModelV2) is the correct type export from ai@6 — LanguageModelV2 is in @ai-sdk/provider but not re-exported from ai package top-level
 - [Phase 05-llm-processing-pipeline]: Drizzle migration SQL breakpoints must be inline (-->statement-breakpoint suffix) not in comment lines above — block comments before breakpoints cause RangeError: no SQL statements
 - [Phase 05-llm-processing-pipeline]: tokenBudget=0 in TokenBudgetGuard means unlimited — default construction allows all calls without footgun
+- [Phase 05-llm-processing-pipeline]: maxOutputTokens (not maxTokens) is the correct generateText parameter in ai@6 — LanguageModelV2 CallSettings uses maxOutputTokens
+- [Phase 05-llm-processing-pipeline]: Ollama JSON repair fallback: structured output failures fall back to plain generateText and JSON.parse on the text response
 
 ### Pending Todos
 
@@ -111,5 +113,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Completed 05-llm-processing-pipeline 05-01-PLAN.md — src/llm/ module (types/adapter/rate-limiter/prompts), Config.llm Zod schema, schema migration 0002, repository job management functions; LLM-04/05/07 fulfilled.
+Stopped at: Completed 05-llm-processing-pipeline 05-02-PLAN.md — LLMPipeline dequeue loop with summary/concepts/change_impact dispatch, rate limiting, COMPAT-02 exclude check, 7 unit tests; LLM-01/02/03/08/COMPAT-02 fulfilled.
 Resume file: None

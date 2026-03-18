@@ -35,19 +35,19 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 ### LLM Pipeline
 
-- [ ] **LLM-01**: Background LLM automatically generates/updates file summaries when a file or its dependencies change
-- [ ] **LLM-02**: Background LLM auto-extracts structured concepts per file (functions, classes, interfaces, exports) as structured JSON
-- [ ] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
+- [x] **LLM-01**: Background LLM automatically generates/updates file summaries when a file or its dependencies change
+- [x] **LLM-02**: Background LLM auto-extracts structured concepts per file (functions, classes, interfaces, exports) as structured JSON
+- [x] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
 - [x] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
 - [x] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
 - [ ] **LLM-06**: Background LLM can be toggled on/off via config or MCP tool call — system works fully without it (structural metadata only)
 - [x] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
-- [ ] **LLM-08**: When LLM is off, semantic metadata fields return null with appropriate staleness indicators
+- [x] **LLM-08**: When LLM is off, semantic metadata fields return null with appropriate staleness indicators
 
 ### Compatibility & Degradation
 
 - [ ] **COMPAT-01**: All 20+ existing MCP tool names, parameter schemas, and response shapes remain identical
-- [ ] **COMPAT-02**: Existing exclude patterns are honored by the LLM pipeline (no LLM calls on excluded files)
+- [x] **COMPAT-02**: Existing exclude patterns are honored by the LLM pipeline (no LLM calls on excluded files)
 - [ ] **COMPAT-03**: System functions correctly with no LLM configured — file tree, dependencies, importance, and watching all work as before
 
 ## v2 Requirements
@@ -103,16 +103,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASC-03 | Phase 4 | Complete (04-02) |
 | CASC-04 | Phase 4 | Complete (04-01) |
 | CASC-05 | Phase 4 | Complete (04-01) |
-| LLM-01 | Phase 5 | Pending |
-| LLM-02 | Phase 5 | Pending |
-| LLM-03 | Phase 5 | Pending |
+| LLM-01 | Phase 5 | Complete |
+| LLM-02 | Phase 5 | Complete |
+| LLM-03 | Phase 5 | Complete |
 | LLM-04 | Phase 5 | Complete |
 | LLM-05 | Phase 5 | Complete |
 | LLM-06 | Phase 5 | Pending |
 | LLM-07 | Phase 5 | Complete |
-| LLM-08 | Phase 5 | Pending |
+| LLM-08 | Phase 5 | Complete |
 | COMPAT-01 | Phase 1 → Phase 6 | Pending |
-| COMPAT-02 | Phase 5 | Pending |
+| COMPAT-02 | Phase 5 | Complete |
 | COMPAT-03 | Phase 2 → Phase 6 | Pending |
 
 **Coverage:**

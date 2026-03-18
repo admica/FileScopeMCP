@@ -96,7 +96,7 @@ Plans:
   4. LLM calls respect a configurable token budget cap and per-minute rate limit; when the budget is exhausted the system writes error state to SQLite and stops queuing new jobs until the next window
   5. Files matching existing exclude patterns are never passed to the LLM pipeline — the same patterns that suppress watching and tree inclusion suppress LLM calls
   6. Concurrent file changes do not produce duplicate or conflicting LLM writes — generation counters and a per-file pending-job map ensure only the latest result is committed
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 05-01-PLAN.md — LLM types, config extension, adapter factory (Vercel AI SDK), rate limiter, prompt templates, schema extension (concepts + change_impact columns)
@@ -131,5 +131,5 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
 | 3. Semantic Change Detection | 2/2 | Complete   | 2026-03-18 |
 | 4. Cascade Engine + Staleness | 2/2 | Complete    | 2026-03-18 |
-| 5. LLM Processing Pipeline | 1/3 | In Progress|  |
+| 5. LLM Processing Pipeline | 2/3 | In Progress|  |
 | 6. Verification & Tech Debt | 0/2 | Not started | - |
