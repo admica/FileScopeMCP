@@ -5,8 +5,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { openDatabase, closeDatabase } from '../db/db.js';
-import { getFile, getDependencies, getDependents } from '../db/repository.js';
+import { openDatabase, closeDatabase, getSqlite } from '../db/db.js';
+import { getFile, getDependencies, getDependents, upsertFile } from '../db/repository.js';
 import { migrateJsonToSQLite, runMigrationIfNeeded } from './json-to-sqlite.js';
 import type { FileTreeStorage, FileNode } from '../types.js';
 
@@ -233,27 +233,14 @@ describe('migrateJsonToSQLite', () => {
     expect(node!.mtime).toBeUndefined();
   });
 
-  it('leaves JSON file untouched if transaction fails', () => {
-    // Write a JSON with invalid structure that will cause migration to fail
+  it('leaves JSON file untouched if migration fails (malformed JSON)', () => {
+    // Write malformed JSON (not parseable) — JSON.parse will throw before any transaction
     const badJsonPath = path.join(tmpDir, 'FileScopeMCP-tree-bad.json');
-    // Write invalid JSON that parses successfully but breaks during insert
-    // We simulate this by writing a storage with a fileTree that has duplicate paths
-    const badStorage: FileTreeStorage = {
-      config: { filename: 'test.json', baseDirectory: '/', projectRoot: '/', lastUpdated: new Date() },
-      fileTree: {
-        path: '/root',
-        name: 'root',
-        isDirectory: false,
-        children: [
-          { path: '/root', name: 'root', isDirectory: false }, // duplicate path — triggers constraint error
-        ]
-      }
-    };
-    fs.writeFileSync(badJsonPath, JSON.stringify(badStorage), 'utf-8');
+    fs.writeFileSync(badJsonPath, '{ this is not valid json }', 'utf-8');
 
     expect(() => migrateJsonToSQLite(badJsonPath, dbPath)).toThrow();
 
-    // JSON should NOT be renamed — it's still there
+    // JSON should NOT be renamed — it's still there untouched
     expect(fs.existsSync(badJsonPath)).toBe(true);
     expect(fs.existsSync(badJsonPath + '.bak')).toBe(false);
   });
@@ -272,35 +259,45 @@ describe('runMigrationIfNeeded', () => {
   });
 
   it('does nothing when no JSON files are present (fresh install)', () => {
-    // No JSON files in tmpDir
-    expect(() => runMigrationIfNeeded(tmpDir)).not.toThrow();
-    // No DB should exist (we didn't create one, and fresh install skips)
-    expect(fs.existsSync(path.join(tmpDir, '.filescope.db'))).toBe(false);
-  });
-
-  it('does nothing when .filescope.db already exists (DB already migrated)', () => {
-    // Create an empty DB file to simulate already-migrated state
+    // Open DB first (coordinator pattern), then call migration
     const dbPath = path.join(tmpDir, '.filescope.db');
     openDatabase(dbPath);
-    // Write a JSON file too — it should be ignored since DB exists
+    // No JSON files in tmpDir
+    expect(() => runMigrationIfNeeded(tmpDir, getSqlite())).not.toThrow();
+  });
+
+  it('does nothing when DB already has data (already migrated)', () => {
+    // Open DB, insert a file row to simulate already-migrated state
+    const dbPath = path.join(tmpDir, '.filescope.db');
+    openDatabase(dbPath);
+    upsertFile({ path: '/sentinel', name: 'sentinel', isDirectory: false });
+
+    // Write a JSON file too — it should be ignored since DB has data
     const storage = makeSimpleStorage();
     writeJsonTree(tmpDir, 'FileScopeMCP-tree-test.json', storage);
 
-    // Should not throw and should not migrate (DB exists)
-    expect(() => runMigrationIfNeeded(tmpDir)).not.toThrow();
+    // Should not throw and should not migrate (DB has data)
+    expect(() => runMigrationIfNeeded(tmpDir, getSqlite())).not.toThrow();
 
     // JSON should still exist (not renamed) since migration was skipped
     expect(fs.existsSync(path.join(tmpDir, 'FileScopeMCP-tree-test.json'))).toBe(true);
+
+    // Sentinel row still present, and the /project nodes were NOT inserted
+    expect(getFile('/sentinel')).not.toBeNull();
+    expect(getFile('/project')).toBeNull();
   });
 
-  it('triggers migration when JSON file exists and no DB present', () => {
+  it('triggers migration when JSON file exists and DB has no data', () => {
+    const dbPath = path.join(tmpDir, '.filescope.db');
+    openDatabase(dbPath);
+
     const storage = makeSimpleStorage();
     const jsonPath = writeJsonTree(tmpDir, 'FileScopeMCP-tree-test.json', storage);
 
-    runMigrationIfNeeded(tmpDir);
+    runMigrationIfNeeded(tmpDir, getSqlite());
 
-    // DB should now exist
-    expect(fs.existsSync(path.join(tmpDir, '.filescope.db'))).toBe(true);
+    // DB should have data now
+    expect(getFile('/project')).not.toBeNull();
     // JSON should be renamed to .bak
     expect(fs.existsSync(jsonPath)).toBe(false);
     expect(fs.existsSync(jsonPath + '.bak')).toBe(true);

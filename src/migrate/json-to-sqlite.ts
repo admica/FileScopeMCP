@@ -4,10 +4,15 @@
 // Per Plan 01-02 and RESEARCH.md Pattern 4.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { log } from '../logger.js';
-import { openDatabase, getSqlite, closeDatabase } from '../db/db.js';
+import { getSqlite } from '../db/db.js';
 import { upsertFile, setDependencies } from '../db/repository.js';
 import type { FileTreeStorage, FileNode } from '../types.js';
+
+// Load Database type for the sqlite parameter type annotation
+const _require = createRequire(import.meta.url);
+const Database = _require('better-sqlite3') as typeof import('better-sqlite3');
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -19,6 +24,21 @@ function collectNodes(node: FileNode, out: FileNode[]): void {
   out.push(node);
   for (const child of node.children ?? []) {
     collectNodes(child, out);
+  }
+}
+
+/**
+ * Checks whether migration has already been run by querying the files table.
+ * Returns true if files table exists AND has at least one row.
+ * Returns false if the table doesn't exist yet (migration needed).
+ */
+function checkAlreadyMigrated(sqlite: InstanceType<typeof Database>): boolean {
+  try {
+    const row = sqlite.prepare('SELECT COUNT(*) as n FROM files').get() as { n: number };
+    return row.n > 0;
+  } catch {
+    // files table doesn't exist yet — migration needed
+    return false;
   }
 }
 
@@ -46,6 +66,7 @@ export function migrateJsonToSQLite(jsonPath: string, dbPath: string): void {
 
   log(`Migration: migrating ${allNodes.length} files from JSON to SQLite`);
 
+  // Use the already-open DB connection (coordinator opened it before calling migration)
   const sqlite = getSqlite();
 
   // All-or-nothing: if anything fails, better-sqlite3 automatically rolls back
@@ -84,20 +105,22 @@ export function migrateJsonToSQLite(jsonPath: string, dbPath: string): void {
  * Entry point called from server initialization.
  * Detects whether migration is needed and runs it if so.
  *
+ * Receives an already-open DB handle from the coordinator — no internal DB open/close.
+ * The coordinator owns the DB lifecycle (single owner pattern).
+ *
  * Skip conditions:
- *   - `.filescope.db` already exists (DB already migrated or initialized).
+ *   - SQLite files table already has rows (DB already migrated or initialized).
  *   - No `FileScopeMCP-tree*.json` files found (fresh install).
  *
  * On migration failure: logs error, does NOT re-throw — server falls back
  * to JSON gracefully (per locked decision in RESEARCH.md).
  *
  * @param projectRoot - Absolute path to the project root directory.
+ * @param sqlite      - Already-open better-sqlite3 connection (coordinator owns lifecycle).
  */
-export function runMigrationIfNeeded(projectRoot: string): void {
-  const dbPath = path.join(projectRoot, '.filescope.db');
-
-  // If DB already exists, skip (migration already done or fresh SQLite start)
-  if (fs.existsSync(dbPath)) {
+export function runMigrationIfNeeded(projectRoot: string, sqlite: InstanceType<typeof Database>): void {
+  // If DB already has file data, skip (migration already done or fresh SQLite start)
+  if (checkAlreadyMigrated(sqlite)) {
     return;
   }
 
@@ -119,8 +142,7 @@ export function runMigrationIfNeeded(projectRoot: string): void {
     return;
   }
 
-  // Open the database so migration can insert rows
-  openDatabase(dbPath);
+  const dbPath = path.join(projectRoot, '.filescope.db');
 
   for (const jsonFile of jsonFiles) {
     const jsonPath = path.join(projectRoot, jsonFile);

@@ -13,7 +13,7 @@ import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-s
 import { loadConfig } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
-import { openDatabase, closeDatabase } from './db/db.js';
+import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { getAllFiles, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
@@ -197,17 +197,17 @@ export class ServerCoordinator {
       lastUpdated: new Date()
     };
 
-    // Run JSON-to-SQLite migration if needed (handles existing JSON tree files)
-    try {
-      runMigrationIfNeeded(projectRoot);
-    } catch (err) {
-      log(`Migration failed (non-fatal): ${err}`);
-    }
-
-    // Open the SQLite database for this project
+    // Open the SQLite database for this project (coordinator owns the lifecycle)
     const dbPath = path.join(projectRoot, '.filescope.db');
     openDatabase(dbPath);
     log(`Opened SQLite database at: ${dbPath}`);
+
+    // Run JSON-to-SQLite migration if needed — receives the already-open DB handle
+    try {
+      runMigrationIfNeeded(projectRoot, getSqlite());
+    } catch (err) {
+      log(`Migration failed (non-fatal): ${err}`);
+    }
 
     try {
       await this.buildFileTree(newConfig);
