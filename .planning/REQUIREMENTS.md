@@ -9,13 +9,13 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 ### Storage & Infrastructure
 
-- [ ] **STOR-01**: System stores all file metadata in SQLite instead of JSON, with non-breaking migration for existing users
-- [ ] **STOR-02**: Existing JSON trees are automatically migrated to SQLite on first startup after upgrade
+- [x] **STOR-01**: System stores all file metadata in SQLite instead of JSON, with non-breaking migration for existing users
+- [x] **STOR-02**: Existing JSON trees are automatically migrated to SQLite on first startup after upgrade
 - [ ] **STOR-03**: SQLite schema supports per-file staleness flags, dependency relationships as a join table, and structured metadata fields
 - [ ] **STOR-04**: All existing MCP tools continue to work identically after storage migration (backward compatibility)
 - [ ] **STOR-05**: Coordinator logic is extracted from mcp-server.ts into a standalone module that can run without MCP transport
 - [ ] **STOR-06**: System can run as a standalone daemon via `--daemon` flag, watching and maintaining metadata 24/7 without an MCP client connected
-- [ ] **STOR-07**: Pending LLM jobs persist in SQLite and survive process restarts — work resumes on startup
+- [x] **STOR-07**: Pending LLM jobs persist in SQLite and survive process restarts — work resumes on startup
 
 ### Change Detection
 
@@ -86,13 +86,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STOR-01 | Phase 1 → Phase 6 | Pending |
-| STOR-02 | Phase 1 → Phase 6 | Pending |
+| STOR-01 | Phase 1 → Phase 6 | Complete |
+| STOR-02 | Phase 1 → Phase 6 | Complete |
 | STOR-03 | Phase 1 → Phase 6 | Pending |
 | STOR-04 | Phase 1 → Phase 6 | Pending |
 | STOR-05 | Phase 2 → Phase 6 | Pending |
 | STOR-06 | Phase 2 → Phase 6 | Pending |
-| STOR-07 | Phase 1 → Phase 6 | Pending |
+| STOR-07 | Phase 1 → Phase 6 | Complete |
 | CHNG-01 | Phase 3 | Complete (03-01) |
 | CHNG-02 | Phase 3 | Complete (03-01) |
 | CHNG-03 | Phase 3 | Complete |

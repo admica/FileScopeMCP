@@ -99,9 +99,9 @@ Plans:
 **Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 05-01-PLAN.md — LLM types, config extension, adapter factory (Vercel AI SDK), rate limiter, prompt templates, schema extension (concepts + change_impact columns)
-- [ ] 05-02-PLAN.md — LLMPipeline dequeue loop, job dispatch, result writing, staleness clearing, exclude pattern enforcement, unit tests
-- [ ] 05-03-PLAN.md — Wire LLMPipeline into coordinator lifecycle, toggle_llm MCP tool, token budget persistence across restarts
+- [x] 05-01-PLAN.md — LLM types, config extension, adapter factory (Vercel AI SDK), rate limiter, prompt templates, schema extension (concepts + change_impact columns)
+- [x] 05-02-PLAN.md — LLMPipeline dequeue loop, job dispatch, result writing, staleness clearing, exclude pattern enforcement, unit tests
+- [x] 05-03-PLAN.md — Wire LLMPipeline into coordinator lifecycle, toggle_llm MCP tool, token budget persistence across restarts
 
 ### Phase 6: Verification & Tech Debt Cleanup
 **Goal:** Close all 9 partial requirements by creating VERIFICATION.md files for completed phases, and fix integration issues and tech debt identified in the v1.0 audit
@@ -114,16 +114,16 @@ Plans:
   3. DB double-open sequence in migration path is eliminated (single open/close lifecycle)
   4. Dead import `getChildren` removed from storage-utils.ts
   5. All `console.error` calls in storage-utils.ts and global-state.ts routed through logger to respect daemon log suppression
-**Plans**: TBD
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 06-01: Verify Phase 1 (STOR-01–04, STOR-07, COMPAT-01) and Phase 2 (STOR-05, STOR-06, COMPAT-03); create VERIFICATION.md files
-- [ ] 06-02: Fix tech debt — DB double-open, dead import, console.error bypass
+- [ ] 06-01-PLAN.md — Logger extension, console.error cleanup, dead import removal, DB lifecycle refactor
+- [ ] 06-02-PLAN.md — VERIFICATION.md creation for Phase 1 and Phase 2, REQUIREMENTS.md traceability update
 
 ## Progress
 
 **Execution Order:**
-Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
+Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -132,4 +132,4 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | 3. Semantic Change Detection | 2/2 | Complete   | 2026-03-18 |
 | 4. Cascade Engine + Staleness | 2/2 | Complete    | 2026-03-18 |
 | 5. LLM Processing Pipeline | 3/3 | Complete   | 2026-03-18 |
-| 6. Verification & Tech Debt | 0/2 | Not started | - |
+| 6. Verification & Tech Debt | 1/2 | In Progress|  |
