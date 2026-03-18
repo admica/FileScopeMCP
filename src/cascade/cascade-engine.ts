@@ -3,11 +3,56 @@
 // When Phase 3's ChangeDetector flags an API surface change, this module
 // ensures staleness propagates to all transitive dependents so Phase 5
 // can regenerate their summaries and concepts.
+import { readFileSync } from 'node:fs';
 import { getDependents, markStale, insertLlmJobIfNotPending } from '../db/repository.js';
 import { getSqlite } from '../db/db.js';
 import { log } from '../logger.js';
 
 const MAX_CASCADE_DEPTH = 10;
+
+// 14KB content limit for dependent file payloads.
+// Leaves room for the header text within the 16KB LLM job payload limit.
+const MAX_DEP_CONTENT_BYTES = 14 * 1024;
+
+/**
+ * Context about the originally changed file, passed to cascadeStale so it can
+ * build meaningful payloads for change_impact jobs on all cascade-visited files.
+ */
+interface ChangeContext {
+  /** Payload for the root changed file's change_impact job (e.g., the git diff). */
+  directPayload: string;
+  /** From SemanticChangeSummary.changeType — describes the kind of change. */
+  changeType: string;
+  /** Path of the originally changed file (used in dependent payloads). */
+  changedFilePath: string;
+}
+
+/**
+ * Builds a payload for a cascade-dependent file's change_impact job.
+ * Includes upstream change info plus the dependent file's own content
+ * so the LLM has both "what changed upstream" and "what does this file do".
+ *
+ * File content is truncated at MAX_DEP_CONTENT_BYTES to stay within the
+ * 16KB LLM job payload limit (header text is added on top of content).
+ */
+function buildDependentPayload(changeContext: ChangeContext, dependentFilePath: string): string {
+  let content: string;
+  try {
+    content = readFileSync(dependentFilePath, 'utf-8');
+    if (content.length > MAX_DEP_CONTENT_BYTES) {
+      content = content.slice(0, MAX_DEP_CONTENT_BYTES) + '... [truncated]';
+    }
+  } catch {
+    content = '[file content unavailable]';
+  }
+
+  return [
+    `[upstream change: ${changeContext.changedFilePath} (${changeContext.changeType})]`,
+    `[assessing dependent: ${dependentFilePath}]`,
+    '',
+    content,
+  ].join('\n');
+}
 
 /**
  * Propagate staleness from `changedFilePath` to all transitive dependents
@@ -16,12 +61,18 @@ const MAX_CASCADE_DEPTH = 10;
  * For each visited file (including the changed file itself):
  *  - Sets all 3 staleness columns (summary, concepts, change_impact)
  *  - Queues 3 LLM jobs at priority tier 2 with deduplication
+ *  - If changeContext is provided, change_impact jobs carry a non-null payload:
+ *    - Root file gets directPayload
+ *    - Dependent files get a payload with upstream change info + their own content
  *
  * Cycle protection: each file is visited at most once (visited Set).
  * Depth cap: stops at depth >= MAX_CASCADE_DEPTH (10).
  */
-export function cascadeStale(changedFilePath: string, opts: { timestamp: number }): void {
-  const { timestamp } = opts;
+export function cascadeStale(
+  changedFilePath: string,
+  opts: { timestamp: number; changeContext?: ChangeContext }
+): void {
+  const { timestamp, changeContext } = opts;
   const visited = new Set<string>();
   const queue: Array<[string, number]> = [[changedFilePath, 0]];
   visited.add(changedFilePath);
@@ -32,11 +83,22 @@ export function cascadeStale(changedFilePath: string, opts: { timestamp: number 
     const item = queue.shift()!;
     const [filePath, depth] = item;
 
+    // Determine the change_impact payload for this file (if changeContext provided)
+    let changeImpactPayload: string | undefined;
+    if (changeContext) {
+      if (filePath === changedFilePath) {
+        changeImpactPayload = changeContext.directPayload;
+      } else {
+        changeImpactPayload = buildDependentPayload(changeContext, filePath);
+      }
+    }
+
     // Mark this file stale and queue 3 jobs
+    // summary and concepts jobs never get payload — only change_impact does
     markStale([filePath], timestamp);
     insertLlmJobIfNotPending(filePath, 'summary', 2);
     insertLlmJobIfNotPending(filePath, 'concepts', 2);
-    insertLlmJobIfNotPending(filePath, 'change_impact', 2);
+    insertLlmJobIfNotPending(filePath, 'change_impact', 2, changeImpactPayload);
     totalVisited++;
 
     // Stop BFS expansion if at depth cap

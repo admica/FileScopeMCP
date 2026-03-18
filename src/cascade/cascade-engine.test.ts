@@ -292,6 +292,146 @@ describe('cascadeStale', () => {
   });
 });
 
+describe('cascadeStale with changeContext', () => {
+  it('passes directPayload to change_impact job for the root changed file', () => {
+    clearTables();
+    insertFile('/root-with-ctx.ts');
+
+    cascadeStale('/root-with-ctx.ts', {
+      timestamp: 7000,
+      changeContext: {
+        directPayload: 'diff content for root file',
+        changeType: 'exports-changed',
+        changedFilePath: '/root-with-ctx.ts',
+      },
+    });
+
+    const sqlite = getSqlite();
+    const job = sqlite
+      .prepare(
+        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
+      )
+      .get('/root-with-ctx.ts') as { payload: string | null } | undefined;
+
+    expect(job).toBeDefined();
+    expect(job!.payload).toBe('diff content for root file');
+  });
+
+  it('builds dependent payload for cascade dependents containing upstream change info', async () => {
+    clearTables();
+    // Create actual dependent file on disk so readFileSync can read it
+    const depPath = path.join(tmpDir, 'dep-file.ts');
+    await fs.writeFile(depPath, 'export function depFn() {}');
+
+    insertFile('/changed-root.ts');
+    insertFile(depPath);
+    insertDep(depPath, '/changed-root.ts'); // depPath depends on /changed-root.ts
+
+    cascadeStale('/changed-root.ts', {
+      timestamp: 7100,
+      changeContext: {
+        directPayload: 'root diff',
+        changeType: 'exports-changed',
+        changedFilePath: '/changed-root.ts',
+      },
+    });
+
+    const sqlite = getSqlite();
+    const depJob = sqlite
+      .prepare(
+        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
+      )
+      .get(depPath) as { payload: string | null } | undefined;
+
+    expect(depJob).toBeDefined();
+    expect(depJob!.payload).not.toBeNull();
+    expect(depJob!.payload).toContain('[upstream change: /changed-root.ts (exports-changed)]');
+    expect(depJob!.payload).toContain('[assessing dependent:');
+    expect(depJob!.payload).toContain('export function depFn');
+  });
+
+  it('produces null payload for change_impact jobs when changeContext is absent (backward compat)', () => {
+    clearTables();
+    insertFile('/no-ctx.ts');
+
+    cascadeStale('/no-ctx.ts', { timestamp: 7200 });
+
+    const sqlite = getSqlite();
+    const job = sqlite
+      .prepare(
+        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
+      )
+      .get('/no-ctx.ts') as { payload: string | null } | undefined;
+
+    expect(job).toBeDefined();
+    expect(job!.payload).toBeNull();
+  });
+
+  it('truncates large dependent file content at 14KB in dependent payload', async () => {
+    clearTables();
+    const largePath = path.join(tmpDir, 'large-dep.ts');
+    // 20KB of content
+    await fs.writeFile(largePath, 'x'.repeat(20 * 1024));
+
+    insertFile('/changed-for-large.ts');
+    insertFile(largePath);
+    insertDep(largePath, '/changed-for-large.ts');
+
+    cascadeStale('/changed-for-large.ts', {
+      timestamp: 7300,
+      changeContext: {
+        directPayload: 'small root diff',
+        changeType: 'exports-changed',
+        changedFilePath: '/changed-for-large.ts',
+      },
+    });
+
+    const sqlite = getSqlite();
+    const depJob = sqlite
+      .prepare(
+        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
+      )
+      .get(largePath) as { payload: string | null } | undefined;
+
+    expect(depJob).toBeDefined();
+    expect(depJob!.payload).not.toBeNull();
+    // Content should be truncated — payload should not contain 20KB of 'x's
+    expect(depJob!.payload).toContain('[truncated]');
+    // The header text adds a bit, but total should be reasonable
+    expect(depJob!.payload!.length).toBeLessThan(20 * 1024);
+  });
+
+  it('queues summary and concepts jobs WITHOUT payload even with changeContext', () => {
+    clearTables();
+    insertFile('/ctx-job-types.ts');
+
+    cascadeStale('/ctx-job-types.ts', {
+      timestamp: 7400,
+      changeContext: {
+        directPayload: 'diff',
+        changeType: 'exports-changed',
+        changedFilePath: '/ctx-job-types.ts',
+      },
+    });
+
+    const sqlite = getSqlite();
+    const summaryJob = sqlite
+      .prepare(
+        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'summary'"
+      )
+      .get('/ctx-job-types.ts') as { payload: string | null } | undefined;
+
+    const conceptsJob = sqlite
+      .prepare(
+        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'concepts'"
+      )
+      .get('/ctx-job-types.ts') as { payload: string | null } | undefined;
+
+    expect(summaryJob!.payload).toBeNull();
+    expect(conceptsJob!.payload).toBeNull();
+  });
+});
+
 describe('markSelfStale', () => {
   it('marks only summary and concepts stale (NOT change_impact), queues 2 jobs', () => {
     clearTables();
