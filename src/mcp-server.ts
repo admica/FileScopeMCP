@@ -634,6 +634,31 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     });
   });
 
+  server.tool("toggle_llm", "Enable or disable the background LLM processing pipeline", {
+    enabled: z.boolean().describe("true to start LLM pipeline, false to stop it"),
+  }, async ({ enabled }) => {
+    if (!coordinator.isInitialized()) {
+      return { content: [{ type: "text", text: "Error: Project not initialized. Call set_project_path first." }], isError: true };
+    }
+    try {
+      coordinator.toggleLlm(enabled);
+      // Persist the toggle to config file so restart respects it
+      const config = getConfig();
+      if (config) {
+        if (!config.llm) {
+          config.llm = { enabled, provider: 'anthropic', model: 'claude-3-haiku-20240307' };
+        } else {
+          config.llm.enabled = enabled;
+        }
+        setConfig(config);
+        await saveConfig(config);
+      }
+      return { content: [{ type: "text", text: `LLM pipeline ${enabled ? 'started' : 'stopped'}. Setting persisted to config.` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error toggling LLM: ${err}` }], isError: true };
+    }
+  });
+
   server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {
     filepath: z.string().describe("The path or pattern of the file to exclude and remove")
   }, async (params: { filepath: string }) => {
