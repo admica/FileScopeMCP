@@ -1,6 +1,7 @@
 import { Config } from './types.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { error as logError, info as logInfo, debug as logDebug } from './logger.js';
 
 // Global state management for the MCP server
 let _projectRoot: string = ''; // Default to empty string, will be set by initializeProject
@@ -9,7 +10,7 @@ let _config: Config | null = null;
 export function setProjectRoot(root: string) {
   _projectRoot = root;
   _customExcludesLoaded = false; // Reset so custom excludes are re-read for the new project
-  console.error(`Global project root set to: ${_projectRoot}`);
+  logInfo(`Global project root set to: ${_projectRoot}`);
 }
 
 export function getProjectRoot(): string {
@@ -19,7 +20,7 @@ export function getProjectRoot(): string {
 export function setConfig(config: Config) {
   _config = config;
   _customExcludesLoaded = false; // Reset so custom excludes are re-merged with the new config
-  console.error('Global config updated:', config);
+  logDebug('Global config updated:', config);
 }
 
 // Cache for custom excludes so we don't re-read and re-append on every call
@@ -41,11 +42,11 @@ export function getConfig(): Config | null {
           if (newPatterns.length > 0) {
             _config.excludePatterns = [..._config.excludePatterns, ...newPatterns];
           }
-          console.error('Custom excludes loaded:', newPatterns);
+          logInfo('Custom excludes loaded:', newPatterns);
         }
       }
-    } catch (error) {
-      console.error('Error loading custom excludes:', error);
+    } catch (err) {
+      logError('Error loading custom excludes:', err);
     }
     _customExcludesLoaded = true;
   }
@@ -65,11 +66,11 @@ export function addExclusionPattern(pattern: string): void {
     if (!customExcludes.includes(pattern)) {
       customExcludes.push(pattern);
       fs.writeFileSync(customExcludesPath, JSON.stringify(customExcludes, null, 2), 'utf-8');
-      console.error(`Added exclusion pattern to FileScopeMCP-excludes.json: ${pattern}`);
+      logInfo(`Added exclusion pattern to FileScopeMCP-excludes.json: ${pattern}`);
     } else {
-      console.error(`Pattern already exists in FileScopeMCP-excludes.json: ${pattern}`);
+      logDebug(`Pattern already exists in FileScopeMCP-excludes.json: ${pattern}`);
     }
-  } catch (error) {
-    console.error('Error updating FileScopeMCP-excludes.json:', error);
+  } catch (err) {
+    logError('Error updating FileScopeMCP-excludes.json:', err);
   }
-} 
+}

@@ -7,8 +7,8 @@ import {
   getFile,
   upsertFile,
   getAllFiles,
-  getChildren,
 } from "./db/repository.js";
+import { error as logError, info as logInfo, debug as logDebug } from "./logger.js";
 
 /**
  * Normalizes paths to use forward slashes and handles URL encoding
@@ -36,13 +36,13 @@ export function normalizeAndResolvePath(inputPath: string, baseDirectory?: strin
 
     // For relative paths, resolve against the base directory
     const base = baseDirectory || getProjectRoot();
-    console.error(`Resolving relative path ${cleanPath} against base ${base}`);
+    logDebug(`Resolving relative path ${cleanPath} against base ${base}`);
     const fullPath = path.resolve(base, cleanPath);
 
     // Normalize to forward slashes for consistency and remove duplicate slashes
     return fullPath.replace(/\\/g, '/').replace(/\/+/g, '/');
-  } catch (error) {
-    console.error(`Failed to normalize path: ${inputPath}`, error);
+  } catch (err) {
+    logError(`Failed to normalize path: ${inputPath}`, err);
     // Return the input as fallback
     return inputPath;
   }
@@ -66,27 +66,27 @@ async function ensureDirectoryExists(dirPath: string): Promise<void> {
  * Creates a new file tree configuration
  */
 export async function createFileTreeConfig(filename: string, baseDirectory: string): Promise<FileTreeConfig> {
-  console.error('Creating file tree config...');
-  console.error('Input filename:', filename);
-  console.error('Input baseDirectory:', baseDirectory);
+  logDebug('Creating file tree config...');
+  logDebug('Input filename:', filename);
+  logDebug('Input baseDirectory:', baseDirectory);
 
   // Handle special case for current directory
   if (baseDirectory === '.' || baseDirectory === './') {
     baseDirectory = getProjectRoot();
-    console.error('Resolved "." to project root:', baseDirectory);
+    logDebug('Resolved "." to project root:', baseDirectory);
   }
 
   // Normalize paths
   const normalizedBase = normalizeAndResolvePath(baseDirectory);
-  console.error('Normalized base directory:', normalizedBase);
+  logDebug('Normalized base directory:', normalizedBase);
 
   // For the filename, we only want the basename, not the full path
   const basename = path.basename(filename);
   const cleanFilename = basename.endsWith('.json') ? basename : `${basename}.json`;
-  console.error('Clean filename:', cleanFilename);
+  logDebug('Clean filename:', cleanFilename);
 
   // Ensure the base directory exists
-  console.error('Creating base directory if needed:', normalizedBase);
+  logDebug('Creating base directory if needed:', normalizedBase);
   await ensureDirectoryExists(normalizedBase);
 
   const config = {
@@ -95,7 +95,7 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
     projectRoot: getProjectRoot(),
     lastUpdated: new Date()
   };
-  console.error('Created config:', config);
+  logDebug('Created config:', config);
 
   return config;
 }
@@ -107,7 +107,7 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
  */
 export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): Promise<void> {
   try {
-    console.error('Saving file tree to SQLite...');
+    logInfo('Saving file tree to SQLite...');
     // Flatten the tree and upsert all nodes
     function collectNodes(node: FileNode): FileNode[] {
       const results: FileNode[] = [node];
@@ -120,11 +120,11 @@ export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): 
     for (const node of allNodes) {
       upsertFile(node);
     }
-    console.error(`Successfully saved ${allNodes.length} nodes to SQLite`);
-  } catch (error) {
-    console.error('Error saving file tree to SQLite:', error);
-    console.error('Error details:', error instanceof Error ? error.stack : String(error));
-    throw error;
+    logInfo(`Successfully saved ${allNodes.length} nodes to SQLite`);
+  } catch (err) {
+    logError('Error saving file tree to SQLite:', err);
+    logError('Error details:', err instanceof Error ? err.stack : String(err));
+    throw err;
   }
 }
 
@@ -135,7 +135,7 @@ export async function saveFileTree(config: FileTreeConfig, fileTree: FileNode): 
  */
 export async function loadFileTree(filename: string): Promise<FileTreeStorage> {
   try {
-    console.error(`Loading file tree from SQLite (filename param ignored: ${filename})`);
+    logDebug(`Loading file tree from SQLite (filename param ignored: ${filename})`);
     const allNodes = getAllFiles();
     if (allNodes.length === 0) {
       throw new Error('No files in SQLite database');
@@ -174,9 +174,9 @@ export async function loadFileTree(filename: string): Promise<FileTreeStorage> {
     config.lastUpdated = new Date();
 
     return { config, fileTree: root };
-  } catch (error) {
-    console.error(`Failed to load file tree from SQLite:`, error);
-    throw error;
+  } catch (err) {
+    logError(`Failed to load file tree from SQLite:`, err);
+    throw err;
   }
 }
 
@@ -192,8 +192,8 @@ export async function listSavedFileTrees(): Promise<{type: "text", text: string}
       return [{ type: 'text' as const, text: '.filescope.db' }];
     }
     return [];
-  } catch (error) {
-    console.error('Error listing file trees:', error);
+  } catch (err) {
+    logError('Error listing file trees:', err);
     return [];
   }
 }
@@ -299,5 +299,5 @@ export function getFileNode(fileTree: FileNode, filePath: string): FileNode | nu
  * Kept for backward compatibility.
  */
 export function clearTreeCache(): void {
-  console.error('clearTreeCache: no-op (SQLite is source of truth)');
+  logDebug('clearTreeCache: no-op (SQLite is source of truth)');
 }

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { z } from 'zod';
 import { Config, FileWatchingConfig } from './types.js';
 import { LLMConfigSchema } from './llm/types.js';
+import { error as logError, info as logInfo, debug as logDebug } from './logger.js';
 
 // Define the FileWatchingConfig schema
 const FileWatchingSchema = z.object({
@@ -43,57 +44,56 @@ const DEFAULT_CONFIG: Config = {
 };
 
 export async function loadConfig(configPath: string = 'config.json'): Promise<Config> {
-  console.error(`\n🔧 LOADING CONFIG from ${configPath}`);
-  console.error(`  - Current working directory: ${process.cwd()}`);
-  
+  logDebug(`Loading config from ${configPath}`);
+  logDebug(`Current working directory: ${process.cwd()}`);
+
   try {
     const fullPath = path.resolve(configPath);
-    console.error(`  - Resolved full path: ${fullPath}`);
-    
+    logDebug(`Resolved full path: ${fullPath}`);
+
     const exists = await fs.access(fullPath).then(() => true).catch(() => false);
-    console.error(`  - Config file exists: ${exists ? '✅ YES' : '❌ NO'}`);
-    
+    logDebug(`Config file exists: ${exists ? 'YES' : 'NO'}`);
+
     if (!exists) {
-      console.error(`  - ! Using default config instead`);
-      console.error(`  - Default config:`, JSON.stringify(DEFAULT_CONFIG, null, 2));
+      logInfo(`Using default config (${configPath} not found)`);
+      logDebug(`Default config:`, JSON.stringify(DEFAULT_CONFIG, null, 2));
       return DEFAULT_CONFIG;
     }
-    
+
     const configContent = await fs.readFile(configPath, 'utf-8');
-    console.error(`  - Read ${configContent.length} bytes from config file`);
-    
+    logDebug(`Read ${configContent.length} bytes from config file`);
+
     try {
       const parsedConfig = JSON.parse(configContent);
-      console.error(`  - Parsed config successfully`);
-      
+      logDebug(`Parsed config successfully`);
+
       // Check for exclude patterns
       if (parsedConfig.excludePatterns && Array.isArray(parsedConfig.excludePatterns)) {
-        console.error(`  - Found ${parsedConfig.excludePatterns.length} exclude patterns`);
+        logDebug(`Found ${parsedConfig.excludePatterns.length} exclude patterns`);
         if (parsedConfig.excludePatterns.length > 0) {
-          console.error(`  - First 5 patterns:`, parsedConfig.excludePatterns.slice(0, 5));
+          logDebug(`First 5 patterns:`, parsedConfig.excludePatterns.slice(0, 5));
         }
       } else {
-        console.error(`  - ! No exclude patterns found in config!`);
+        logDebug(`No exclude patterns found in config`);
       }
-      
+
       // Validate config
       const validatedConfig = ConfigSchema.parse(parsedConfig);
-      console.error(`  - Config validation successful`);
-      console.error(`  - Base directory: ${validatedConfig.baseDirectory}`);
-      console.error(`  - Version: ${validatedConfig.version}`);
-      console.error(`+ CONFIG LOADED SUCCESSFULLY\n`);
-      
+      logInfo(`Config loaded successfully from ${configPath}`);
+      logDebug(`Base directory: ${validatedConfig.baseDirectory}`);
+      logDebug(`Version: ${validatedConfig.version}`);
+
       return validatedConfig;
     } catch (parseError) {
-      console.error(`  - x ERROR parsing config JSON:`, parseError);
-      console.error(`  - Raw config content:`, configContent);
-      console.error(`  - ! Using default config instead`);
+      logError(`Error parsing config JSON:`, parseError);
+      logDebug(`Raw config content:`, configContent);
+      logInfo(`Using default config (parse error)`);
       return DEFAULT_CONFIG;
     }
-  } catch (error) {
-    console.error(`  - x ERROR loading config:`, error);
-    console.error(`  - ! Using default config instead`);
-    console.error(`  - Default config:`, JSON.stringify(DEFAULT_CONFIG, null, 2));
+  } catch (err) {
+    logError(`Error loading config:`, err);
+    logInfo(`Using default config (load error)`);
+    logDebug(`Default config:`, JSON.stringify(DEFAULT_CONFIG, null, 2));
     return DEFAULT_CONFIG;
   }
 }
@@ -101,8 +101,8 @@ export async function loadConfig(configPath: string = 'config.json'): Promise<Co
 export async function saveConfig(config: Config, configPath: string = 'config.json'): Promise<void> {
   try {
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
-  } catch (error) {
-    console.error('Error saving config:', error);
-    throw error;
+  } catch (err) {
+    logError('Error saving config:', err);
+    throw err;
   }
-} 
+}

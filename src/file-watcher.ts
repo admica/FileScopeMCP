@@ -3,6 +3,7 @@ import * as path from 'path';
 import { FileWatchingConfig } from './types.js';
 import { getConfig, getProjectRoot } from './global-state.js';
 import { normalizePath, globToRegExp } from './file-utils.js';
+import { error as logError, warn as logWarn, info as logInfo, debug as logDebug } from './logger.js';
 
 /**
  * Types of file events that the watcher can emit
@@ -36,18 +37,18 @@ export class FileWatcher {
   constructor(config: FileWatchingConfig, baseDir: string) {
     this.config = config;
     this.baseDir = path.normalize(baseDir);
-    console.error(`FileWatcher: Initialized with base directory: ${this.baseDir}`);
+    logInfo(`FileWatcher: Initialized with base directory: ${this.baseDir}`);
   }
-  
+
   /**
    * Start watching for file changes
    */
   public start(): void {
     if (this.isWatching) {
-      console.error('FileWatcher: Already running');
+      logWarn('FileWatcher: Already running');
       return;
     }
-    
+
     const watchOptions: chokidar.WatchOptions = {
       ignored: this.getIgnoredPatterns(),
       ignoreInitial: true,
@@ -61,71 +62,71 @@ export class FileWatcher {
       disableGlobbing: false,
       followSymlinks: false
     };
-    
-    console.error(`FileWatcher: Starting on ${this.baseDir}`);
-    
+
+    logInfo(`FileWatcher: Starting on ${this.baseDir}`);
+
     try {
       this.watcher = chokidar.watch(this.baseDir, watchOptions);
-      
+
       // Setup event handlers if watching is enabled for those events
       if (this.config.watchForNewFiles) {
         this.watcher.on('add', (filePath) => this.onFileEvent(filePath, 'add'));
       }
-      
+
       if (this.config.watchForChanged) {
         this.watcher.on('change', (filePath) => this.onFileEvent(filePath, 'change'));
       }
-      
+
       if (this.config.watchForDeleted) {
         this.watcher.on('unlink', (filePath) => this.onFileEvent(filePath, 'unlink'));
       }
-      
+
       // Handle errors
-      this.watcher.on('error', (error) => {
-        console.error(`FileWatcher: Error:`, error);
+      this.watcher.on('error', (err) => {
+        logError(`FileWatcher: Error:`, err);
         this.errorCount++;
-        
+
         // If too many errors, try restarting the watcher
         if (this.errorCount > 10) {
-          console.error('FileWatcher: Too many errors, restarting...');
+          logError('FileWatcher: Too many errors, restarting...');
           this.restart();
         }
       });
-      
+
       // Setup ready event
       this.watcher.on('ready', () => {
-        console.error('FileWatcher: Initial scan complete. Ready for changes.');
+        logInfo('FileWatcher: Initial scan complete. Ready for changes.');
       });
-      
+
       this.isWatching = true;
-      console.error('FileWatcher: Started successfully');
-    } catch (error) {
-      console.error('FileWatcher: Error starting:', error);
+      logInfo('FileWatcher: Started successfully');
+    } catch (err) {
+      logError('FileWatcher: Error starting:', err);
     }
   }
-  
+
   /**
    * Stop watching for file changes
    */
   public stop(): void {
     if (!this.isWatching || !this.watcher) {
-      console.error('FileWatcher: Not running');
+      logDebug('FileWatcher: Not running');
       return;
     }
-    
-    console.error('FileWatcher: Stopping...');
-    
+
+    logInfo('FileWatcher: Stopping...');
+
     // Clear all throttle timers
     this.throttleTimers.forEach(timer => clearTimeout(timer));
     this.throttleTimers.clear();
-    
+
     // Close the watcher
     this.watcher.close()
       .then(() => {
-        console.error('FileWatcher: Stopped successfully');
+        logInfo('FileWatcher: Stopped successfully');
       })
-      .catch(error => {
-        console.error('FileWatcher: Error stopping:', error);
+      .catch(err => {
+        logError('FileWatcher: Error stopping:', err);
       })
       .finally(() => {
         this.watcher = null;
@@ -133,14 +134,14 @@ export class FileWatcher {
         this.errorCount = 0;
       });
   }
-  
+
   /**
    * Restart the file watcher with exponential backoff
    */
   public restart(): void {
     const delay = Math.min(1000 * Math.pow(2, this.restartAttempts), this.maxRestartDelay);
     this.restartAttempts++;
-    console.error(`FileWatcher: Restarting in ${delay}ms (attempt ${this.restartAttempts})...`);
+    logWarn(`FileWatcher: Restarting in ${delay}ms (attempt ${this.restartAttempts})...`);
     this.stop();
     setTimeout(() => {
       if (!this.isWatching) {
@@ -149,16 +150,16 @@ export class FileWatcher {
       }
     }, delay);
   }
-  
+
   /**
    * Register a callback for file events
    * @param callback The callback function to call when a file event occurs
    */
   public addEventCallback(callback: FileEventCallback): void {
     this.eventCallbacks.push(callback);
-    console.error(`FileWatcher: Added event callback. Total callbacks: ${this.eventCallbacks.length}`);
+    logDebug(`FileWatcher: Added event callback. Total callbacks: ${this.eventCallbacks.length}`);
   }
-  
+
   /**
    * Remove a previously registered callback
    * @param callback The callback function to remove
@@ -167,32 +168,32 @@ export class FileWatcher {
     const index = this.eventCallbacks.indexOf(callback);
     if (index !== -1) {
       this.eventCallbacks.splice(index, 1);
-      console.error(`FileWatcher: Removed event callback. Total callbacks: ${this.eventCallbacks.length}`);
+      logDebug(`FileWatcher: Removed event callback. Total callbacks: ${this.eventCallbacks.length}`);
     }
   }
-  
+
   /**
    * Get patterns to ignore based on config
    * @returns Array of patterns to ignore
    */
   private getIgnoredPatterns(): (string | RegExp)[] {
     const patterns: (string | RegExp)[] = [];
-    
+
     // Add patterns from excludePatterns in config
     const config = getConfig();
     if (config?.excludePatterns) {
       patterns.push(...config.excludePatterns);
     }
-    
+
     // Add dot files if configured
     if (this.config.ignoreDotFiles) {
       patterns.push(/(^|[\/\\])\../); // Matches all paths starting with a dot
     }
-    
-    console.error(`FileWatcher: Ignoring ${patterns.length} patterns:`, patterns.slice(0, 5));
+
+    logDebug(`FileWatcher: Ignoring ${patterns.length} patterns:`, patterns.slice(0, 5));
     return patterns;
   }
-  
+
   /**
    * Handle a file event
    * @param filePath The path of the file that changed
@@ -201,11 +202,11 @@ export class FileWatcher {
   private onFileEvent(filePath: string, eventType: FileEventType): void {
     // Get relative path for logging
     const relativePath = path.relative(this.baseDir, filePath);
-    console.error(`FileWatcher: Event: ${eventType} - ${relativePath}`);
-    
+    logDebug(`FileWatcher: Event: ${eventType} - ${relativePath}`);
+
     // Log the ignored patterns
     const ignoredPatterns = this.getIgnoredPatterns();
-    console.error(`FileWatcher: Ignored patterns:`, ignoredPatterns);
+    logDebug(`FileWatcher: Ignored patterns:`, ignoredPatterns);
 
     // Check if the file should be ignored
     const shouldIgnore = ignoredPatterns.some(pattern => {
@@ -213,22 +214,22 @@ export class FileWatcher {
       return globToRegExp(pattern).test(relativePath);
     });
 
-    console.error(`FileWatcher: Should ignore ${relativePath}? ${shouldIgnore ? 'YES' : 'NO'}`);
+    logDebug(`FileWatcher: Should ignore ${relativePath}? ${shouldIgnore ? 'YES' : 'NO'}`);
 
     if (shouldIgnore) {
-      console.error(`FileWatcher: Ignoring event for ${relativePath}`);
+      logDebug(`FileWatcher: Ignoring event for ${relativePath}`);
       return;
     }
 
     // Notify all registered callbacks of a file event
-    console.error(`FileWatcher: Notifying ${this.eventCallbacks.length} callbacks for ${eventType} event on ${filePath}`);
+    logDebug(`FileWatcher: Notifying ${this.eventCallbacks.length} callbacks for ${eventType} event on ${filePath}`);
     this.eventCallbacks.forEach(callback => {
       try {
         // Pass normalized path to callback
-        callback(normalizePath(filePath), eventType); 
-      } catch (error) {
-        console.error(`FileWatcher: Error in callback:`, error);
+        callback(normalizePath(filePath), eventType);
+      } catch (err) {
+        logError(`FileWatcher: Error in callback:`, err);
       }
     });
   }
-} 
+}
