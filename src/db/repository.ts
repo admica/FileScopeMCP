@@ -314,6 +314,39 @@ export function setExportsSnapshot(filePath: string, snapshot: ExportSnapshot): 
 // ─── Staleness ────────────────────────────────────────────────────────────────
 
 /**
+ * Reads the three staleness columns for the given file path.
+ * Returns an object with camelCase field names and null for fresh/missing values.
+ * If the file does not exist in the DB, all fields are null.
+ * Used by MCP tool handlers to inject staleness timestamps into query responses.
+ */
+export function getStaleness(filePath: string): {
+  summaryStale: number | null;
+  conceptsStale: number | null;
+  changeImpactStale: number | null;
+} {
+  const sqlite = getSqlite();
+  const row = sqlite
+    .prepare(
+      'SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?'
+    )
+    .get(filePath) as {
+      summary_stale_since: number | null;
+      concepts_stale_since: number | null;
+      change_impact_stale_since: number | null;
+    } | undefined;
+
+  if (!row) {
+    return { summaryStale: null, conceptsStale: null, changeImpactStale: null };
+  }
+
+  return {
+    summaryStale: row.summary_stale_since ?? null,
+    conceptsStale: row.concepts_stale_since ?? null,
+    changeImpactStale: row.change_impact_stale_since ?? null,
+  };
+}
+
+/**
  * Marks all 3 staleness columns to `timestamp` for every file in `filePaths`.
  * Uses a raw prepared statement inside a transaction for atomicity and speed.
  * If a path doesn't exist in the DB, the UPDATE silently matches 0 rows (no throw).

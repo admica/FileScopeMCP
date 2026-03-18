@@ -33,7 +33,8 @@ import {
   getAllFiles,
   setDependencies,
   getDependencies,
-  getDependents
+  getDependents,
+  getStaleness
 } from './db/repository.js';
 import { ServerCoordinator } from './coordinator.js';
 
@@ -314,13 +315,17 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
         return createMcpResponse(`File not found: ${params.filepath}`, true);
       }
 
+      const importanceStale = getStaleness(normalizedPath);
       return createMcpResponse({
         path: node.path,
         importance: node.importance || 0,
         dependencies: node.dependencies || [],
         dependents: node.dependents || [],
         packageDependencies: node.packageDependencies || [],
-        summary: node.summary || null
+        summary: node.summary || null,
+        ...(importanceStale.summaryStale !== null && { summaryStale: importanceStale.summaryStale }),
+        ...(importanceStale.conceptsStale !== null && { conceptsStale: importanceStale.conceptsStale }),
+        ...(importanceStale.changeImpactStale !== null && { changeImpactStale: importanceStale.changeImpactStale }),
       });
     } catch (error) {
       log('Error in get_file_importance: ' + error);
@@ -345,13 +350,19 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       .filter(file => (file.importance || 0) >= minImportance)
       .sort((a, b) => (b.importance || 0) - (a.importance || 0))
       .slice(0, limit)
-      .map(file => ({
-        path: file.path,
-        importance: file.importance || 0,
-        dependentCount: (file.dependents?.length || getDependents(file.path).length) || 0,
-        dependencyCount: (file.dependencies?.length || getDependencies(file.path).length) || 0,
-        hasSummary: !!file.summary
-      }));
+      .map(file => {
+        const fileStale = getStaleness(file.path);
+        return {
+          path: file.path,
+          importance: file.importance || 0,
+          dependentCount: (file.dependents?.length || getDependents(file.path).length) || 0,
+          dependencyCount: (file.dependencies?.length || getDependencies(file.path).length) || 0,
+          hasSummary: !!file.summary,
+          ...(fileStale.summaryStale !== null && { summaryStale: fileStale.summaryStale }),
+          ...(fileStale.conceptsStale !== null && { conceptsStale: fileStale.conceptsStale }),
+          ...(fileStale.changeImpactStale !== null && { changeImpactStale: fileStale.changeImpactStale }),
+        };
+      });
 
     return createMcpResponse(importantFiles);
   });
@@ -372,9 +383,13 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       return createMcpResponse(`No summary available for ${params.filepath}`);
     }
 
+    const summaryStale = getStaleness(normalizedPath);
     return createMcpResponse({
       path: node.path,
-      summary: node.summary
+      summary: node.summary,
+      ...(summaryStale.summaryStale !== null && { summaryStale: summaryStale.summaryStale }),
+      ...(summaryStale.conceptsStale !== null && { conceptsStale: summaryStale.conceptsStale }),
+      ...(summaryStale.changeImpactStale !== null && { changeImpactStale: summaryStale.changeImpactStale }),
     });
   });
 
