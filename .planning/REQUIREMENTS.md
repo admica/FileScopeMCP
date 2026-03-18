@@ -29,7 +29,7 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 - [x] **CASC-01**: When a file's API surface changes, all direct dependents in the dependency graph have their metadata marked stale
 - [x] **CASC-02**: Staleness is tracked per semantic field: summary, concepts, and change_impact each have independent staleSince timestamps
-- [ ] **CASC-03**: MCP query responses include staleness timestamps alongside metadata so LLMs can decide whether to trust the data
+- [x] **CASC-03**: MCP query responses include staleness timestamps alongside metadata so LLMs can decide whether to trust the data
 - [x] **CASC-04**: Cascade propagation detects and handles circular dependencies without infinite loops
 - [x] **CASC-05**: Cascade jobs are queued with priority ordering: interactive queries (tier 1) > file-change cascades (tier 2) > background sweeps (tier 3)
 
@@ -98,11 +98,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CHNG-03 | Phase 3 | Complete |
 | CHNG-04 | Phase 3 | Complete (03-01) |
 | CHNG-05 | Phase 3 | Complete |
-| CASC-01 | Phase 4 | Pending |
-| CASC-02 | Phase 4 | Pending |
-| CASC-03 | Phase 4 | Pending |
-| CASC-04 | Phase 4 | Pending |
-| CASC-05 | Phase 4 | Pending |
+| CASC-01 | Phase 4 | Complete (04-01) |
+| CASC-02 | Phase 4 | Complete (04-01) |
+| CASC-03 | Phase 4 | Complete (04-02) |
+| CASC-04 | Phase 4 | Complete (04-01) |
+| CASC-05 | Phase 4 | Complete (04-01) |
 | LLM-01 | Phase 5 | Pending |
 | LLM-02 | Phase 5 | Pending |
 | LLM-03 | Phase 5 | Pending |

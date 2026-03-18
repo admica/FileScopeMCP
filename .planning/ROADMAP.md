@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: SQLite Storage** - Replace JSON flat-file storage with SQLite; migrate existing users transparently
 - [x] **Phase 2: Coordinator + Daemon Mode** - Extract coordinator from mcp-server.ts; enable standalone daemon operation (completed 2026-03-03)
 - [x] **Phase 3: Semantic Change Detection** - AST-level diff for TS/JS; LLM fallback for unsupported languages (completed 2026-03-18)
-- [ ] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers (in progress)
+- [x] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers (completed 2026-03-18)
 - [ ] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact
 - [ ] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure)
 
@@ -79,11 +79,11 @@ Plans:
   3. A project with circular dependencies (A imports B imports A) processes a cascade without hanging or stack-overflowing; a visited set terminates the walk
   4. LLM jobs written to the SQLite queue have priority tiers: tier 1 for interactive query promotion, tier 2 for file-change cascades, tier 3 for background sweeps
   5. A body-only change in any file produces zero new stale marks on dependents and zero new LLM job queue entries
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 04-01-PLAN.md — CascadeEngine BFS walk, repository staleness functions, upsertFile fix, coordinator wiring
-- [ ] 04-02-PLAN.md — MCP response staleness timestamp injection via getStaleness()
+- [x] 04-02-PLAN.md — MCP response staleness timestamp injection via getStaleness()
 
 ### Phase 5: LLM Processing Pipeline
 **Goal**: A background LLM pipeline autonomously regenerates file summaries, structured concept lists, and change impact assessments when files go stale — with configurable providers, rate limiting, and a clean on/off toggle
@@ -130,6 +130,6 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. SQLite Storage | 3/3 | Complete | 2026-03-02 |
 | 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
 | 3. Semantic Change Detection | 2/2 | Complete   | 2026-03-18 |
-| 4. Cascade Engine + Staleness | 1/2 | In progress | - |
+| 4. Cascade Engine + Staleness | 2/2 | Complete    | 2026-03-18 |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |
 | 6. Verification & Tech Debt | 0/2 | Not started | - |

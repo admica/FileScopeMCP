@@ -6,9 +6,9 @@ status: unknown
 last_updated: "2026-03-18T04:15:00.000Z"
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
+  completed_phases: 4
+  total_plans: 9
+  completed_plans: 9
 ---
 
 # Project State
@@ -22,12 +22,12 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 
 ## Current Position
 
-Phase: 4 of 5 (CascadeEngine Staleness)
-Plan: 1 of 1 in current phase (04-01 complete)
-Status: In progress
-Last activity: 2026-03-17 — Plan 04-01 complete: CascadeEngine BFS, markStale/insertLlmJobIfNotPending, upsertFile staleness fix, coordinator cascade wiring; CASC-01, CASC-02, CASC-04, CASC-05 fulfilled
+Phase: 4 of 5 (CascadeEngine Staleness) — COMPLETE
+Plan: 2 of 2 in current phase (04-02 complete)
+Status: Phase 4 complete; ready for Phase 5
+Last activity: 2026-03-18 — Plan 04-02 complete: getStaleness() repository function, staleness injection into get_file_importance/find_important_files/get_file_summary MCP handlers; CASC-03 fulfilled
 
-Progress: [████████░░] 55%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -43,10 +43,10 @@ Progress: [████████░░] 55%
 | 01-sqlite-storage | 3/3 | ~43 min | ~14 min |
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
 | 03-semantic-change-detection | 2/3 | ~11 min | ~5.5 min |
-| 04-cascade-engine-staleness | 1/1 | ~12 min | ~12 min |
+| 04-cascade-engine-staleness | 2/2 | ~19 min | ~9.5 min |
 
 **Recent Trend:**
-- Last 7 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min, 12 min
+- Last 8 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min, 12 min, 7 min
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -92,6 +92,9 @@ Recent decisions affecting current work:
 - [Phase 04-cascade-engine-staleness]: markSelfStale sets only summary_stale_since and concepts_stale_since (NOT change_impact_stale_since) — body-only changes don't affect impact assessment
 - [Phase 04-cascade-engine-staleness]: cascadeStale in unlink case runs BEFORE removeFileNode so getDependents() can still find dependency edges
 - [Phase 04-cascade-engine-staleness]: MAX_CASCADE_DEPTH=10 — depth >= 10 stops BFS expansion; files at depths 0..10 visited (11 max hops)
+- [Phase 04-cascade-engine-staleness]: getStaleness uses raw better-sqlite3 prepared statement — consistent with getExportsSnapshot pattern for direct column reads
+- [Phase 04-cascade-engine-staleness]: MCP staleness injection uses conditional spread so null fields are always omitted — no API contract change for fresh files (CASC-03 backward compat)
+- [Phase 04-cascade-engine-staleness]: get_file_summary injects all three staleness fields (not just summaryStale) — LLMs see the full picture from any query
 
 ### Pending Todos
 
@@ -103,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-17
-Stopped at: Completed 04-cascade-engine-staleness 04-01-PLAN.md — CascadeEngine BFS, markStale, insertLlmJobIfNotPending, upsertFile staleness fix, coordinator wiring; CASC-01, CASC-02, CASC-04, CASC-05 fulfilled
+Last session: 2026-03-18
+Stopped at: Completed 04-cascade-engine-staleness 04-02-PLAN.md — getStaleness() function, MCP staleness injection in get_file_importance/find_important_files/get_file_summary; CASC-03 fulfilled. Phase 4 complete.
 Resume file: None
