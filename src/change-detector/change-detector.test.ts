@@ -7,6 +7,8 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { ChangeDetector } from './change-detector.js';
 import { queueLlmDiffJob } from './llm-diff-fallback.js';
+import { getGitDiffOrContent } from './git-diff.js';
+import { insertLlmJobIfNotPending } from '../db/repository.js';
 
 // ─── DB setup ──────────────────────────────────────────────────────────────
 // The change detector uses getExportsSnapshot/setExportsSnapshot/insertLlmJob,
@@ -154,6 +156,94 @@ describe('ChangeDetector', () => {
 
     expect(result.affectsDependents).toBe(true);
     expect(result.changeType).toBe('exports-changed');
+  });
+});
+
+// ─── getGitDiffOrContent tests ──────────────────────────────────────────────
+
+describe('getGitDiffOrContent', () => {
+  it('returns file content with [new/untracked file] prefix when git diff is empty (untracked file)', async () => {
+    const testFile = path.join(tmpDir, 'untracked-test.py');
+    await fs.writeFile(testFile, 'def hello():\n    pass\n');
+
+    // tmpDir is not a git repo, so git diff will fail/empty — should fall back to content
+    const result = await getGitDiffOrContent(testFile, tmpDir);
+
+    expect(result).toContain('[new/untracked file]');
+    expect(result).toContain('def hello()');
+  });
+
+  it('returns [file content unavailable] when file does not exist and git fails', async () => {
+    const nonExistent = path.join(tmpDir, 'does-not-exist.py');
+
+    const result = await getGitDiffOrContent(nonExistent, tmpDir);
+
+    expect(result).toBe('[file content unavailable]');
+  });
+});
+
+// ─── insertLlmJobIfNotPending payload tests ──────────────────────────────────
+
+describe('insertLlmJobIfNotPending with payload', () => {
+  it('passes payload through to inserted job row', () => {
+    const sqlite = getSqlite();
+    sqlite.exec("DELETE FROM llm_jobs WHERE file_path = '/payload-test.py'");
+
+    insertLlmJobIfNotPending('/payload-test.py', 'change_impact', 2, 'my diff payload');
+
+    const row = sqlite
+      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'")
+      .get('/payload-test.py') as { payload: string } | undefined;
+
+    expect(row).toBeDefined();
+    expect(row!.payload).toBe('my diff payload');
+  });
+
+  it('works without payload (backward compat) — payload is null', () => {
+    const sqlite = getSqlite();
+    sqlite.exec("DELETE FROM llm_jobs WHERE file_path = '/no-payload-test.py'");
+
+    insertLlmJobIfNotPending('/no-payload-test.py', 'summary', 2);
+
+    const row = sqlite
+      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'summary'")
+      .get('/no-payload-test.py') as { payload: string | null } | undefined;
+
+    expect(row).toBeDefined();
+    expect(row!.payload).toBeNull();
+  });
+});
+
+// ─── _classifyWithLlmFallback wiring tests ──────────────────────────────────
+
+describe('ChangeDetector LLM fallback wiring', () => {
+  it('classify on a .py file queues a change_impact job with non-null payload', async () => {
+    const pyFile = path.join(tmpDir, 'wired-test.py');
+    await fs.writeFile(pyFile, 'def hello():\n    pass\n');
+
+    const detector = new ChangeDetector(tmpDir);
+    await detector.classify(pyFile);
+
+    const sqlite = getSqlite();
+    const row = sqlite
+      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact' AND status = 'pending'")
+      .get(pyFile) as { payload: string | null } | undefined;
+
+    expect(row).toBeDefined();
+    expect(row!.payload).not.toBeNull();
+    expect(row!.payload!.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── ast-parser console.warn check ──────────────────────────────────────────
+
+describe('ast-parser logger usage', () => {
+  it('ast-parser.ts does not contain console.warn calls', async () => {
+    const astParserSource = await fs.readFile(
+      new URL('./ast-parser.ts', import.meta.url),
+      'utf-8'
+    );
+    expect(astParserSource).not.toContain('console.warn');
   });
 });
 

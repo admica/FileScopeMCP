@@ -5,7 +5,7 @@
   "main": "dist/mcp-server.js",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/config-utils.ts src/coordinator.ts src/file-utils.ts src/file-watcher.ts src/global-state.ts src/logger.ts src/mcp-server.ts src/storage-utils.ts src/types.ts src/db/schema.ts src/db/db.ts src/db/repository.ts src/migrate/json-to-sqlite.ts src/change-detector/types.ts src/change-detector/ast-parser.ts src/change-detector/semantic-diff.ts src/change-detector/change-detector.ts src/change-detector/llm-diff-fallback.ts --format=esm --target=es2020 --outdir=dist --platform=node",
+    "build": "esbuild src/config-utils.ts src/coordinator.ts src/file-utils.ts src/file-watcher.ts src/global-state.ts src/logger.ts src/mcp-server.ts src/storage-utils.ts src/types.ts src/db/schema.ts src/db/db.ts src/db/repository.ts src/migrate/json-to-sqlite.ts src/change-detector/types.ts src/change-detector/ast-parser.ts src/change-detector/semantic-diff.ts src/change-detector/change-detector.ts src/change-detector/llm-diff-fallback.ts src/change-detector/git-diff.ts --format=esm --target=es2020 --outdir=dist --platform=node",
     "typecheck": "tsc --noEmit",
     "start": "node dist/mcp-server.js",
     "test": "vitest",

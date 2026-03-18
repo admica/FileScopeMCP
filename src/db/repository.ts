@@ -370,11 +370,15 @@ export function markStale(filePaths: string[], timestamp: number): void {
  * Inserts a pending LLM job only if no pending job with the same (file_path, job_type)
  * already exists. Prevents duplicate job rows when cascades overlap.
  * Uses getSqlite() for the existence check (raw SELECT) then delegates to insertLlmJob.
+ *
+ * Optional `payload` parameter passes context to the LLM job (e.g., git diff content
+ * for change_impact jobs). Existing callers without payload continue to work unchanged.
  */
 export function insertLlmJobIfNotPending(
   filePath: string,
   jobType: 'summary' | 'concepts' | 'change_impact',
-  priorityTier: number
+  priorityTier: number,
+  payload?: string
 ): void {
   const sqlite = getSqlite();
   const existing = sqlite
@@ -383,7 +387,7 @@ export function insertLlmJobIfNotPending(
     )
     .get(filePath, jobType);
   if (existing) return;
-  insertLlmJob({ file_path: filePath, job_type: jobType, priority_tier: priorityTier });
+  insertLlmJob({ file_path: filePath, job_type: jobType, priority_tier: priorityTier, payload });
 }
 
 // ─── LLM jobs ─────────────────────────────────────────────────────────────────

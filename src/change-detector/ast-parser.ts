@@ -7,6 +7,7 @@
 // Same pattern as better-sqlite3 in src/db/db.ts.
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import { log } from '../logger.js';
 import type { ExportSnapshot, ExportedSymbol } from './types.js';
 
 const _require = createRequire(import.meta.url);
@@ -125,7 +126,8 @@ export function extractSnapshot(filePath: string, source: string): ExportSnapsho
     tree = parser.parse(source);
   } catch (err) {
     // Parsing failure — return null so caller falls back to 'unknown'
-    console.warn(`[ast-parser] tree-sitter parse failed for ${filePath}:`, err);
+    // Use log() (not warn()) — parse failures in daemon mode should be suppressed, not spammed to stderr
+    log(`[ast-parser] tree-sitter parse failed for ${filePath}: ${err}`);
     return null;
   }
 

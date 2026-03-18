@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { extractSnapshot, isTreeSitterLanguage } from './ast-parser.js';
 import { computeSemanticDiff } from './semantic-diff.js';
 import { queueLlmDiffJob } from './llm-diff-fallback.js';
+import { getGitDiffOrContent } from './git-diff.js';
 import { getExportsSnapshot, setExportsSnapshot } from '../db/repository.js';
 import { log } from '../logger.js';
 import type { SemanticChangeSummary } from './types.js';
@@ -82,20 +83,12 @@ export class ChangeDetector {
   // ─── LLM fallback path (non-TS/JS) ────────────────────────────────────────
 
   private async _classifyWithLlmFallback(filePath: string): Promise<SemanticChangeSummary> {
-    // For unsupported languages we do NOT cache content (no schema change needed).
-    // The simplest approach: return 'unknown' immediately without queuing an LLM job,
-    // since we have no previous version to diff against.
-    //
-    // Phase 5 can enhance this by storing previous content hashes and generating
-    // unified diffs for LLM consumption.
-    log(`[ChangeDetector] Unsupported language for ${filePath}, returning heuristic unknown`);
-    return {
-      filePath,
-      changeType: 'unknown',
-      affectsDependents: true,
-      confidence: 'heuristic',
-      timestamp: Date.now(),
-    };
+    // For unsupported languages, get the git diff (or file content as fallback)
+    // and queue an LLM job for async classification. Returns a conservative summary
+    // immediately — the LLM pipeline will update the result asynchronously.
+    const diff = await getGitDiffOrContent(filePath, this.projectRoot);
+    log(`[ChangeDetector] Unsupported language for ${filePath}, queuing LLM diff job`);
+    return queueLlmDiffJob(filePath, diff);
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
