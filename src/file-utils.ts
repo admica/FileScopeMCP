@@ -8,6 +8,7 @@ import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.j
 import { saveFileTree } from './storage-utils.js'; // Import saveFileTree
 import { log } from './logger.js'; // Import the logger
 import { upsertFile, deleteFile, setDependencies } from './db/repository.js';
+import { extractSnapshot, isTreeSitterLanguage } from './change-detector/ast-parser.js';
 
 /**
  * Normalizes a file path for consistent comparison across platforms
@@ -46,11 +47,10 @@ export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);
 }
 
+// Note: .ts, .tsx, .js, .jsx entries removed — those file types now use AST-based
+// import extraction via extractSnapshot() from change-detector/ast-parser.ts (CHNG-04).
+// All other languages continue to use the regex patterns below.
 const IMPORT_PATTERNS: { [key: string]: RegExp } = {
-  '.js': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
-  '.jsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
-  '.ts': /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
-  '.tsx': /(?:import\s+(?:[^;]*?)\s+from\s+["']([^"']+)["'])|(?:import\s+["']([^"']+)["'])|(?:require\(["']([^"']+)["']\))|(?:import\s*\(["']([^"']+)["']\))/g,
   '.py': /(?:import\s+[\w.]+|from\s+[\w.]+\s+import\s+[\w*]+)/g,
   '.c': /#include\s+["<][^">]+[">]/g,
   '.cpp': /#include\s+["<][^">]+[">]/g,
@@ -460,7 +460,60 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
       const dependencies: string[] = [];
       const packageDependencies: PackageDependency[] = [];
 
-      if (importPattern) {
+      // AST-based import extraction for TS/JS (CHNG-04 — replaces regex for these types)
+      if (isTreeSitterLanguage(ext)) {
+        try {
+          const content = await fsPromises.readFile(fullPath, 'utf-8');
+          const snapshot = extractSnapshot(normalizedFullPath, content);
+          if (snapshot) {
+            log(`[AST] Found ${snapshot.imports.length} imports in ${normalizedFullPath}`);
+            for (const importPath of snapshot.imports) {
+              if (isUnresolvedTemplateLiteral(importPath)) {
+                log(`Skipping unresolved template literal: ${importPath}`);
+                continue;
+              }
+              try {
+                const resolvedPath = resolveImportPath(importPath, normalizedFullPath, normalizedBaseDir);
+                log(`Resolved path: ${resolvedPath}`);
+                if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+                  const pkgDep = PackageDependency.fromPath(resolvedPath);
+                  if (!pkgDep.name) {
+                    if (importPath.startsWith('@')) {
+                      const parts = importPath.split('/');
+                      if (parts.length >= 2) { pkgDep.scope = parts[0]; pkgDep.name = `${parts[0]}/${parts[1]}`; }
+                    } else if (importPath.includes('/')) {
+                      pkgDep.name = importPath.split('/')[0];
+                    } else {
+                      pkgDep.name = importPath;
+                    }
+                  }
+                  if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
+                  if (pkgDep.name) {
+                    const version = await extractPackageVersion(pkgDep.name, normalizedBaseDir);
+                    if (version) pkgDep.version = version;
+                  }
+                  packageDependencies.push(pkgDep);
+                  continue;
+                }
+                const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
+                for (const extension of possibleExtensions) {
+                  const pathToCheck = resolvedPath + extension;
+                  try {
+                    await fsPromises.access(pathToCheck);
+                    log(`Found existing path: ${pathToCheck}`);
+                    dependencies.push(pathToCheck);
+                    break;
+                  } catch { /* try next extension */ }
+                }
+              } catch (error) {
+                log(`Failed to resolve path for ${importPath}:`, error);
+              }
+            }
+          }
+        } catch (error) {
+          log(`Failed to read or process file ${fullPath} (AST path):`, error);
+        }
+      } else if (importPattern) {
         try {
           const content = await fsPromises.readFile(fullPath, 'utf-8');
           const matches = content.match(importPattern);
@@ -475,14 +528,9 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
                   log(`Skipping unresolved template literal: ${importPath}`);
                   continue;
                 }
-                
+
                 try {
-                  let resolvedPath;
-                  if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
-                    resolvedPath = resolveImportPath(importPath, normalizedFullPath, normalizedBaseDir);
-                  } else {
-                    resolvedPath = path.resolve(path.dirname(fullPath), importPath);
-                  }
+                  const resolvedPath = path.resolve(path.dirname(fullPath), importPath);
                   log(`Resolved path: ${resolvedPath}`);
                   
                   // Handle package imports
@@ -809,58 +857,105 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
   log(`[analyzeNewFile] Analyzing ${filePath}`);
   const dependencies: string[] = [];
   const packageDependencies: PackageDependency[] = [];
-  const ext = path.extname(filePath);
-  const pattern = IMPORT_PATTERNS[ext];
+  const ext = path.extname(filePath).toLowerCase();
 
-  if (pattern) {
-     try {
-       const content = await fsPromises.readFile(filePath, 'utf-8');
-       let match;
-       while ((match = pattern.exec(content)) !== null) {
-         const importPath = match[1] || match[2] || match[3]; // Adjust indices based on specific regex
-         if (importPath) {
-            // Skip if the importPath looks like an unresolved template literal
-            if (isUnresolvedTemplateLiteral(importPath)) {
-              log(`[analyzeNewFile] Skipping unresolved template literal: ${importPath}`);
-              continue;
-            }
-            
-            try {
-                const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
-                const normalizedResolvedPath = normalizePath(resolvedPath);
-
-                // Check if it's a package dependency (heuristic: includes node_modules or doesn't start with . or /)
-                if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
-                    const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
-                    
-                    // Skip if the package name is a template literal
-                    if (isUnresolvedTemplateLiteral(pkgDep.name)) {
-                      log(`[analyzeNewFile] Skipping package with template literal name: ${pkgDep.name}`);
-                      continue;
-                    }
-                    
-                    const version = await extractPackageVersion(pkgDep.name, projectRoot);
-                    if (version) {
-                      pkgDep.version = version;
-                    }
-                    packageDependencies.push(pkgDep);
+  // AST-based import extraction for TS/JS (CHNG-04)
+  if (isTreeSitterLanguage(ext)) {
+    try {
+      const content = await fsPromises.readFile(filePath, 'utf-8');
+      const snapshot = extractSnapshot(filePath, content);
+      if (snapshot) {
+        log(`[analyzeNewFile] [AST] Found ${snapshot.imports.length} imports in ${filePath}`);
+        for (const importPath of snapshot.imports) {
+          if (isUnresolvedTemplateLiteral(importPath)) {
+            log(`[analyzeNewFile] Skipping unresolved template literal: ${importPath}`);
+            continue;
+          }
+          try {
+            const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
+            const normalizedResolvedPath = normalizePath(resolvedPath);
+            if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+              const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
+              if (!pkgDep.name) {
+                if (importPath.startsWith('@')) {
+                  const parts = importPath.split('/');
+                  if (parts.length >= 2) { pkgDep.scope = parts[0]; pkgDep.name = `${parts[0]}/${parts[1]}`; }
+                } else if (importPath.includes('/')) {
+                  pkgDep.name = importPath.split('/')[0];
                 } else {
-                    // Attempt to confirm local file exists (you might need more robust checking like in scanDirectory)
-                    try {
-                      await fsPromises.access(normalizedResolvedPath);
-                      dependencies.push(normalizedResolvedPath);
-                    } catch {
-                      //console.warn(`[analyzeNewFile] Referenced local file not found: ${normalizedResolvedPath}`);
-                    }
+                  pkgDep.name = importPath;
                 }
-            } catch (resolveError) {
-                 log(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}: ${resolveError}`);
+              }
+              if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
+              const version = await extractPackageVersion(pkgDep.name, projectRoot);
+              if (version) pkgDep.version = version;
+              packageDependencies.push(pkgDep);
+            } else {
+              try {
+                await fsPromises.access(normalizedResolvedPath);
+                dependencies.push(normalizedResolvedPath);
+              } catch { /* file not found with this path */ }
             }
+          } catch (resolveError) {
+            log(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}: ${resolveError}`);
+          }
+        }
+      }
+    } catch (readError) {
+      log(`[analyzeNewFile] Error reading file ${filePath} (AST path): ${readError}`);
+    }
+  } else {
+    const pattern = IMPORT_PATTERNS[ext];
+    if (pattern) {
+       try {
+         const content = await fsPromises.readFile(filePath, 'utf-8');
+         let match;
+         while ((match = pattern.exec(content)) !== null) {
+           const importPath = match[1] || match[2] || match[3]; // Adjust indices based on specific regex
+           if (importPath) {
+              // Skip if the importPath looks like an unresolved template literal
+              if (isUnresolvedTemplateLiteral(importPath)) {
+                log(`[analyzeNewFile] Skipping unresolved template literal: ${importPath}`);
+                continue;
+              }
+
+              try {
+                  const resolvedPath = path.resolve(path.dirname(filePath), importPath);
+                  const normalizedResolvedPath = normalizePath(resolvedPath);
+
+                  // Check if it's a package dependency (heuristic: includes node_modules or doesn't start with . or /)
+                  if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+                      const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
+
+                      // Skip if the package name is a template literal
+                      if (isUnresolvedTemplateLiteral(pkgDep.name)) {
+                        log(`[analyzeNewFile] Skipping package with template literal name: ${pkgDep.name}`);
+                        continue;
+                      }
+
+                      const version = await extractPackageVersion(pkgDep.name, projectRoot);
+                      if (version) {
+                        pkgDep.version = version;
+                      }
+                      packageDependencies.push(pkgDep);
+                  } else {
+                      // Attempt to confirm local file exists
+                      try {
+                        await fsPromises.access(normalizedResolvedPath);
+                        dependencies.push(normalizedResolvedPath);
+                      } catch {
+                        //console.warn(`[analyzeNewFile] Referenced local file not found: ${normalizedResolvedPath}`);
+                      }
+                  }
+              } catch (resolveError) {
+                   log(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}: ${resolveError}`);
+              }
+           }
          }
+       } catch (readError) {
+         log(`[analyzeNewFile] Error reading file ${filePath}: ${readError}`);
        }
-     } catch (readError) {
-       log(`[analyzeNewFile] Error reading file ${filePath}: ${readError}`);
-     }
+    }
   }
   log(`[analyzeNewFile] Found deps for ${filePath}: ${JSON.stringify({ dependencies, packageDependencies })}`);
   return { dependencies, packageDependencies };
