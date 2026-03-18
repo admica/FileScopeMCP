@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: SQLite Storage** - Replace JSON flat-file storage with SQLite; migrate existing users transparently
 - [x] **Phase 2: Coordinator + Daemon Mode** - Extract coordinator from mcp-server.ts; enable standalone daemon operation (completed 2026-03-03)
-- [ ] **Phase 3: Semantic Change Detection** - AST-level diff for TS/JS; LLM fallback for unsupported languages
+- [x] **Phase 3: Semantic Change Detection** - AST-level diff for TS/JS; LLM fallback for unsupported languages (completed 2026-03-18)
 - [ ] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers
 - [ ] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact
 - [ ] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure)
@@ -63,7 +63,7 @@ Plans:
   3. Editing a file in an unsupported language (e.g., Go, Rust) produces a SemanticChangeSummary via LLM diff fallback with a best-effort change classification
   4. The TS/JS dependency import parser uses AST extraction instead of regex, eliminating false-positive dependency edges from string literals and comments
   5. The SemanticChangeSummary type is a stable TypeScript interface that CascadeEngine (Phase 4) can consume without changes to its contract
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 03-01-PLAN.md — Types, tree-sitter AST parser, semantic diff engine, SQLite schema extension for exports snapshot
@@ -129,7 +129,7 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. SQLite Storage | 3/3 | Complete | 2026-03-02 |
 | 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
-| 3. Semantic Change Detection | 1/2 | In progress | - |
+| 3. Semantic Change Detection | 2/2 | Complete   | 2026-03-18 |
 | 4. Cascade Engine + Staleness | 0/2 | Not started | - |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |
 | 6. Verification & Tech Debt | 0/2 | Not started | - |

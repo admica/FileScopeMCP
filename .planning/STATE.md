@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-17T20:28:41Z"
+last_updated: "2026-03-18T01:39:25.645Z"
 progress:
-  total_phases: 5
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 4
+  completed_phases: 3
+  total_plans: 7
+  completed_plans: 7
 ---
 
 # Project State
@@ -23,18 +23,18 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 ## Current Position
 
 Phase: 3 of 5 (Semantic Change Detection)
-Plan: 1 of 3 in current phase (03-01 complete)
+Plan: 2 of 3 in current phase (03-02 complete)
 Status: In progress
-Last activity: 2026-03-17 — Plan 03-01 complete: tree-sitter AST parser, semantic diff engine, exports_snapshot schema, ExportSnapshot/SemanticChangeSummary types; CHNG-01, CHNG-02, CHNG-04 fulfilled
+Last activity: 2026-03-17 — Plan 03-02 complete: ChangeDetector class, LLM diff fallback, coordinator integration, AST import extraction replacing TS/JS regex; CHNG-03, CHNG-04, CHNG-05 fulfilled
 
-Progress: [██████░░░░] 40%
+Progress: [███████░░░] 47%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: ~12 min
-- Total execution time: ~49 min
+- Total plans completed: 6
+- Average duration: ~10 min
+- Total execution time: ~53 min
 
 **By Phase:**
 
@@ -42,10 +42,10 @@ Progress: [██████░░░░] 40%
 |-------|-------|-------|----------|
 | 01-sqlite-storage | 3/3 | ~43 min | ~14 min |
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
-| 03-semantic-change-detection | 1/3 | ~7 min | ~7 min |
+| 03-semantic-change-detection | 2/3 | ~11 min | ~5.5 min |
 
 **Recent Trend:**
-- Last 6 plans: 10 min, 3 min, ~30 min, 6 min, 4 min, 7 min
+- Last 6 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -83,6 +83,9 @@ Recent decisions affecting current work:
 - [Phase 03-semantic-change-detection]: setExportsSnapshot uses UPSERT pattern (UPDATE first, INSERT minimal row if 0 rows updated)
 - [Phase 03-semantic-change-detection]: insertLlmJob uses new payload TEXT column on llm_jobs (not error_message hack)
 - [Phase 03-semantic-change-detection]: Tree traversal via recursive visitNode() used instead of Language.query() S-expressions for simpler, more debuggable export extraction
+- [Phase 03-semantic-change-detection]: ChangeDetector._classifyWithLlmFallback returns 'unknown' immediately without caching — no schema change needed; Phase 5 can add content hashing for real diffs
+- [Phase 03-semantic-change-detection]: queueLlmDiffJob truncates at MAX_DIFF_BYTES=16384 with '... [truncated]' suffix to prevent DB bloat
+- [Phase 03-semantic-change-detection]: changeSummary in coordinator case 'change' block is void-cast to suppress unused warning; Phase 4 will wire it into CascadeEngine
 
 ### Pending Todos
 
@@ -95,5 +98,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-17
-Stopped at: Completed 03-semantic-change-detection 03-01-PLAN.md — tree-sitter AST parser, semantic diff engine, exports_snapshot schema; CHNG-01, CHNG-02, CHNG-04 fulfilled
+Stopped at: Completed 03-semantic-change-detection 03-02-PLAN.md — ChangeDetector, LLM fallback, coordinator wiring, AST import extraction; CHNG-03, CHNG-04, CHNG-05 fulfilled
 Resume file: None
