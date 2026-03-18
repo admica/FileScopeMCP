@@ -18,6 +18,7 @@ import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { getAllFiles, upsertFile } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
+import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
 
 // Module-private async mutex to serialize all tree mutations.
 // Both the file-watcher callback and the integrity sweep mutate the SQLite state;
@@ -415,14 +416,24 @@ export class ServerCoordinator {
                 log(`[Coordinator] CHANGE detected for ${filePath}, performing incremental update.`);
                 await updateFileNodeOnChange(filePath, tempTree, projectRoot);
 
-                // 3. Phase 4 CascadeEngine will consume changeSummary.affectsDependents
-                //    For now, log the result. Phase 4 will add cascade logic here.
-                void changeSummary; // suppress unused variable warning until Phase 4
+                // 3. Dispatch to CascadeEngine based on change semantics
+                if (changeSummary) {
+                  if (changeSummary.affectsDependents) {
+                    // Export/type surface changed — propagate staleness to all transitive dependents
+                    cascadeStale(filePath, { timestamp: Date.now() });
+                  } else {
+                    // Body-only change — mark only this file's summary and concepts stale
+                    markSelfStale(filePath, { timestamp: Date.now() });
+                  }
+                }
               }
               break;
 
             case 'unlink':
               if (fileWatchingConfig.watchForDeleted) {
+                // Cascade BEFORE removeFileNode: dependency edges must still exist
+                // so getDependents() can find all dependents of the deleted file.
+                cascadeStale(filePath, { timestamp: Date.now() });
                 log(`[Coordinator] Calling removeFileNode for ${filePath}`);
                 await removeFileNode(filePath, tempTree, projectRoot);
               }
