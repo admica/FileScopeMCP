@@ -3,9 +3,10 @@
 // Hides SQL/Drizzle from callers — all interactions go through these functions.
 // Per RESEARCH.md Pattern 3.
 import { eq, like, asc, or } from 'drizzle-orm';
-import { getDb } from './db.js';
-import { files, file_dependencies } from './schema.js';
+import { getDb, getSqlite } from './db.js';
+import { files, file_dependencies, llm_jobs } from './schema.js';
 import type { FileNode, PackageDependency } from '../types.js';
+import type { ExportSnapshot } from '../change-detector/types.js';
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -255,4 +256,83 @@ export function getAllFiles(): FileNode[] {
     .orderBy(asc(files.path))
     .all()
     .map((r: FileRow) => rowToFileNode(r, false));
+}
+
+// ─── Exports snapshot ─────────────────────────────────────────────────────────
+
+/**
+ * Retrieves the stored ExportSnapshot for a file, or null if none stored.
+ * Uses a raw SQL query to read the exports_snapshot column directly, avoiding
+ * the need to go through FileNode deserialization.
+ */
+export function getExportsSnapshot(filePath: string): ExportSnapshot | null {
+  // Use raw sqlite for direct column access — avoids rowToFileNode complexity
+  const sqlite = getSqlite();
+  const row = sqlite
+    .prepare('SELECT exports_snapshot FROM files WHERE path = ?')
+    .get(filePath) as { exports_snapshot: string | null } | undefined;
+
+  if (!row || row.exports_snapshot === null || row.exports_snapshot === undefined) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(row.exports_snapshot) as ExportSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stores an ExportSnapshot for a file. Uses an UPSERT to create the row if
+ * it doesn't exist yet (first-parse case), or update exports_snapshot if it does.
+ *
+ * Note: Only the exports_snapshot column is affected — other columns are
+ * unchanged if the row already exists.
+ */
+export function setExportsSnapshot(filePath: string, snapshot: ExportSnapshot): void {
+  const sqlite = getSqlite();
+  const json = JSON.stringify(snapshot);
+
+  // Try update first; if no row exists, insert a minimal row with the snapshot.
+  // The files table requires path and name to be NOT NULL.
+  const updated = sqlite
+    .prepare('UPDATE files SET exports_snapshot = ? WHERE path = ?')
+    .run(json, filePath);
+
+  if (updated.changes === 0) {
+    // Row doesn't exist — insert with minimal required fields
+    const name = filePath.split('/').pop() ?? filePath;
+    sqlite
+      .prepare(
+        'INSERT INTO files (path, name, is_directory, exports_snapshot) VALUES (?, ?, 0, ?)'
+      )
+      .run(filePath, name, json);
+  }
+}
+
+// ─── LLM jobs ─────────────────────────────────────────────────────────────────
+
+/**
+ * Inserts a new pending LLM job into the llm_jobs table.
+ * Used by the change detection system to queue async LLM classification jobs
+ * for unsupported languages (CHNG-03).
+ */
+export function insertLlmJob(params: {
+  file_path: string;
+  job_type: 'summary' | 'concepts' | 'change_impact';
+  priority_tier: number;
+  payload?: string;
+}): void {
+  const db = getDb();
+  db.insert(llm_jobs)
+    .values({
+      file_path: params.file_path,
+      job_type: params.job_type,
+      priority_tier: params.priority_tier,
+      status: 'pending',
+      created_at: new Date(Date.now()),
+      payload: params.payload ?? null,
+    })
+    .run();
 }

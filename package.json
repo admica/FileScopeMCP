@@ -5,7 +5,7 @@
   "main": "dist/mcp-server.js",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/config-utils.ts src/coordinator.ts src/file-utils.ts src/file-watcher.ts src/global-state.ts src/logger.ts src/mcp-server.ts src/storage-utils.ts src/types.ts src/db/schema.ts src/db/db.ts src/db/repository.ts src/migrate/json-to-sqlite.ts --format=esm --target=es2020 --outdir=dist --platform=node",
+    "build": "esbuild src/config-utils.ts src/coordinator.ts src/file-utils.ts src/file-watcher.ts src/global-state.ts src/logger.ts src/mcp-server.ts src/storage-utils.ts src/types.ts src/db/schema.ts src/db/db.ts src/db/repository.ts src/migrate/json-to-sqlite.ts src/change-detector/types.ts src/change-detector/ast-parser.ts src/change-detector/semantic-diff.ts --format=esm --target=es2020 --outdir=dist --platform=node",
     "typecheck": "tsc --noEmit",
     "start": "node dist/mcp-server.js",
     "test": "vitest",
@@ -16,6 +16,9 @@
     "better-sqlite3": "^12.6.2",
     "chokidar": "^3.6.0",
     "drizzle-orm": "^0.45.1",
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2",
     "zod": "^3.25.28"
   },
   "devDependencies": {

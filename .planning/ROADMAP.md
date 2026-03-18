@@ -63,11 +63,11 @@ Plans:
   3. Editing a file in an unsupported language (e.g., Go, Rust) produces a SemanticChangeSummary via LLM diff fallback with a best-effort change classification
   4. The TS/JS dependency import parser uses AST extraction instead of regex, eliminating false-positive dependency edges from string literals and comments
   5. The SemanticChangeSummary type is a stable TypeScript interface that CascadeEngine (Phase 4) can consume without changes to its contract
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 03-01: tree-sitter integration — validate build pipeline (esbuild external flag, native addon copy); implement AST parser for TS/JS producing SemanticChangeSummary
-- [ ] 03-02: LLM diff fallback for unsupported languages; replace regex import parsing with AST-based extraction for TS/JS; wire ChangeDetector into coordinator's file-change handler
+- [ ] 03-01-PLAN.md — Types, tree-sitter AST parser, semantic diff engine, SQLite schema extension for exports snapshot
+- [ ] 03-02-PLAN.md — ChangeDetector class, LLM diff fallback, replace TS/JS regex imports with AST, wire into coordinator
 
 ### Phase 4: Cascade Engine + Staleness
 **Goal**: When a file's API surface changes, staleness propagates through the dependency graph to all affected files — with per-field granularity, circular dependency protection, and priority-ordered job queuing

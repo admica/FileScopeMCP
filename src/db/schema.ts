@@ -15,6 +15,7 @@ export const files = sqliteTable('files', {
   summary_stale_since:        integer('summary_stale_since'),      // NULL = not stale
   concepts_stale_since:       integer('concepts_stale_since'),     // NULL = not stale
   change_impact_stale_since:  integer('change_impact_stale_since'), // NULL = not stale
+  exports_snapshot:           text('exports_snapshot'),             // JSON blob: ExportSnapshot | null
 }, (t) => [
   index('files_is_directory_idx').on(t.is_directory),
 ]);
@@ -55,6 +56,7 @@ export const llm_jobs = sqliteTable('llm_jobs', {
   completed_at:  integer('completed_at', { mode: 'timestamp_ms' }),
   error_message: text('error_message'),
   retry_count:   integer('retry_count').notNull().default(0),
+  payload:       text('payload'),  // JSON payload for the job (e.g., diff for change_impact jobs)
 }, (t) => [
   index('jobs_status_priority_idx').on(t.status, t.priority_tier),
   index('jobs_file_path_idx').on(t.file_path),
