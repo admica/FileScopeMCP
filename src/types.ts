@@ -1,4 +1,5 @@
 import { getProjectRoot } from './global-state.js';
+import type { LLMConfig } from './llm/types.js';
 
 // File watching configuration
 export interface FileWatchingConfig {
@@ -17,6 +18,7 @@ export interface Config {
   excludePatterns: string[];
   fileWatching?: FileWatchingConfig;
   version: string;
+  llm?: LLMConfig;
 }
 
 // Define concrete classes rather than just interfaces to ensure proper compilation

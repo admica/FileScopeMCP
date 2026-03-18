@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { z } from 'zod';
 import { Config, FileWatchingConfig } from './types.js';
+import { LLMConfigSchema } from './llm/types.js';
 
 // Define the FileWatchingConfig schema
 const FileWatchingSchema = z.object({
@@ -19,7 +20,8 @@ const ConfigSchema = z.object({
   baseDirectory: z.string(),
   excludePatterns: z.array(z.string()),
   fileWatching: FileWatchingSchema,
-  version: z.string()
+  version: z.string(),
+  llm: LLMConfigSchema,
 });
 
 // Verify the schema matches our Config type
