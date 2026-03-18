@@ -21,7 +21,7 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 - [x] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
 - [x] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
-- [ ] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
+- [x] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
 - [x] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
 - [x] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
 
@@ -37,7 +37,7 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 - [x] **LLM-01**: Background LLM automatically generates/updates file summaries when a file or its dependencies change
 - [x] **LLM-02**: Background LLM auto-extracts structured concepts per file (functions, classes, interfaces, exports) as structured JSON
-- [ ] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
+- [x] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
 - [x] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
 - [x] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
 - [x] **LLM-06**: Background LLM can be toggled on/off via config or MCP tool call — system works fully without it (structural metadata only)
@@ -95,7 +95,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-07 | Phase 1 → Phase 6 | Complete (06) |
 | CHNG-01 | Phase 3 | Complete (03-01) |
 | CHNG-02 | Phase 3 | Complete (03-01) |
-| CHNG-03 | Phase 3 → Phase 7 | Pending |
+| CHNG-03 | Phase 3 → Phase 7 | Complete (07-01) |
 | CHNG-04 | Phase 3 | Complete (03-01) |
 | CHNG-05 | Phase 3 | Complete |
 | CASC-01 | Phase 4 | Complete (04-01) |
@@ -105,7 +105,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASC-05 | Phase 4 | Complete (04-01) |
 | LLM-01 | Phase 5 | Complete |
 | LLM-02 | Phase 5 | Complete |
-| LLM-03 | Phase 5 → Phase 7 | Pending |
+| LLM-03 | Phase 5 → Phase 7 | Complete (07-01) |
 | LLM-04 | Phase 5 | Complete |
 | LLM-05 | Phase 5 | Complete |
 | LLM-06 | Phase 5 | Complete |
@@ -122,4 +122,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-03-02*
-*Last updated: 2026-03-18 — All 9 partial requirements verified and marked Complete (06) in Phase 6 plan 02*
+*Last updated: 2026-03-18 — CHNG-03 and LLM-03 marked Complete (07-01) in Phase 7 plan 01 — all 28 v1 requirements now complete*
