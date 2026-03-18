@@ -96,12 +96,12 @@ Plans:
   4. LLM calls respect a configurable token budget cap and per-minute rate limit; when the budget is exhausted the system writes error state to SQLite and stops queuing new jobs until the next window
   5. Files matching existing exclude patterns are never passed to the LLM pipeline — the same patterns that suppress watching and tree inclusion suppress LLM calls
   6. Concurrent file changes do not produce duplicate or conflicting LLM writes — generation counters and a per-file pending-job map ensure only the latest result is committed
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 05-01: LLMAdapter — multi-provider interface (Vercel AI SDK); Anthropic, OpenAI-compatible, and Ollama provider wiring; config schema for provider selection
-- [ ] 05-02: LLMPipeline — dequeue jobs, run prompts (summary, concepts, change impact), write results to SQLite, clear staleness flags; generation counter + pending-job map for race safety
-- [ ] 05-03: Rate limiting, token budget cap, circuit breaker, on/off toggle (config + MCP tool); exclude pattern enforcement in pipeline; end-to-end integration test
+- [ ] 05-01-PLAN.md — LLM types, config extension, adapter factory (Vercel AI SDK), rate limiter, prompt templates, schema extension (concepts + change_impact columns)
+- [ ] 05-02-PLAN.md — LLMPipeline dequeue loop, job dispatch, result writing, staleness clearing, exclude pattern enforcement, unit tests
+- [ ] 05-03-PLAN.md — Wire LLMPipeline into coordinator lifecycle, toggle_llm MCP tool, token budget persistence across restarts
 
 ### Phase 6: Verification & Tech Debt Cleanup
 **Goal:** Close all 9 partial requirements by creating VERIFICATION.md files for completed phases, and fix integration issues and tech debt identified in the v1.0 audit
@@ -131,5 +131,5 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
 | 3. Semantic Change Detection | 2/2 | Complete   | 2026-03-18 |
 | 4. Cascade Engine + Staleness | 2/2 | Complete    | 2026-03-18 |
-| 5. LLM Processing Pipeline | 0/3 | Not started | - |
+| 5. LLM Processing Pipeline | 0/3 | In Progress | - |
 | 6. Verification & Tech Debt | 0/2 | Not started | - |
