@@ -15,10 +15,12 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, upsertFile } from './db/repository.js';
+import { getAllFiles, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
+import { LLMPipeline } from './llm/pipeline.js';
+import type { LLMConfig } from './llm/types.js';
 
 // Module-private async mutex to serialize all tree mutations.
 // Both the file-watcher callback and the integrity sweep mutate the SQLite state;
@@ -62,6 +64,7 @@ export class ServerCoordinator {
   private _initialized = false;
   private _projectRoot: string | null = null;
   private changeDetector: ChangeDetector | null = null;
+  private llmPipeline: LLMPipeline | null = null;
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -121,6 +124,30 @@ export class ServerCoordinator {
    */
   async reinitializeWatcher(): Promise<void> {
     await this.initializeFileWatcher();
+  }
+
+  /**
+   * Toggle LLM pipeline on/off at runtime (called by toggle_llm MCP tool).
+   * Does not persist the config change — caller is responsible for saving config.
+   */
+  toggleLlm(enabled: boolean): void {
+    if (enabled && !this.isLlmRunning()) {
+      const config = getConfig();
+      if (config?.llm) {
+        this.startLlmPipeline(config.llm);
+      } else {
+        log('toggleLlm: enabled=true but no llm config found');
+      }
+    } else if (!enabled && this.isLlmRunning()) {
+      this.stopLlmPipeline();
+    }
+  }
+
+  /**
+   * Returns true if the LLM pipeline is currently running.
+   */
+  isLlmRunning(): boolean {
+    return this.llmPipeline?.isRunning() ?? false;
   }
 
   /**
@@ -194,6 +221,13 @@ export class ServerCoordinator {
       this.startIntegritySweep();
 
       this._initialized = true;
+
+      // Start LLM pipeline if configured and enabled (non-blocking)
+      const appConfig = getConfig();
+      if (appConfig?.llm?.enabled) {
+        this.startLlmPipeline(appConfig.llm);
+      }
+
       return this._okResponse(`Project path set to ${projectRoot}. File tree built and saved to SQLite.`);
     } catch (error) {
       log('Failed to build file tree: ' + error);
@@ -257,6 +291,9 @@ export class ServerCoordinator {
     // Drain the mutex (wait for any in-flight mutations to complete)
     await this.treeMutex.run(async () => {});
 
+    // Stop LLM pipeline before closing DB (pipeline persists budget state)
+    this.stopLlmPipeline();
+
     // Close the database
     closeDatabase();
 
@@ -275,6 +312,31 @@ export class ServerCoordinator {
   // ---------------------------------------------------------------------------
   // Private methods
   // ---------------------------------------------------------------------------
+
+  private startLlmPipeline(llmConfig: LLMConfig): void {
+    this.llmPipeline = new LLMPipeline(llmConfig);
+    // Restore persisted lifetime token usage
+    const savedTokens = loadLlmRuntimeState('lifetime_tokens_used');
+    if (savedTokens !== null) {
+      const parsed = parseInt(savedTokens, 10);
+      if (!isNaN(parsed)) {
+        this.llmPipeline.getBudgetGuard().setLifetimeTokensUsed(parsed);
+        log(`LLM pipeline: restored ${parsed} lifetime tokens from persistent state`);
+      }
+    }
+    this.llmPipeline.start();
+    log('LLM pipeline started');
+  }
+
+  private stopLlmPipeline(): void {
+    if (this.llmPipeline === null) return;
+    // Persist budget state before stopping
+    const lifetimeTokens = this.llmPipeline.getBudgetGuard().getLifetimeTokensUsed();
+    saveLlmRuntimeState('lifetime_tokens_used', String(lifetimeTokens));
+    this.llmPipeline.stop();
+    this.llmPipeline = null;
+    log('LLM pipeline stopped');
+  }
 
   private _okResponse(text: string): ToolResponse {
     return { content: [{ type: 'text', text }] };
