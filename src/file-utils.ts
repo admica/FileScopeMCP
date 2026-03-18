@@ -238,7 +238,7 @@ async function extractPackageVersion(packageName: string, baseDir: string): Prom
 }
 
 // Helper function to check if a path matches any exclude pattern
-function isExcluded(filePath: string, baseDir: string): boolean {
+export function isExcluded(filePath: string, baseDir: string): boolean {
   // Add a failsafe check specifically for .git directory
   if (filePath.includes('.git') || path.basename(filePath) === '.git') {
     log(`🔴 SPECIAL CASE: .git directory/file detected: ${filePath}`);
