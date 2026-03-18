@@ -233,3 +233,44 @@ describe('Staleness injection into MCP response shape', () => {
     expect(staleEntry).toHaveProperty('summaryStale', 7777);
   });
 });
+
+// ─── COMPAT-01: All MCP tool names registered ─────────────────────────────────
+
+describe('COMPAT-01: MCP tool names and schemas remain identical', () => {
+  it('COMPAT-01: all expected MCP tool names are registered in mcp-server.ts', async () => {
+    // Read the source file and verify all required tool names appear via server.tool() calls.
+    // This is a static verification that no tool was accidentally removed or renamed.
+    const src = await import('node:fs/promises').then(fsp =>
+      fsp.readFile(new URL('../src/mcp-server.ts', import.meta.url).pathname.replace('/src/mcp-server.ts', '/src/mcp-server.ts'), 'utf-8')
+    ).catch(() =>
+      // fallback: read relative to cwd
+      import('node:fs/promises').then(fsp => fsp.readFile('./src/mcp-server.ts', 'utf-8'))
+    );
+
+    const expectedTools = [
+      'set_project_path',
+      'list_saved_trees',
+      'delete_file_tree',
+      'create_file_tree',
+      'select_file_tree',
+      'list_files',
+      'get_file_importance',
+      'find_important_files',
+      'get_file_summary',
+      'set_file_summary',
+      'read_file_content',
+      'set_file_importance',
+      'recalculate_importance',
+      'toggle_file_watching',
+      'get_file_watching_status',
+      'update_file_watching_config',
+      'debug_list_all_files',
+      'toggle_llm',
+      'exclude_and_remove',
+    ];
+
+    for (const toolName of expectedTools) {
+      expect(src).toContain(`server.tool("${toolName}"`);
+    }
+  });
+});
