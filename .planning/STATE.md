@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T05:34:33.595Z"
+last_updated: "2026-03-18T05:39:37.710Z"
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -22,10 +22,10 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 
 ## Current Position
 
-Phase: 5 of 5 (LLM Processing Pipeline) — IN PROGRESS
-Plan: 2 of 3 in current phase (05-01, 05-02 complete)
-Status: Phase 5 Plan 2 complete; ready for Plan 3 (LLMPipeline persistence wiring)
-Last activity: 2026-03-18 — Plan 05-02 complete: LLMPipeline dequeue loop (summary/concepts/change_impact), rate limiting, COMPAT-02 exclude check, 7 unit tests; LLM-01/02/03/08/COMPAT-02 fulfilled
+Phase: 5 of 5 (LLM Processing Pipeline) — COMPLETE
+Plan: 3 of 3 in current phase (05-01, 05-02, 05-03 complete)
+Status: Phase 5 complete — all 3 plans done; LLM pipeline fully operational end-to-end
+Last activity: 2026-03-18 — Plan 05-03 complete: LLMPipeline lifecycle wired into coordinator, budget persistence across restarts, toggle_llm MCP tool; LLM-06/LLM-07 fulfilled
 
 Progress: [██████████] 100%
 
@@ -44,7 +44,7 @@ Progress: [██████████] 100%
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
 | 03-semantic-change-detection | 2/3 | ~11 min | ~5.5 min |
 | 04-cascade-engine-staleness | 2/2 | ~19 min | ~9.5 min |
-| 05-llm-processing-pipeline | 2/3 | ~27 min | ~13 min |
+| 05-llm-processing-pipeline | 3/3 | ~35 min | ~12 min |
 
 **Recent Trend:**
 - Last 8 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min, 12 min, 7 min
@@ -101,6 +101,9 @@ Recent decisions affecting current work:
 - [Phase 05-llm-processing-pipeline]: tokenBudget=0 in TokenBudgetGuard means unlimited — default construction allows all calls without footgun
 - [Phase 05-llm-processing-pipeline]: maxOutputTokens (not maxTokens) is the correct generateText parameter in ai@6 — LanguageModelV2 CallSettings uses maxOutputTokens
 - [Phase 05-llm-processing-pipeline]: Ollama JSON repair fallback: structured output failures fall back to plain generateText and JSON.parse on the text response
+- [Phase 05-llm-processing-pipeline]: LLM pipeline start is non-blocking (no await) in coordinator.init() per RESEARCH.md anti-pattern 6
+- [Phase 05-llm-processing-pipeline]: stopLlmPipeline() called before closeDatabase() in shutdown() — budget save requires open DB
+- [Phase 05-llm-processing-pipeline]: toggle_llm persists llm.enabled to config file so restart respects the toggle
 
 ### Pending Todos
 
@@ -113,5 +116,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Completed 05-llm-processing-pipeline 05-02-PLAN.md — LLMPipeline dequeue loop with summary/concepts/change_impact dispatch, rate limiting, COMPAT-02 exclude check, 7 unit tests; LLM-01/02/03/08/COMPAT-02 fulfilled.
+Stopped at: Completed 05-llm-processing-pipeline 05-03-PLAN.md — LLMPipeline lifecycle wired into coordinator (start/stop/budget persistence), toggle_llm MCP tool registered; LLM-06/LLM-07 fulfilled. Phase 5 complete.
 Resume file: None
