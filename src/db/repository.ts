@@ -117,9 +117,9 @@ export function upsertFile(node: FileNode): void {
         importance: row.importance,
         summary: row.summary,
         mtime: row.mtime,
-        summary_stale_since: row.summary_stale_since,
-        concepts_stale_since: row.concepts_stale_since,
-        change_impact_stale_since: row.change_impact_stale_since,
+        // Staleness columns are owned exclusively by CascadeEngine.
+        // Do NOT overwrite them on conflict — they are set by markStale().
+        // Fresh INSERT still uses fileNodeToRow values (null for new files).
       },
     })
     .run();
@@ -309,6 +309,48 @@ export function setExportsSnapshot(filePath: string, snapshot: ExportSnapshot): 
       )
       .run(filePath, name, json);
   }
+}
+
+// ─── Staleness ────────────────────────────────────────────────────────────────
+
+/**
+ * Marks all 3 staleness columns to `timestamp` for every file in `filePaths`.
+ * Uses a raw prepared statement inside a transaction for atomicity and speed.
+ * If a path doesn't exist in the DB, the UPDATE silently matches 0 rows (no throw).
+ * Owned exclusively by CascadeEngine — callers outside the cascade subsystem
+ * should not call this directly.
+ */
+export function markStale(filePaths: string[], timestamp: number): void {
+  const sqlite = getSqlite();
+  const stmt = sqlite.prepare(
+    'UPDATE files SET summary_stale_since = ?, concepts_stale_since = ?, change_impact_stale_since = ? WHERE path = ?'
+  );
+  const tx = sqlite.transaction(() => {
+    for (const p of filePaths) {
+      stmt.run(timestamp, timestamp, timestamp, p);
+    }
+  });
+  tx();
+}
+
+/**
+ * Inserts a pending LLM job only if no pending job with the same (file_path, job_type)
+ * already exists. Prevents duplicate job rows when cascades overlap.
+ * Uses getSqlite() for the existence check (raw SELECT) then delegates to insertLlmJob.
+ */
+export function insertLlmJobIfNotPending(
+  filePath: string,
+  jobType: 'summary' | 'concepts' | 'change_impact',
+  priorityTier: number
+): void {
+  const sqlite = getSqlite();
+  const existing = sqlite
+    .prepare(
+      "SELECT 1 FROM llm_jobs WHERE file_path = ? AND job_type = ? AND status = 'pending' LIMIT 1"
+    )
+    .get(filePath, jobType);
+  if (existing) return;
+  insertLlmJob({ file_path: filePath, job_type: jobType, priority_tier: priorityTier });
 }
 
 // ─── LLM jobs ─────────────────────────────────────────────────────────────────

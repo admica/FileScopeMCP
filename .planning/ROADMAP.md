@@ -67,7 +67,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Types, tree-sitter AST parser, semantic diff engine, SQLite schema extension for exports snapshot
-- [ ] 03-02-PLAN.md — ChangeDetector class, LLM diff fallback, replace TS/JS regex imports with AST, wire into coordinator
+- [x] 03-02-PLAN.md — ChangeDetector class, LLM diff fallback, replace TS/JS regex imports with AST, wire into coordinator
 
 ### Phase 4: Cascade Engine + Staleness
 **Goal**: When a file's API surface changes, staleness propagates through the dependency graph to all affected files — with per-field granularity, circular dependency protection, and priority-ordered job queuing
@@ -79,11 +79,11 @@ Plans:
   3. A project with circular dependencies (A imports B imports A) processes a cascade without hanging or stack-overflowing; a visited set terminates the walk
   4. LLM jobs written to the SQLite queue have priority tiers: tier 1 for interactive query promotion, tier 2 for file-change cascades, tier 3 for background sweeps
   5. A body-only change in any file produces zero new stale marks on dependents and zero new LLM job queue entries
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 04-01: CascadeEngine implementation — dependency graph walk, visited set, depth cap, per-field SQLite staleness writes; wire to ChangeDetector output
-- [ ] 04-02: Priority-tiered job queue (p-queue); LLM job record schema in SQLite; MCP response staleness timestamp injection
+- [ ] 04-01-PLAN.md — CascadeEngine BFS walk, repository staleness functions, upsertFile fix, coordinator wiring
+- [ ] 04-02-PLAN.md — MCP response staleness timestamp injection via getStaleness()
 
 ### Phase 5: LLM Processing Pipeline
 **Goal**: A background LLM pipeline autonomously regenerates file summaries, structured concept lists, and change impact assessments when files go stale — with configurable providers, rate limiting, and a clean on/off toggle
