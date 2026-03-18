@@ -21,17 +21,17 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 - [x] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
 - [x] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
-- [ ] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
+- [x] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
 - [x] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
-- [ ] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
+- [x] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
 
 ### Cascade & Staleness
 
-- [ ] **CASC-01**: When a file's API surface changes, all direct dependents in the dependency graph have their metadata marked stale
-- [ ] **CASC-02**: Staleness is tracked per semantic field: summary, concepts, and change_impact each have independent staleSince timestamps
+- [x] **CASC-01**: When a file's API surface changes, all direct dependents in the dependency graph have their metadata marked stale
+- [x] **CASC-02**: Staleness is tracked per semantic field: summary, concepts, and change_impact each have independent staleSince timestamps
 - [ ] **CASC-03**: MCP query responses include staleness timestamps alongside metadata so LLMs can decide whether to trust the data
-- [ ] **CASC-04**: Cascade propagation detects and handles circular dependencies without infinite loops
-- [ ] **CASC-05**: Cascade jobs are queued with priority ordering: interactive queries (tier 1) > file-change cascades (tier 2) > background sweeps (tier 3)
+- [x] **CASC-04**: Cascade propagation detects and handles circular dependencies without infinite loops
+- [x] **CASC-05**: Cascade jobs are queued with priority ordering: interactive queries (tier 1) > file-change cascades (tier 2) > background sweeps (tier 3)
 
 ### LLM Pipeline
 
@@ -95,9 +95,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-07 | Phase 1 → Phase 6 | Pending |
 | CHNG-01 | Phase 3 | Complete (03-01) |
 | CHNG-02 | Phase 3 | Complete (03-01) |
-| CHNG-03 | Phase 3 | Pending |
+| CHNG-03 | Phase 3 | Complete |
 | CHNG-04 | Phase 3 | Complete (03-01) |
-| CHNG-05 | Phase 3 | Pending |
+| CHNG-05 | Phase 3 | Complete |
 | CASC-01 | Phase 4 | Pending |
 | CASC-02 | Phase 4 | Pending |
 | CASC-03 | Phase 4 | Pending |

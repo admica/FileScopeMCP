@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: SQLite Storage** - Replace JSON flat-file storage with SQLite; migrate existing users transparently
 - [x] **Phase 2: Coordinator + Daemon Mode** - Extract coordinator from mcp-server.ts; enable standalone daemon operation (completed 2026-03-03)
 - [x] **Phase 3: Semantic Change Detection** - AST-level diff for TS/JS; LLM fallback for unsupported languages (completed 2026-03-18)
-- [ ] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers
+- [ ] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers (in progress)
 - [ ] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact
 - [ ] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure)
 
@@ -82,7 +82,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — CascadeEngine BFS walk, repository staleness functions, upsertFile fix, coordinator wiring
+- [x] 04-01-PLAN.md — CascadeEngine BFS walk, repository staleness functions, upsertFile fix, coordinator wiring
 - [ ] 04-02-PLAN.md — MCP response staleness timestamp injection via getStaleness()
 
 ### Phase 5: LLM Processing Pipeline
@@ -130,6 +130,6 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. SQLite Storage | 3/3 | Complete | 2026-03-02 |
 | 2. Coordinator + Daemon Mode | 2/2 | Complete   | 2026-03-03 |
 | 3. Semantic Change Detection | 2/2 | Complete   | 2026-03-18 |
-| 4. Cascade Engine + Staleness | 0/2 | Not started | - |
+| 4. Cascade Engine + Staleness | 1/2 | In progress | - |
 | 5. LLM Processing Pipeline | 0/3 | Not started | - |
 | 6. Verification & Tech Debt | 0/2 | Not started | - |

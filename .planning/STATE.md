@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T01:40:50.090Z"
+last_updated: "2026-03-18T04:15:00.000Z"
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 8
+  completed_plans: 8
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 3 — Semantic Change Detection
+**Current focus:** Phase 4 — CascadeEngine Staleness
 
 ## Current Position
 
-Phase: 3 of 5 (Semantic Change Detection)
-Plan: 2 of 3 in current phase (03-02 complete)
+Phase: 4 of 5 (CascadeEngine Staleness)
+Plan: 1 of 1 in current phase (04-01 complete)
 Status: In progress
-Last activity: 2026-03-17 — Plan 03-02 complete: ChangeDetector class, LLM diff fallback, coordinator integration, AST import extraction replacing TS/JS regex; CHNG-03, CHNG-04, CHNG-05 fulfilled
+Last activity: 2026-03-17 — Plan 04-01 complete: CascadeEngine BFS, markStale/insertLlmJobIfNotPending, upsertFile staleness fix, coordinator cascade wiring; CASC-01, CASC-02, CASC-04, CASC-05 fulfilled
 
-Progress: [███████░░░] 47%
+Progress: [████████░░] 55%
 
 ## Performance Metrics
 
@@ -43,9 +43,10 @@ Progress: [███████░░░] 47%
 | 01-sqlite-storage | 3/3 | ~43 min | ~14 min |
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
 | 03-semantic-change-detection | 2/3 | ~11 min | ~5.5 min |
+| 04-cascade-engine-staleness | 1/1 | ~12 min | ~12 min |
 
 **Recent Trend:**
-- Last 6 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min
+- Last 7 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min, 12 min
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -86,6 +87,11 @@ Recent decisions affecting current work:
 - [Phase 03-semantic-change-detection]: ChangeDetector._classifyWithLlmFallback returns 'unknown' immediately without caching — no schema change needed; Phase 5 can add content hashing for real diffs
 - [Phase 03-semantic-change-detection]: queueLlmDiffJob truncates at MAX_DIFF_BYTES=16384 with '... [truncated]' suffix to prevent DB bloat
 - [Phase 03-semantic-change-detection]: changeSummary in coordinator case 'change' block is void-cast to suppress unused warning; Phase 4 will wire it into CascadeEngine
+- [Phase 04-cascade-engine-staleness]: CascadeEngine uses raw better-sqlite3 prepared statements (not Drizzle) for markStale — transaction() API composes cleanly with loops
+- [Phase 04-cascade-engine-staleness]: upsertFile() conflict update path no longer includes staleness columns — CascadeEngine owns those columns exclusively
+- [Phase 04-cascade-engine-staleness]: markSelfStale sets only summary_stale_since and concepts_stale_since (NOT change_impact_stale_since) — body-only changes don't affect impact assessment
+- [Phase 04-cascade-engine-staleness]: cascadeStale in unlink case runs BEFORE removeFileNode so getDependents() can still find dependency edges
+- [Phase 04-cascade-engine-staleness]: MAX_CASCADE_DEPTH=10 — depth >= 10 stops BFS expansion; files at depths 0..10 visited (11 max hops)
 
 ### Pending Todos
 
@@ -98,5 +104,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-17
-Stopped at: Completed 03-semantic-change-detection 03-02-PLAN.md — ChangeDetector, LLM fallback, coordinator wiring, AST import extraction; CHNG-03, CHNG-04, CHNG-05 fulfilled
+Stopped at: Completed 04-cascade-engine-staleness 04-01-PLAN.md — CascadeEngine BFS, markStale, insertLlmJobIfNotPending, upsertFile staleness fix, coordinator wiring; CASC-01, CASC-02, CASC-04, CASC-05 fulfilled
 Resume file: None
