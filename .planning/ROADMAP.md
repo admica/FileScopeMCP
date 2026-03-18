@@ -18,6 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Cascade Engine + Staleness** - Propagate staleness through dependency graph; enqueue LLM jobs with priority tiers (completed 2026-03-18)
 - [x] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact (completed 2026-03-18)
 - [x] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure) (completed 2026-03-18)
+- [ ] **Phase 7: Fix change_impact Pipeline** - Wire queueLlmDiffJob into production, fix null payload in cascade jobs, logger cleanup (Gap Closure)
 
 ## Phase Details
 
@@ -120,6 +121,21 @@ Plans:
 - [ ] 06-01-PLAN.md — Logger extension, console.error cleanup, dead import removal, DB lifecycle refactor
 - [ ] 06-02-PLAN.md — VERIFICATION.md creation for Phase 1 and Phase 2, REQUIREMENTS.md traceability update
 
+### Phase 7: Fix change_impact Pipeline
+**Goal:** Wire the LLM diff fallback into the production code path so change_impact jobs carry proper payloads and the LLM pipeline can assess them — fixing the silent failure identified in the v1.0 audit
+**Depends on**: Phase 3, Phase 5
+**Requirements**: CHNG-03, LLM-03
+**Gap Closure:** Closes integration gap (Phase 3 → Phase 5 change_impact pipeline) and broken E2E flow #7 from v1.0 audit
+**Success Criteria** (what must be TRUE):
+  1. `queueLlmDiffJob` is called in production when a non-TS/JS file changes, producing a diff payload for the LLM
+  2. `change_impact` jobs queued by cascadeStale carry non-null payloads and are processed by LLMPipeline.runJob
+  3. E2E flow: non-TS/JS file change → heuristic fallback → cascadeStale → change_impact job with payload → LLM processes job
+  4. `console.warn` in ast-parser.ts replaced with `logger.warn`
+**Plans:** 0/1 plans created
+
+Plans:
+- [ ] 07-01-PLAN.md — Wire queueLlmDiffJob, fix change_impact payload, logger cleanup
+
 ## Progress
 
 **Execution Order:**
@@ -133,3 +149,4 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 4. Cascade Engine + Staleness | 2/2 | Complete    | 2026-03-18 |
 | 5. LLM Processing Pipeline | 3/3 | Complete   | 2026-03-18 |
 | 6. Verification & Tech Debt | 2/2 | Complete   | 2026-03-18 |
+| 7. Fix change_impact Pipeline | 0/1 | Planned    | — |
