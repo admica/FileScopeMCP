@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T04:15:00.000Z"
+last_updated: "2026-03-18T04:11:14.068Z"
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
   total_plans: 9
   completed_plans: 9
@@ -22,10 +22,10 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 
 ## Current Position
 
-Phase: 4 of 5 (CascadeEngine Staleness) — COMPLETE
-Plan: 2 of 2 in current phase (04-02 complete)
-Status: Phase 4 complete; ready for Phase 5
-Last activity: 2026-03-18 — Plan 04-02 complete: getStaleness() repository function, staleness injection into get_file_importance/find_important_files/get_file_summary MCP handlers; CASC-03 fulfilled
+Phase: 5 of 5 (LLM Processing Pipeline) — IN PROGRESS
+Plan: 1 of 3 in current phase (05-01 complete)
+Status: Phase 5 Plan 1 complete; ready for Plan 2 (LLMPipeline dequeue loop)
+Last activity: 2026-03-18 — Plan 05-01 complete: src/llm/ module (types, adapter, rate-limiter, prompts), Config.llm Zod schema, files.concepts/change_impact columns, llm_runtime_state table, repository job management functions; LLM-04/05/07 fulfilled
 
 Progress: [██████████] 100%
 
@@ -44,6 +44,7 @@ Progress: [██████████] 100%
 | 02-coordinator-daemon-mode | 2/3 | ~10 min | ~5 min |
 | 03-semantic-change-detection | 2/3 | ~11 min | ~5.5 min |
 | 04-cascade-engine-staleness | 2/2 | ~19 min | ~9.5 min |
+| 05-llm-processing-pipeline | 1/3 | ~15 min | ~15 min |
 
 **Recent Trend:**
 - Last 8 plans: 3 min, ~30 min, 6 min, 4 min, 7 min, 4 min, 12 min, 7 min
@@ -95,6 +96,9 @@ Recent decisions affecting current work:
 - [Phase 04-cascade-engine-staleness]: getStaleness uses raw better-sqlite3 prepared statement — consistent with getExportsSnapshot pattern for direct column reads
 - [Phase 04-cascade-engine-staleness]: MCP staleness injection uses conditional spread so null fields are always omitted — no API contract change for fresh files (CASC-03 backward compat)
 - [Phase 04-cascade-engine-staleness]: get_file_summary injects all three staleness fields (not just summaryStale) — LLMs see the full picture from any query
+- [Phase 05-llm-processing-pipeline]: LanguageModel (not LanguageModelV2) is the correct type export from ai@6 — LanguageModelV2 is in @ai-sdk/provider but not re-exported from ai package top-level
+- [Phase 05-llm-processing-pipeline]: Drizzle migration SQL breakpoints must be inline (-->statement-breakpoint suffix) not in comment lines above — block comments before breakpoints cause RangeError: no SQL statements
+- [Phase 05-llm-processing-pipeline]: tokenBudget=0 in TokenBudgetGuard means unlimited — default construction allows all calls without footgun
 
 ### Pending Todos
 
@@ -107,5 +111,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Completed 04-cascade-engine-staleness 04-02-PLAN.md — getStaleness() function, MCP staleness injection in get_file_importance/find_important_files/get_file_summary; CASC-03 fulfilled. Phase 4 complete.
+Stopped at: Completed 05-llm-processing-pipeline 05-01-PLAN.md — src/llm/ module (types/adapter/rate-limiter/prompts), Config.llm Zod schema, schema migration 0002, repository job management functions; LLM-04/05/07 fulfilled.
 Resume file: None

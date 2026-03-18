@@ -38,10 +38,10 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 - [ ] **LLM-01**: Background LLM automatically generates/updates file summaries when a file or its dependencies change
 - [ ] **LLM-02**: Background LLM auto-extracts structured concepts per file (functions, classes, interfaces, exports) as structured JSON
 - [ ] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
-- [ ] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
-- [ ] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
+- [x] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
+- [x] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
 - [ ] **LLM-06**: Background LLM can be toggled on/off via config or MCP tool call — system works fully without it (structural metadata only)
-- [ ] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
+- [x] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
 - [ ] **LLM-08**: When LLM is off, semantic metadata fields return null with appropriate staleness indicators
 
 ### Compatibility & Degradation
@@ -106,10 +106,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LLM-01 | Phase 5 | Pending |
 | LLM-02 | Phase 5 | Pending |
 | LLM-03 | Phase 5 | Pending |
-| LLM-04 | Phase 5 | Pending |
-| LLM-05 | Phase 5 | Pending |
+| LLM-04 | Phase 5 | Complete |
+| LLM-05 | Phase 5 | Complete |
 | LLM-06 | Phase 5 | Pending |
-| LLM-07 | Phase 5 | Pending |
+| LLM-07 | Phase 5 | Complete |
 | LLM-08 | Phase 5 | Pending |
 | COMPAT-01 | Phase 1 → Phase 6 | Pending |
 | COMPAT-02 | Phase 5 | Pending |
