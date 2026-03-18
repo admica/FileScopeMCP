@@ -16,6 +16,8 @@ import { log } from './logger.js';
 import { openDatabase, closeDatabase } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { getAllFiles, upsertFile } from './db/repository.js';
+import { ChangeDetector } from './change-detector/change-detector.js';
+import type { SemanticChangeSummary } from './change-detector/types.js';
 
 // Module-private async mutex to serialize all tree mutations.
 // Both the file-watcher callback and the integrity sweep mutate the SQLite state;
@@ -58,6 +60,7 @@ export class ServerCoordinator {
   private integritySweepInterval: NodeJS.Timeout | null = null;
   private _initialized = false;
   private _projectRoot: string | null = null;
+  private changeDetector: ChangeDetector | null = null;
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -144,6 +147,9 @@ export class ServerCoordinator {
 
     // Store project root on instance
     this._projectRoot = projectRoot;
+
+    // Initialize ChangeDetector for semantic change classification (Phase 3)
+    this.changeDetector = new ChangeDetector(projectRoot);
 
     // Acquire PID file guard — prevents concurrent daemons from corrupting the DB
     await this.acquirePidFile(projectRoot);
@@ -252,6 +258,9 @@ export class ServerCoordinator {
 
     // Close the database
     closeDatabase();
+
+    // Clear ChangeDetector reference
+    this.changeDetector = null;
 
     this._initialized = false;
     log('ServerCoordinator shutdown complete.');
@@ -391,8 +400,24 @@ export class ServerCoordinator {
 
             case 'change':
               if (fileWatchingConfig.watchForChanged) {
+                // 1. Run semantic change detection BEFORE updating file metadata
+                let changeSummary: SemanticChangeSummary | null = null;
+                if (this.changeDetector) {
+                  try {
+                    changeSummary = await this.changeDetector.classify(filePath);
+                    log(`[Coordinator] SemanticChange for ${filePath}: ${changeSummary.changeType} (affectsDependents=${changeSummary.affectsDependents})`);
+                  } catch (err) {
+                    log(`[Coordinator] Change detection failed for ${filePath}: ${err}`);
+                  }
+                }
+
+                // 2. Proceed with normal file update
                 log(`[Coordinator] CHANGE detected for ${filePath}, performing incremental update.`);
                 await updateFileNodeOnChange(filePath, tempTree, projectRoot);
+
+                // 3. Phase 4 CascadeEngine will consume changeSummary.affectsDependents
+                //    For now, log the result. Phase 4 will add cascade logic here.
+                void changeSummary; // suppress unused variable warning until Phase 4
               }
               break;
 
