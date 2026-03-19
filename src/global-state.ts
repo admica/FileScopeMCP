@@ -2,6 +2,7 @@ import { Config } from './types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { error as logError, info as logInfo, debug as logDebug } from './logger.js';
+import ignore, { Ignore } from 'ignore';
 
 // Global state management for the MCP server
 let _projectRoot: string = ''; // Default to empty string, will be set by initializeProject
@@ -10,6 +11,8 @@ let _config: Config | null = null;
 export function setProjectRoot(root: string) {
   _projectRoot = root;
   _customExcludesLoaded = false; // Reset so custom excludes are re-read for the new project
+  _filescopeIgnore = null;
+  _filescopeIgnoreLoaded = false;
   logInfo(`Global project root set to: ${_projectRoot}`);
 }
 
@@ -20,11 +23,17 @@ export function getProjectRoot(): string {
 export function setConfig(config: Config) {
   _config = config;
   _customExcludesLoaded = false; // Reset so custom excludes are re-merged with the new config
+  _filescopeIgnore = null;
+  _filescopeIgnoreLoaded = false;
   logDebug('Global config updated:', config);
 }
 
 // Cache for custom excludes so we don't re-read and re-append on every call
 let _customExcludesLoaded = false;
+
+// Cache for .filescopeignore rules
+let _filescopeIgnore: Ignore | null = null;
+let _filescopeIgnoreLoaded = false;
 
 export function getConfig(): Config | null {
   if (!_config) return null;
@@ -48,10 +57,33 @@ export function getConfig(): Config | null {
     } catch (err) {
       logError('Error loading custom excludes:', err);
     }
+
+    // Load .filescopeignore if present
+    try {
+      const filescopeignorePath = path.join(_projectRoot, '.filescopeignore');
+      if (fs.existsSync(filescopeignorePath)) {
+        const content = fs.readFileSync(filescopeignorePath, 'utf-8');
+        _filescopeIgnore = ignore();
+        _filescopeIgnore.add(content);
+        logInfo('.filescopeignore loaded successfully');
+      }
+    } catch (err) {
+      logError('Error loading .filescopeignore:', err);
+      _filescopeIgnore = null;
+    }
+    _filescopeIgnoreLoaded = true;
     _customExcludesLoaded = true;
   }
 
   return _config;
+}
+
+export function getFilescopeIgnore(): Ignore | null {
+  // Ensure lazy-load has run
+  if (!_filescopeIgnoreLoaded && _projectRoot) {
+    getConfig(); // triggers lazy load including .filescopeignore
+  }
+  return _filescopeIgnore;
 }
 
 export function addExclusionPattern(pattern: string): void {
