@@ -73,7 +73,10 @@ Plans:
   1. Go files with single-line `import "pkg"` and grouped `import (...)` blocks have their imported packages extracted and intra-project paths resolved to filesystem paths using the module name from `go.mod`
   2. Ruby files have `require` and `require_relative` calls extracted, with `require_relative` paths and local `require` paths resolved to `.rb` files in the project tree
   3. Go and Ruby files appear in dependency graphs with correct dependent/dependency relationships, and their importance scores reflect how many other files import them
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 12-01-PLAN.md — Go import parsing (regex extraction, go.mod resolution, importance scoring, tests)
+- [ ] 12-02-PLAN.md — Ruby import parsing (require/require_relative resolution, .rb probing, importance scoring, tests)
 
 ### Phase 13: Streaming Directory Scan
 **Goal**: Large codebases scan without loading all file nodes into memory at once — the directory scanner yields one FileNode at a time using an async generator
@@ -120,8 +123,8 @@ Plans:
 | 8. Integration Fixes | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 9. Verification Documentation | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
-| 11. .filescopeignore Support | 2/2 | Complete   | 2026-03-19 | - |
-| 12. Go and Ruby Language Support | v1.1 | 0/TBD | Not started | - |
+| 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
+| 12. Go and Ruby Language Support | v1.1 | 0/2 | Planning complete | - |
 | 13. Streaming Directory Scan | v1.1 | 0/TBD | Not started | - |
 | 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |
 | 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |
