@@ -91,49 +91,22 @@ export class PackageDependency {
         }
       }
     } else {
-      // For directly specified package imports
+      // For directly specified package imports (no node_modules in path)
       const parts = path.split('/');
       if (parts.length > 0) {
-        const lastPart = parts[parts.length - 1];
-        
-        if (path.includes('@supabase') || path.includes('@types') || path.includes('@firebase')) {
-          // Handle scoped package references in the path
-          for (const part of parts) {
-            if (part.startsWith('@')) {
-              const scopeName = part;
-              const nextIndex = parts.indexOf(part) + 1;
-              if (nextIndex < parts.length) {
-                const scopedPackage = parts[nextIndex];
-                pkg.scope = scopeName;
-                pkg.name = `${scopeName}/${scopedPackage}`;
-                break;
-              }
-            }
-          }
-        } else if (parts[0].startsWith('@')) {
-          // Scoped package
+        if (parts[0].startsWith('@')) {
+          // Scoped package (e.g., @types/node, @supabase/auth)
           if (parts.length > 1) {
             pkg.scope = parts[0];
             pkg.name = `${parts[0]}/${parts[1]}`;
           }
         } else {
-          // Extract package name from the path
-          // Check for common package names in the path
-          const commonPkgs = ['react', 'axios', 'uuid', 'yup', 'express', 'firebase', 'date-fns'];
-          
-          for (const commonPkg of commonPkgs) {
-            if (path.includes(`/${commonPkg}`) || path.includes(`\\${commonPkg}`)) {
-              pkg.name = commonPkg;
-              break;
-            }
-          }
-          
-          // If no common package was found, use the last part of the path
-          if (!pkg.name && lastPart) {
-            // Avoid using lastPart if it's a template literal
-            if (!this.isUnresolvedTemplateLiteral(lastPart)) {
-              pkg.name = lastPart;
-            }
+          // Use the first path segment as the package name.
+          // This handles bare specifiers like 'react', 'express', etc.
+          // without a hardcoded allowlist.
+          const candidate = parts[0];
+          if (candidate && !this.isUnresolvedTemplateLiteral(candidate)) {
+            pkg.name = candidate;
           }
         }
       }

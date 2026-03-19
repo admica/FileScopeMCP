@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
-import * as fsSync from "fs";
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { normalizeAndResolvePath } from "./storage-utils.js";
 import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.js';
@@ -765,7 +764,7 @@ export function setFileImportance(fileTree: FileNode, filePath: string, importan
   return findAndSetImportance(fileTree);
 }
 
-export async function createFileTree(baseDir: string): Promise<FileNode> {
+async function createFileTree(baseDir: string): Promise<FileNode> {
   const normalizedBaseDir = path.normalize(baseDir);
   const nodes = await scanDirectory(normalizedBaseDir);
   
