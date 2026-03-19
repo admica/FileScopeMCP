@@ -1400,21 +1400,29 @@ async function recalculateImportanceForAffected(
     activeProjectRoot: string
 ): Promise<void> {
   log(`[recalculateImportanceForAffected] Recalculating importance for paths: ${JSON.stringify(affectedPaths)}`);
-  // Removed reliance on getConfig()
 
-  const uniquePaths = [...new Set(affectedPaths)]; // Ensure uniqueness
+  // Collect all transitively affected nodes using BFS with a visited set
+  const visited = new Set<string>();
+  const queue = [...new Set(affectedPaths)];
 
-  for (const filePath of uniquePaths) {
+  while (queue.length > 0) {
+    const filePath = queue.shift()!;
+    if (visited.has(filePath)) continue;
+    visited.add(filePath);
+
     const node = findNodeByPath(activeFileTree, filePath);
     if (node && !node.isDirectory) {
-       const oldImportance = node.importance;
-       // Use the corrected importance calculation function
-       node.importance = calculateNodeImportance(node, activeProjectRoot);
-       if(oldImportance !== node.importance) {
-          log(`[recalculateImportanceForAffected] Importance for ${node.path} changed from ${oldImportance} to ${node.importance}`);
-          // Potential future enhancement: trigger recursive recalculation if importance changed significantly
-       }
-    } else {
+      const oldImportance = node.importance;
+      node.importance = calculateNodeImportance(node, activeProjectRoot);
+      if (oldImportance !== node.importance) {
+        log(`[recalculateImportanceForAffected] Importance for ${node.path} changed from ${oldImportance} to ${node.importance}`);
+        // Enqueue this node's dependents for recalculation (transitive propagation)
+        for (const depPath of (node.dependents ?? [])) {
+          if (!visited.has(depPath)) {
+            queue.push(depPath);
+          }
+        }
+      }
     }
   }
 }
