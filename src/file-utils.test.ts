@@ -516,3 +516,194 @@ describe('FileWatcher .filescopeignore integration', () => {
     expect(ignoredOption(srcPath)).toBe(false);
   });
 });
+
+describe('Go import parsing', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescopemcp-go-'));
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('readGoModuleName returns module name from valid go.mod content', async () => {
+    const { readGoModuleName } = await import('./file-utils.js');
+    fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module github.com/myorg/myrepo\n\ngo 1.21\n');
+    const result = await readGoModuleName(tempDir);
+    expect(result).toBe('github.com/myorg/myrepo');
+  });
+
+  it('readGoModuleName returns null when go.mod does not exist', async () => {
+    const { readGoModuleName } = await import('./file-utils.js');
+    const result = await readGoModuleName(tempDir);
+    expect(result).toBeNull();
+  });
+
+  it('resolveGoImports extracts single-line import as package dependency', async () => {
+    const goContent = 'package main\n\nimport "fmt"\n\nfunc main() {}\n';
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    expect(mainNode!.packageDependencies).toBeDefined();
+    expect(mainNode!.packageDependencies!.some(p => p.name === 'fmt')).toBe(true);
+  });
+
+  it('resolveGoImports extracts aliased import path, not alias', async () => {
+    const goContent = 'package main\n\nimport f "fmt"\n\nfunc main() {}\n';
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    expect(mainNode!.packageDependencies!.some(p => p.name === 'fmt')).toBe(true);
+    expect(mainNode!.packageDependencies!.some(p => p.name === 'f')).toBe(false);
+  });
+
+  it('resolveGoImports extracts blank import (_ alias)', async () => {
+    const goContent = 'package main\n\nimport _ "database/sql"\n\nfunc main() {}\n';
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    expect(mainNode!.packageDependencies!.some(p => p.name === 'database/sql')).toBe(true);
+  });
+
+  it('resolveGoImports extracts dot import (. alias)', async () => {
+    const goContent = 'package main\n\nimport . "testing"\n\nfunc main() {}\n';
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    expect(mainNode!.packageDependencies!.some(p => p.name === 'testing')).toBe(true);
+  });
+
+  it('resolveGoImports extracts grouped import block with multiple packages', async () => {
+    const goContent = `package main
+
+import (
+\t"fmt"
+\t"os"
+\t"net/http"
+)
+
+func main() {}
+`;
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    const pkgNames = mainNode!.packageDependencies!.map(p => p.name);
+    expect(pkgNames).toContain('fmt');
+    expect(pkgNames).toContain('os');
+    expect(pkgNames).toContain('net/http');
+  });
+
+  it('resolveGoImports resolves intra-project import when go.mod module matches', async () => {
+    // Create go.mod
+    fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module github.com/myorg/myrepo\n\ngo 1.21\n');
+    // Create intra-project directory
+    const internalDir = path.join(tempDir, 'internal', 'util');
+    fs.mkdirSync(internalDir, { recursive: true });
+    fs.writeFileSync(path.join(internalDir, 'helper.go'), 'package util\n');
+
+    const goContent = `package main
+
+import "github.com/myorg/myrepo/internal/util"
+
+func main() {}
+`;
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    // Intra-project import should resolve to a dependency path, not a package dependency
+    expect(mainNode!.dependencies!.length).toBeGreaterThan(0);
+    const depPath = mainNode!.dependencies![0];
+    expect(depPath).toContain('internal');
+    expect(depPath).toContain('util');
+  });
+
+  it('resolveGoImports treats all imports as package deps when moduleName is null (no go.mod)', async () => {
+    // No go.mod file
+    const goContent = `package main
+
+import "github.com/myorg/myrepo/internal/util"
+
+func main() {}
+`;
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    // Without go.mod, all imports become package dependencies
+    expect(mainNode!.packageDependencies!.some(p => p.name === 'github.com/myorg/myrepo/internal/util')).toBe(true);
+    expect(mainNode!.dependencies!.length).toBe(0);
+  });
+
+  it('resolveGoImports probes for directory existence for intra-project imports', async () => {
+    fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module github.com/myorg/myrepo\n\ngo 1.21\n');
+    // Do NOT create the internal/nonexistent directory
+
+    const goContent = `package main
+
+import "github.com/myorg/myrepo/internal/nonexistent"
+
+func main() {}
+`;
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, goContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    // Non-existent directory should NOT appear in dependencies
+    expect(mainNode!.dependencies!.length).toBe(0);
+  });
+
+  it('calculateInitialImportance returns >= 2 for .go files', async () => {
+    const goFile = path.join(tempDir, 'main.go');
+    fs.writeFileSync(goFile, 'package main\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const mainNode = tree.children?.find(c => c.name === 'main.go');
+    expect(mainNode).toBeDefined();
+    expect(mainNode!.importance).toBeGreaterThanOrEqual(2);
+  });
+
+  it('calculateInitialImportance returns >= 3 for go.mod', async () => {
+    fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module github.com/test/project\n\ngo 1.21\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const modNode = tree.children?.find(c => c.name === 'go.mod');
+    expect(modNode).toBeDefined();
+    expect(modNode!.importance).toBeGreaterThanOrEqual(3);
+  });
+});
