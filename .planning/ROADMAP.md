@@ -149,7 +149,7 @@ Plans:
   3. When token budget is exhausted, no new LLM jobs are inserted into the queue — isExhausted() is consulted before queuing
   4. `queueLlmDiffJob` uses `insertLlmJobIfNotPending` for dedup instead of `insertLlmJob`
   5. Tech debt resolved: commented-out console.warn in file-utils.ts removed, orphaned migrateJsonToSQLite export removed, ROADMAP.md Phase 6 checkboxes checked
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 08-01-PLAN.md — Dedup fix, circuit breaker, coordinator budget methods, tech debt cleanup
@@ -184,5 +184,5 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 
 | 5. LLM Processing Pipeline | 3/3 | Complete   | 2026-03-18 |
 | 6. Verification & Tech Debt | 2/2 | Complete   | 2026-03-18 |
 | 7. Fix change_impact Pipeline | 1/1 | Complete   | 2026-03-18 |
-| 8. Integration Fixes | 0/2 | In Progress | — |
+| 8. Integration Fixes | 1/2 | In Progress|  |
 | 9. Verification Documentation | 0/0 | Pending | — |

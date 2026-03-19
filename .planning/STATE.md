@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T15:58:06.517Z"
+last_updated: "2026-03-19T04:07:57.045Z"
 progress:
-  total_phases: 7
+  total_phases: 9
   completed_phases: 7
-  total_plans: 15
-  completed_plans: 15
+  total_plans: 17
+  completed_plans: 16
 ---
 
 # Project State
@@ -53,6 +53,7 @@ Progress: [██████████] 100%
 *Updated after each plan completion*
 | Phase 06-verification-tech-debt P01 | 6 | 2 tasks | 8 files |
 | Phase 06-verification-tech-debt P02 | 12 | 2 tasks | 4 files |
+| Phase 08-integration-fixes P01 | 4 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,9 @@ Recent decisions affecting current work:
 - [Phase 07-fix-change-impact-pipeline]: log() used in ast-parser.ts (not warn()) — parse failures suppressed in daemon mode
 - [Phase 07-fix-change-impact-pipeline]: ChangeContext interface internal to cascade-engine.ts (not exported); summary/concepts jobs never carry payload — only change_impact does
 - [Phase 07-fix-change-impact-pipeline]: Dependent payload content truncated at 14KB (leaves room for header in 16KB llm_jobs limit)
+- [Phase 08-integration-fixes]: isExhausted circuit breaker uses optional callback (() => boolean) in cascade opts — absent/undefined = backward compat
+- [Phase 08-integration-fixes]: Staleness marks unconditional in cascadeStale/markSelfStale — jobs re-queue when budget resets
+- [Phase 08-integration-fixes]: getLlmTokenBudget/getLlmMaxTokensPerMinute read from getConfig().llm (not pipeline internals) — config is source of truth
 
 ### Pending Todos
 
@@ -126,5 +130,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Completed 07-fix-change-impact-pipeline 07-01-PLAN.md — git-diff helper created, _classifyWithLlmFallback wired to queueLlmDiffJob, insertLlmJobIfNotPending extended with payload, cascadeStale extended with changeContext, coordinator passes changeContext; 176 tests pass; CHNG-03 and LLM-03 closed; v1.0 milestone COMPLETE.
+Stopped at: Completed 08-integration-fixes 08-01-PLAN.md — dedup fix (CHNG-03), budget circuit breaker (LLM-07), 4 coordinator budget methods, console.warn cleanup; 180 tests pass.
 Resume file: None

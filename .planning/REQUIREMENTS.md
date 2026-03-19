@@ -21,7 +21,7 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 - [ ] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
 - [ ] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
-- [ ] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
+- [x] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
 - [ ] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
 - [ ] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
 
@@ -41,7 +41,7 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 - [ ] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
 - [ ] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
 - [ ] **LLM-06**: Background LLM can be toggled on/off via config or MCP tool call — system works fully without it (structural metadata only)
-- [ ] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
+- [x] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
 - [ ] **LLM-08**: When LLM is off, semantic metadata fields return null with appropriate staleness indicators
 
 ### Compatibility & Degradation
