@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact (completed 2026-03-18)
 - [x] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure) (completed 2026-03-18)
 - [x] **Phase 7: Fix change_impact Pipeline** - Wire queueLlmDiffJob into production, fix null payload in cascade jobs, logger cleanup (Gap Closure) (completed 2026-03-18)
-- [ ] **Phase 8: Integration Fixes** - Fix toggle_llm sequencing bug, expose concepts/change_impact via MCP, budget exhaustion circuit breaker, dedup fix, tech debt cleanup (Gap Closure)
+- [x] **Phase 8: Integration Fixes** - Fix toggle_llm sequencing bug, expose concepts/change_impact via MCP, budget exhaustion circuit breaker, dedup fix, tech debt cleanup (Gap Closure)
 - [ ] **Phase 9: Verification Documentation** - Create VERIFICATION.md for Phases 3, 4, 5, 6, 7 to close 18 partial requirements (Gap Closure)
 
 ## Phase Details
@@ -149,11 +149,11 @@ Plans:
   3. When token budget is exhausted, no new LLM jobs are inserted into the queue — isExhausted() is consulted before queuing
   4. `queueLlmDiffJob` uses `insertLlmJobIfNotPending` for dedup instead of `insertLlmJob`
   5. Tech debt resolved: commented-out console.warn in file-utils.ts removed, orphaned migrateJsonToSQLite export removed, ROADMAP.md Phase 6 checkboxes checked
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 08-01-PLAN.md — Dedup fix, circuit breaker, coordinator budget methods, tech debt cleanup
-- [ ] 08-02-PLAN.md — Toggle_llm sequencing fix, MCP concepts/changeImpact exposure, get_llm_status tool
+- [x] 08-01-PLAN.md — Dedup fix, circuit breaker, coordinator budget methods, tech debt cleanup
+- [x] 08-02-PLAN.md — Toggle_llm sequencing fix, MCP concepts/changeImpact exposure, get_llm_status tool
 
 ### Phase 9: Verification Documentation
 **Goal:** Create VERIFICATION.md files for Phases 3, 4, 5, 6, 7 — citing specific test files, describe blocks, and test names as evidence — to close 18 partial requirements and bring all phases to the same verification standard as Phases 1-2
@@ -184,5 +184,5 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 
 | 5. LLM Processing Pipeline | 3/3 | Complete   | 2026-03-18 |
 | 6. Verification & Tech Debt | 2/2 | Complete   | 2026-03-18 |
 | 7. Fix change_impact Pipeline | 1/1 | Complete   | 2026-03-18 |
-| 8. Integration Fixes | 1/2 | In Progress|  |
+| 8. Integration Fixes | 2/2 | Complete   | 2026-03-18 |
 | 9. Verification Documentation | 0/0 | Pending | — |
