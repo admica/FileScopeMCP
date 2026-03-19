@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-19T04:07:57.045Z"
+last_updated: "2026-03-19T04:12:46.494Z"
 progress:
   total_phases: 9
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 17
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -22,12 +22,12 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 
 ## Current Position
 
-Phase: 7 of 7 (Fix change_impact Pipeline) — COMPLETE
-Plan: 1 of 1 complete in current phase
-Status: All phases complete — v1.0 milestone achieved
-Last activity: 2026-03-18 — Phase 7 complete: change_impact pipeline wired E2E (CHNG-03, LLM-03 closed)
+Phase: 8 of 9 (Integration Fixes) — COMPLETE
+Plan: 2 of 2 complete in current phase
+Status: Phase 8 complete — Phase 9 (Verification Documentation) remaining
+Last activity: 2026-03-18 — Phase 8 Plan 02 complete: toggle_llm sequencing fix, MCP concepts/changeImpact exposure, get_llm_status tool (LLM-02, LLM-03, LLM-06 closed)
 
-Progress: [██████████] 100%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [██████████] 100%
 | Phase 06-verification-tech-debt P01 | 6 | 2 tasks | 8 files |
 | Phase 06-verification-tech-debt P02 | 12 | 2 tasks | 4 files |
 | Phase 08-integration-fixes P01 | 4 | 2 tasks | 6 files |
+| Phase 08-integration-fixes P02 | 8 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,8 @@ Recent decisions affecting current work:
 - [Phase 08-integration-fixes]: isExhausted circuit breaker uses optional callback (() => boolean) in cascade opts — absent/undefined = backward compat
 - [Phase 08-integration-fixes]: Staleness marks unconditional in cascadeStale/markSelfStale — jobs re-queue when budget resets
 - [Phase 08-integration-fixes]: getLlmTokenBudget/getLlmMaxTokensPerMinute read from getConfig().llm (not pipeline internals) — config is source of truth
+- [Phase 08-integration-fixes]: toggle_llm default provider is openai-compatible (Ollama) with qwen3-coder:14b-instruct at localhost:11434 — local-first per locked decision
+- [Phase 08-integration-fixes]: get_llm_status reads budget state via coordinator methods (not pipeline internals) — coordinator is source of truth
 
 ### Pending Todos
 
@@ -130,5 +133,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Completed 08-integration-fixes 08-01-PLAN.md — dedup fix (CHNG-03), budget circuit breaker (LLM-07), 4 coordinator budget methods, console.warn cleanup; 180 tests pass.
+Stopped at: Completed 08-integration-fixes 08-02-PLAN.md — toggle_llm sequencing fix, MCP concepts/changeImpact exposure, get_llm_status tool; 180 tests pass.
 Resume file: None
