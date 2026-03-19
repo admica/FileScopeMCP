@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
-import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.js';
+import { getProjectRoot, getConfig, addExclusionPattern, getFilescopeIgnore } from './global-state.js';
 import { log } from './logger.js'; // Import the logger
 import { upsertFile, deleteFile, setDependencies } from './db/repository.js';
 import { extractSnapshot, isTreeSitterLanguage } from './change-detector/ast-parser.js';
@@ -258,7 +258,7 @@ async function extractPackageVersion(packageName: string, baseDir: string): Prom
 }
 
 // Helper function to check if a path matches any exclude pattern
-export function isExcluded(filePath: string, baseDir: string): boolean {
+export function isExcluded(filePath: string, baseDir: string, isDir?: boolean): boolean {
   // Add a failsafe check specifically for .git directory
   if (filePath.includes('.git') || path.basename(filePath) === '.git') {
     log(`🔴 SPECIAL CASE: .git directory/file detected: ${filePath}`);
@@ -286,9 +286,7 @@ export function isExcluded(filePath: string, baseDir: string): boolean {
   }
   
   if (!config.excludePatterns || config.excludePatterns.length === 0) {
-    log('❌ WARNING: No exclude patterns found in config!');
-    log(`Config object: ${JSON.stringify(config, null, 2)}`);
-    return false;
+    log('⚠️ NOTE: No excludePatterns in config — only .filescopeignore rules apply.');
   }
 
   // Get relative path for matching, normalize to forward slashes for cross-platform consistency
@@ -302,7 +300,7 @@ export function isExcluded(filePath: string, baseDir: string): boolean {
   log(`  - File name: ${fileName}`);
   log(`  - Platform: ${process.platform}, path separator: ${path.sep}`);
   
-  log(`\n🔍 Testing against ${config.excludePatterns.length} exclude patterns...`);
+  log(`\n🔍 Testing against ${config.excludePatterns?.length ?? 0} exclude patterns...`);
   
   // Special case check for .git and node_modules
   if (relativePath.includes('/.git/') || relativePath === '.git' || 
@@ -318,7 +316,7 @@ export function isExcluded(filePath: string, baseDir: string): boolean {
   }
   
   // Check each exclude pattern
-  for (let i = 0; i < config.excludePatterns.length; i++) {
+  for (let i = 0; i < (config.excludePatterns?.length ?? 0); i++) {
     const pattern = config.excludePatterns[i];
     log(`\n  [${i+1}/${config.excludePatterns.length}] Testing pattern: "${pattern}"`);
     
@@ -350,6 +348,23 @@ export function isExcluded(filePath: string, baseDir: string): boolean {
     }
   }
   
+  // Check .filescopeignore rules (gitignore syntax via 'ignore' package)
+  const ig = getFilescopeIgnore();
+  if (ig) {
+    const rel = path.relative(baseDir, filePath).replace(/\\/g, '/');
+    if (rel && !rel.startsWith('..')) {
+      if (ig.ignores(rel)) {
+        log(`MATCH! Path ${rel} matches .filescopeignore rule`);
+        return true;
+      }
+      // For directories, also test with trailing slash (gitignore: "dist/" means directory-only)
+      if (isDir && ig.ignores(rel + '/')) {
+        log(`MATCH! Directory ${rel}/ matches .filescopeignore rule`);
+        return true;
+      }
+    }
+  }
+
   log(`❌ No pattern matches found for ${relativePath}`);
   log(`===== END EXCLUDE CHECK =====\n`);
   return false;
@@ -455,7 +470,7 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
 
     // Here's the critical exclusion check
     log(`  🔍 Checking if path should be excluded: ${normalizedFullPath}`);
-    const shouldExclude = isExcluded(normalizedFullPath, normalizedBaseDir);
+    const shouldExclude = isExcluded(normalizedFullPath, normalizedBaseDir, entry.isDirectory());
     log(`  🔍 Exclusion check result: ${shouldExclude ? 'EXCLUDE ✅' : 'INCLUDE ❌'}`);
     
     if (shouldExclude) {
@@ -1475,7 +1490,7 @@ export async function integrityCheck(
         const normalizedFullPath = normalizePath(fullPath);
 
         // Skip excluded paths
-        if (isExcluded(fullPath, projectRoot)) continue;
+        if (isExcluded(fullPath, projectRoot, entry.isDirectory())) continue;
 
         if (entry.isDirectory()) {
           await walkDir(fullPath);

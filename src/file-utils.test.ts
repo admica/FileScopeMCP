@@ -1,7 +1,10 @@
-import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp, calculateImportance } from './file-utils';
+import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp, calculateImportance, isExcluded } from './file-utils';
 import { FileNode } from './types';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { setProjectRoot, setConfig } from './global-state';
 
 describe('canonicalizePath', () => {
   it('should return an empty string for empty input', () => {
@@ -337,5 +340,80 @@ describe('transitive importance propagation', () => {
     expect(fileIsolated.importance).toBeDefined();
     expect(fileIsolated.importance!).toBeGreaterThanOrEqual(0);
     expect(fileIsolated.importance!).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('.filescopeignore integration in isExcluded', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescopemcp-isexcluded-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns true for a file path matching a .filescopeignore pattern (dist/ pattern, dist/bundle.js path)', () => {
+    fs.writeFileSync(path.join(tempDir, '.filescopeignore'), 'dist/\n');
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+
+    const filePath = path.join(tempDir, 'dist', 'bundle.js');
+    expect(isExcluded(filePath, tempDir)).toBe(true);
+  });
+
+  it('returns true for a directory path matching a directory-only pattern (isDir=true)', () => {
+    fs.writeFileSync(path.join(tempDir, '.filescopeignore'), 'dist/\n');
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+
+    const dirPath = path.join(tempDir, 'dist');
+    expect(isExcluded(dirPath, tempDir, true)).toBe(true);
+  });
+
+  it('returns false for a file NOT matching any .filescopeignore pattern', () => {
+    fs.writeFileSync(path.join(tempDir, '.filescopeignore'), 'dist/\n');
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+
+    const filePath = path.join(tempDir, 'src', 'index.ts');
+    expect(isExcluded(filePath, tempDir)).toBe(false);
+  });
+
+  it('returns false for a negation pattern (*.log then !important.log, path is important.log)', () => {
+    fs.writeFileSync(path.join(tempDir, '.filescopeignore'), '*.log\n!important.log\n');
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+
+    const importantLog = path.join(tempDir, 'important.log');
+    expect(isExcluded(importantLog, tempDir)).toBe(false);
+  });
+
+  it('returns true for globstar patterns (**/build, path is packages/app/build/output.js)', () => {
+    fs.writeFileSync(path.join(tempDir, '.filescopeignore'), '**/build\n');
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+
+    const filePath = path.join(tempDir, 'packages', 'app', 'build', 'output.js');
+    expect(isExcluded(filePath, tempDir)).toBe(true);
+  });
+
+  it('returns true for existing config.excludePatterns even when no .filescopeignore exists', () => {
+    // No .filescopeignore file
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: ['**/*.log'] } as any);
+
+    const filePath = path.join(tempDir, 'app.log');
+    expect(isExcluded(filePath, tempDir)).toBe(true);
+  });
+
+  it('returns true for coverage/ directory-only pattern with isDir=true', () => {
+    fs.writeFileSync(path.join(tempDir, '.filescopeignore'), 'coverage/\n');
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+
+    const dirPath = path.join(tempDir, 'coverage');
+    expect(isExcluded(dirPath, tempDir, true)).toBe(true);
   });
 });
