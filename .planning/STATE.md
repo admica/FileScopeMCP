@@ -1,14 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Autonomous File Metadata
-status: completed
-last_updated: "2026-03-19"
+milestone: v1.1
+milestone_name: Hardening
+status: unknown
+stopped_at: Completed 10-01-PLAN.md
+last_updated: "2026-03-19T16:22:35.160Z"
+last_activity: 2026-03-19 — v1.1 roadmap created
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 19
-  completed_plans: 19
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State
@@ -18,18 +20,45 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** v1.0 complete — planning next milestone
+**Current focus:** Phase 10 — code-quality-and-bug-fixes
 
 ## Current Position
 
-Milestone: v1.0 Autonomous File Metadata — SHIPPED 2026-03-19
-Status: All 9 phases complete, 19/19 plans executed, 28/28 requirements verified
+Phase: 10 (code-quality-and-bug-fixes) — EXECUTING
+Plan: 1 of 2
+
+## Performance Metrics
+
+**Velocity:**
+
+- Total plans completed: 0 (v1.1)
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| v1.1 starts at Phase 10 | — | — | — |
+
+*Updated after each plan completion*
+| Phase 10-code-quality-and-bug-fixes P01 | 3 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
 ### Decisions
 
-Archived to PROJECT.md Key Decisions table.
+Decisions archived in PROJECT.md Key Decisions table.
+
+Key v1.1 decisions:
+
+- **Cycle detection is display-only for v1.1** — no cascade integration; `detect_cycles` and `get_cycles_for_file` are read-only MCP tools
+- **Tarjan's SCC implemented as pure TypeScript** — no third-party graph library; iterative (not recursive) to avoid call stack overflow on deep import chains
+- **tree-sitter grammars wrapped in try/catch** — ABI mismatch at load time must not crash coordinator; regex fallback if grammar unavailable
+- **.filescopeignore merges into config.excludePatterns at init** — single code path; scanner and watcher automatically benefit (Option A)
+- **Streaming scan uses two-pass constraint** — metadata collection streamed; dependency resolution deferred until all paths are indexed
+- [Phase 10-code-quality-and-bug-fixes]: Removed commonPkgs hardcoded list in PackageDependency.fromPath — structural detection is sufficient without false positive risk
+- [Phase 10-code-quality-and-bug-fixes]: stabilityTimer approach: 60s consecutive uptime required to reset backoff counter, timer cleared on any restart or shutdown
 
 ### Pending Todos
 
@@ -37,7 +66,9 @@ None.
 
 ### Blockers/Concerns
 
-None — milestone shipped.
+- **Phase 10**: `createRequire` usage in file-utils.ts must be explicitly excluded before any fs import consolidation diff is written — it is the ESM-to-CJS bridge for better-sqlite3 and tree-sitter
+- **Phase 12**: Go intra-project import resolution needs validation against real Go projects before finalizing (go.mod module name extraction behavior when go.mod is absent)
+- **Phase 13**: Exact coordinator integration point for streaming scan needs design documentation before implementation (AsyncMutex wrapping during streaming)
 
 ### Quick Tasks Completed
 
@@ -47,6 +78,6 @@ None — milestone shipped.
 
 ## Session Continuity
 
-Last activity: 2026-03-19 - Completed quick task 1: Update README.md and root ROADMAP.md to reflect v1.0 completion
-Stopped at: v1.0 milestone completed and archived.
+Last activity: 2026-03-19 — v1.1 roadmap created
+Stopped at: Completed 10-01-PLAN.md
 Resume file: None
