@@ -151,6 +151,35 @@ export class ServerCoordinator {
   }
 
   /**
+   * Returns true if the LLM lifetime token budget has been exhausted.
+   * Used as a circuit breaker to prevent new jobs from being inserted.
+   */
+  isLlmBudgetExhausted(): boolean {
+    return this.llmPipeline?.getBudgetGuard().isExhausted() ?? false;
+  }
+
+  /**
+   * Returns the total number of tokens consumed across the lifetime of the pipeline.
+   */
+  getLlmLifetimeTokensUsed(): number {
+    return this.llmPipeline?.getBudgetGuard().getLifetimeTokensUsed() ?? 0;
+  }
+
+  /**
+   * Returns the configured lifetime token budget (0 = unlimited).
+   */
+  getLlmTokenBudget(): number {
+    return getConfig()?.llm?.tokenBudget ?? 0;
+  }
+
+  /**
+   * Returns the configured per-minute token rate limit (default 40000).
+   */
+  getLlmMaxTokensPerMinute(): number {
+    return getConfig()?.llm?.maxTokensPerMinute ?? 40_000;
+  }
+
+  /**
    * Initialize or re-initialize the project analysis.
    * @param projectPath Absolute path to the project directory.
    * @returns ToolResponse indicating success or failure.
@@ -492,10 +521,10 @@ export class ServerCoordinator {
                       changeType: changeSummary.changeType,
                       changedFilePath: filePath,
                     };
-                    cascadeStale(filePath, { timestamp: Date.now(), changeContext });
+                    cascadeStale(filePath, { timestamp: Date.now(), changeContext, isExhausted: () => this.isLlmBudgetExhausted() });
                   } else {
                     // Body-only change — mark only this file's summary and concepts stale
-                    markSelfStale(filePath, { timestamp: Date.now() });
+                    markSelfStale(filePath, { timestamp: Date.now(), isExhausted: () => this.isLlmBudgetExhausted() });
                   }
                 }
               }
@@ -505,7 +534,7 @@ export class ServerCoordinator {
               if (fileWatchingConfig.watchForDeleted) {
                 // Cascade BEFORE removeFileNode: dependency edges must still exist
                 // so getDependents() can find all dependents of the deleted file.
-                cascadeStale(filePath, { timestamp: Date.now() });
+                cascadeStale(filePath, { timestamp: Date.now(), isExhausted: () => this.isLlmBudgetExhausted() });
                 log(`[Coordinator] Calling removeFileNode for ${filePath}`);
                 await removeFileNode(filePath, tempTree, projectRoot);
               }

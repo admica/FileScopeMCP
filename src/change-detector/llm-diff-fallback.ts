@@ -2,7 +2,7 @@
 // LLM job queuing for unsupported languages (CHNG-03).
 // When a file change cannot be classified via tree-sitter AST, this module
 // queues an async LLM job so Phase 5's LLM pipeline can classify it later.
-import { insertLlmJob } from '../db/repository.js';
+import { insertLlmJobIfNotPending } from '../db/repository.js';
 import { log } from '../logger.js';
 import type { SemanticChangeSummary } from './types.js';
 
@@ -29,12 +29,7 @@ export function queueLlmDiffJob(filePath: string, diff: string): SemanticChangeS
       : diff;
 
   try {
-    insertLlmJob({
-      file_path: filePath,
-      job_type: 'change_impact',
-      priority_tier: 2,
-      payload: truncatedDiff,
-    });
+    insertLlmJobIfNotPending(filePath, 'change_impact', 2, truncatedDiff);
   } catch (err) {
     // Non-fatal: if DB is unavailable, log a warning and continue.
     // The function still returns the conservative summary — the coordinator

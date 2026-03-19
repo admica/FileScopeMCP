@@ -247,6 +247,21 @@ describe('ast-parser logger usage', () => {
   });
 });
 
+// ─── queueLlmDiffJob dedup source check ─────────────────────────────────────
+
+describe('queueLlmDiffJob dedup', () => {
+  it('llm-diff-fallback.ts source uses insertLlmJobIfNotPending (not raw insertLlmJob)', async () => {
+    const fallbackSource = await fs.readFile(
+      new URL('./llm-diff-fallback.ts', import.meta.url),
+      'utf-8'
+    );
+    // Must NOT contain the non-dedup raw call pattern
+    expect(fallbackSource).not.toContain('insertLlmJob(');
+    // Must contain the dedup function
+    expect(fallbackSource).toContain('insertLlmJobIfNotPending');
+  });
+});
+
 // ─── queueLlmDiffJob tests ──────────────────────────────────────────────────
 
 describe('queueLlmDiffJob', () => {

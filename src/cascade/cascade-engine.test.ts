@@ -454,3 +454,75 @@ describe('markSelfStale', () => {
     expect(types).not.toContain('change_impact');
   });
 });
+
+// ─── cascadeStale with isExhausted guard ─────────────────────────────────────
+
+describe('cascadeStale with isExhausted guard', () => {
+  it('isExhausted=true skips job insertion but marks stale', () => {
+    clearTables();
+    insertFile('/exhausted-A.ts');
+    insertFile('/exhausted-B.ts');
+    insertDep('/exhausted-B.ts', '/exhausted-A.ts');
+
+    cascadeStale('/exhausted-A.ts', {
+      timestamp: 9000,
+      isExhausted: () => true,
+    });
+
+    const sqlite = getSqlite();
+    // Staleness marks MUST be set even when budget is exhausted
+    const aRow = sqlite
+      .prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?')
+      .get('/exhausted-A.ts') as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null } | undefined;
+    const bRow = sqlite
+      .prepare('SELECT summary_stale_since FROM files WHERE path = ?')
+      .get('/exhausted-B.ts') as { summary_stale_since: number | null } | undefined;
+
+    expect(aRow?.summary_stale_since).toBe(9000);
+    expect(aRow?.concepts_stale_since).toBe(9000);
+    expect(aRow?.change_impact_stale_since).toBe(9000);
+    expect(bRow?.summary_stale_since).toBe(9000);
+
+    // NO LLM jobs should be inserted when budget is exhausted
+    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string }[];
+    expect(jobs).toHaveLength(0);
+  });
+
+  it('isExhausted=false inserts jobs normally (backward compat)', () => {
+    clearTables();
+    insertFile('/not-exhausted.ts');
+
+    cascadeStale('/not-exhausted.ts', {
+      timestamp: 9100,
+      isExhausted: () => false,
+    });
+
+    const sqlite = getSqlite();
+    // 3 jobs for 1 file (summary, concepts, change_impact)
+    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string; job_type: string }[];
+    expect(jobs).toHaveLength(3);
+  });
+
+  it('markSelfStale with isExhausted=true skips job insertion but marks stale', () => {
+    clearTables();
+    insertFile('/mark-self-exhausted.ts');
+
+    markSelfStale('/mark-self-exhausted.ts', {
+      timestamp: 9200,
+      isExhausted: () => true,
+    });
+
+    const sqlite = getSqlite();
+    const row = sqlite
+      .prepare('SELECT summary_stale_since, concepts_stale_since FROM files WHERE path = ?')
+      .get('/mark-self-exhausted.ts') as { summary_stale_since: number | null; concepts_stale_since: number | null } | undefined;
+
+    // Staleness columns must be set
+    expect(row?.summary_stale_since).toBe(9200);
+    expect(row?.concepts_stale_since).toBe(9200);
+
+    // NO jobs inserted when budget is exhausted
+    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string }[];
+    expect(jobs).toHaveLength(0);
+  });
+});

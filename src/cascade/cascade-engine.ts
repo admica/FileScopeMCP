@@ -70,9 +70,9 @@ function buildDependentPayload(changeContext: ChangeContext, dependentFilePath: 
  */
 export function cascadeStale(
   changedFilePath: string,
-  opts: { timestamp: number; changeContext?: ChangeContext }
+  opts: { timestamp: number; changeContext?: ChangeContext; isExhausted?: () => boolean }
 ): void {
-  const { timestamp, changeContext } = opts;
+  const { timestamp, changeContext, isExhausted } = opts;
   const visited = new Set<string>();
   const queue: Array<[string, number]> = [[changedFilePath, 0]];
   visited.add(changedFilePath);
@@ -93,12 +93,14 @@ export function cascadeStale(
       }
     }
 
-    // Mark this file stale and queue 3 jobs
+    // Mark this file stale — always applies even when budget is exhausted
     // summary and concepts jobs never get payload — only change_impact does
     markStale([filePath], timestamp);
-    insertLlmJobIfNotPending(filePath, 'summary', 2);
-    insertLlmJobIfNotPending(filePath, 'concepts', 2);
-    insertLlmJobIfNotPending(filePath, 'change_impact', 2, changeImpactPayload);
+    if (!isExhausted?.()) {
+      insertLlmJobIfNotPending(filePath, 'summary', 2);
+      insertLlmJobIfNotPending(filePath, 'concepts', 2);
+      insertLlmJobIfNotPending(filePath, 'change_impact', 2, changeImpactPayload);
+    }
     totalVisited++;
 
     // Stop BFS expansion if at depth cap
@@ -125,8 +127,8 @@ export function cascadeStale(
  * Body-only changes don't affect the change impact assessment of the file.
  * Queues 2 LLM jobs: summary and concepts at priority tier 2.
  */
-export function markSelfStale(filePath: string, opts: { timestamp: number }): void {
-  const { timestamp } = opts;
+export function markSelfStale(filePath: string, opts: { timestamp: number; isExhausted?: () => boolean }): void {
+  const { timestamp, isExhausted } = opts;
   const sqlite = getSqlite();
   sqlite
     .prepare(
@@ -134,8 +136,10 @@ export function markSelfStale(filePath: string, opts: { timestamp: number }): vo
     )
     .run(timestamp, timestamp, filePath);
 
-  insertLlmJobIfNotPending(filePath, 'summary', 2);
-  insertLlmJobIfNotPending(filePath, 'concepts', 2);
+  if (!isExhausted?.()) {
+    insertLlmJobIfNotPending(filePath, 'summary', 2);
+    insertLlmJobIfNotPending(filePath, 'concepts', 2);
+  }
 
   log(`[CascadeEngine] markSelfStale: ${filePath} → summary and concepts marked stale`);
 }
