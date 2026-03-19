@@ -28,7 +28,7 @@ Requirements for v1.1 Hardening release. Each maps to roadmap phases.
 ### Language Support
 
 - [x] **LANG-01**: Go import parsing extracts dependencies from `import "pkg"` and grouped `import (...)` blocks, with `go.mod` module name resolution for intra-project paths
-- [ ] **LANG-02**: Ruby import parsing extracts dependencies from `require` and `require_relative` calls, with `.rb` extension probing for intra-project paths
+- [x] **LANG-02**: Ruby import parsing extracts dependencies from `require` and `require_relative` calls, with `.rb` extension probing for intra-project paths
 
 ### Cycle Detection
 
@@ -80,7 +80,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERF-02 | Phase 13 | Pending |
 | PERF-03 | Phase 14 | Pending |
 | LANG-01 | Phase 12 | Complete |
-| LANG-02 | Phase 12 | Pending |
+| LANG-02 | Phase 12 | Complete |
 | CYCL-01 | Phase 15 | Pending |
 | CYCL-02 | Phase 15 | Pending |
 
