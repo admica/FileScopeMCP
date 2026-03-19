@@ -19,35 +19,35 @@ Requirements for the autonomous metadata milestone. Each maps to roadmap phases.
 
 ### Change Detection
 
-- [x] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
-- [x] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
-- [x] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
-- [x] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
-- [x] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
+- [ ] **CHNG-01**: System performs AST-level diff on changed TS/JS files to distinguish export/type signature changes from body-only changes
+- [ ] **CHNG-02**: AST diff produces a typed SemanticChangeSummary that classifies what changed (exports, types, body, comments)
+- [ ] **CHNG-03**: For unsupported languages, system falls back to LLM-powered diff to summarize what semantically changed
+- [ ] **CHNG-04**: Body-only changes (internal logic, comments) only re-evaluate the changed file's own metadata, not dependents
+- [ ] **CHNG-05**: Export/type changes trigger cascade to direct dependents, marking their metadata stale
 
 ### Cascade & Staleness
 
-- [x] **CASC-01**: When a file's API surface changes, all direct dependents in the dependency graph have their metadata marked stale
-- [x] **CASC-02**: Staleness is tracked per semantic field: summary, concepts, and change_impact each have independent staleSince timestamps
-- [x] **CASC-03**: MCP query responses include staleness timestamps alongside metadata so LLMs can decide whether to trust the data
-- [x] **CASC-04**: Cascade propagation detects and handles circular dependencies without infinite loops
-- [x] **CASC-05**: Cascade jobs are queued with priority ordering: interactive queries (tier 1) > file-change cascades (tier 2) > background sweeps (tier 3)
+- [ ] **CASC-01**: When a file's API surface changes, all direct dependents in the dependency graph have their metadata marked stale
+- [ ] **CASC-02**: Staleness is tracked per semantic field: summary, concepts, and change_impact each have independent staleSince timestamps
+- [ ] **CASC-03**: MCP query responses include staleness timestamps alongside metadata so LLMs can decide whether to trust the data
+- [ ] **CASC-04**: Cascade propagation detects and handles circular dependencies without infinite loops
+- [ ] **CASC-05**: Cascade jobs are queued with priority ordering: interactive queries (tier 1) > file-change cascades (tier 2) > background sweeps (tier 3)
 
 ### LLM Pipeline
 
-- [x] **LLM-01**: Background LLM automatically generates/updates file summaries when a file or its dependencies change
-- [x] **LLM-02**: Background LLM auto-extracts structured concepts per file (functions, classes, interfaces, exports) as structured JSON
-- [x] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
-- [x] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
-- [x] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
-- [x] **LLM-06**: Background LLM can be toggled on/off via config or MCP tool call — system works fully without it (structural metadata only)
-- [x] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
-- [x] **LLM-08**: When LLM is off, semantic metadata fields return null with appropriate staleness indicators
+- [ ] **LLM-01**: Background LLM automatically generates/updates file summaries when a file or its dependencies change
+- [ ] **LLM-02**: Background LLM auto-extracts structured concepts per file (functions, classes, interfaces, exports) as structured JSON
+- [ ] **LLM-03**: Background LLM auto-assesses change impact per file (what breaks if this file changes, risk level, affected areas)
+- [ ] **LLM-04**: LLM provider is configurable via config — supports any OpenAI-compatible endpoint (Ollama, vLLM, OpenRouter), Anthropic API, and others
+- [ ] **LLM-05**: User can configure LLM provider via base URL + model name + API key in config file
+- [ ] **LLM-06**: Background LLM can be toggled on/off via config or MCP tool call — system works fully without it (structural metadata only)
+- [ ] **LLM-07**: LLM calls have token budget limits and rate limiting to prevent runaway costs
+- [ ] **LLM-08**: When LLM is off, semantic metadata fields return null with appropriate staleness indicators
 
 ### Compatibility & Degradation
 
 - [x] **COMPAT-01**: All 20+ existing MCP tool names, parameter schemas, and response shapes remain identical
-- [x] **COMPAT-02**: Existing exclude patterns are honored by the LLM pipeline (no LLM calls on excluded files)
+- [ ] **COMPAT-02**: Existing exclude patterns are honored by the LLM pipeline (no LLM calls on excluded files)
 - [x] **COMPAT-03**: System functions correctly with no LLM configured — file tree, dependencies, importance, and watching all work as before
 
 ## v2 Requirements
@@ -93,33 +93,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-05 | Phase 2 → Phase 6 | Complete (06) |
 | STOR-06 | Phase 2 → Phase 6 | Complete (06) |
 | STOR-07 | Phase 1 → Phase 6 | Complete (06) |
-| CHNG-01 | Phase 3 | Complete (03-01) |
-| CHNG-02 | Phase 3 | Complete (03-01) |
-| CHNG-03 | Phase 3 → Phase 7 | Complete (07-01) |
-| CHNG-04 | Phase 3 | Complete (03-01) |
-| CHNG-05 | Phase 3 | Complete |
-| CASC-01 | Phase 4 | Complete (04-01) |
-| CASC-02 | Phase 4 | Complete (04-01) |
-| CASC-03 | Phase 4 | Complete (04-02) |
-| CASC-04 | Phase 4 | Complete (04-01) |
-| CASC-05 | Phase 4 | Complete (04-01) |
-| LLM-01 | Phase 5 | Complete |
-| LLM-02 | Phase 5 | Complete |
-| LLM-03 | Phase 5 → Phase 7 | Complete (07-01) |
-| LLM-04 | Phase 5 | Complete |
-| LLM-05 | Phase 5 | Complete |
-| LLM-06 | Phase 5 | Complete |
-| LLM-07 | Phase 5 | Complete |
-| LLM-08 | Phase 5 | Complete |
+| CHNG-01 | Phase 3 → Phase 9 | Pending (verification) |
+| CHNG-02 | Phase 3 → Phase 9 | Pending (verification) |
+| CHNG-03 | Phase 3 → Phase 7 → Phase 8, 9 | Pending (integration fix + verification) |
+| CHNG-04 | Phase 3 → Phase 9 | Pending (verification) |
+| CHNG-05 | Phase 3 → Phase 9 | Pending (verification) |
+| CASC-01 | Phase 4 → Phase 9 | Pending (verification) |
+| CASC-02 | Phase 4 → Phase 9 | Pending (verification) |
+| CASC-03 | Phase 4 → Phase 9 | Pending (verification) |
+| CASC-04 | Phase 4 → Phase 9 | Pending (verification) |
+| CASC-05 | Phase 4 → Phase 9 | Pending (verification) |
+| LLM-01 | Phase 5 → Phase 9 | Pending (verification) |
+| LLM-02 | Phase 5 → Phase 8, 9 | Pending (integration fix + verification) |
+| LLM-03 | Phase 5 → Phase 7 → Phase 8, 9 | Pending (integration fix + verification) |
+| LLM-04 | Phase 5 → Phase 9 | Pending (verification) |
+| LLM-05 | Phase 5 → Phase 9 | Pending (verification) |
+| LLM-06 | Phase 5 → Phase 8, 9 | Pending (integration fix + verification) |
+| LLM-07 | Phase 5 → Phase 8, 9 | Pending (integration fix + verification) |
+| LLM-08 | Phase 5 → Phase 9 | Pending (verification) |
 | COMPAT-01 | Phase 1 → Phase 6 | Complete (06) |
-| COMPAT-02 | Phase 5 | Complete |
+| COMPAT-02 | Phase 5 → Phase 9 | Pending (verification) |
 | COMPAT-03 | Phase 2 → Phase 6 | Complete (06) |
 
 **Coverage:**
 - v1 requirements: 28 total
 - Mapped to phases: 28
+- Satisfied (verified): 10
+- Pending (verification/fix): 18
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-02*
-*Last updated: 2026-03-18 — CHNG-03 and LLM-03 marked Complete (07-01) in Phase 7 plan 01 — all 28 v1 requirements now complete*
+*Last updated: 2026-03-18 — 18 requirements reset to Pending per v1.0 re-audit; Phase 8 (integration fixes) and Phase 9 (verification) added as gap closure*

@@ -19,6 +19,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: LLM Processing Pipeline** - Multi-provider LLM adapter; auto-generate summaries, concepts, and change impact (completed 2026-03-18)
 - [x] **Phase 6: Verification & Tech Debt Cleanup** - Create VERIFICATION.md for completed phases; fix integration issues and tech debt from audit (Gap Closure) (completed 2026-03-18)
 - [x] **Phase 7: Fix change_impact Pipeline** - Wire queueLlmDiffJob into production, fix null payload in cascade jobs, logger cleanup (Gap Closure) (completed 2026-03-18)
+- [ ] **Phase 8: Integration Fixes** - Fix toggle_llm sequencing bug, expose concepts/change_impact via MCP, budget exhaustion circuit breaker, dedup fix, tech debt cleanup (Gap Closure)
+- [ ] **Phase 9: Verification Documentation** - Create VERIFICATION.md for Phases 3, 4, 5, 6, 7 to close 18 partial requirements (Gap Closure)
 
 ## Phase Details
 
@@ -118,8 +120,8 @@ Plans:
 **Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 06-01-PLAN.md — Logger extension, console.error cleanup, dead import removal, DB lifecycle refactor
-- [ ] 06-02-PLAN.md — VERIFICATION.md creation for Phase 1 and Phase 2, REQUIREMENTS.md traceability update
+- [x] 06-01-PLAN.md — Logger extension, console.error cleanup, dead import removal, DB lifecycle refactor
+- [x] 06-02-PLAN.md — VERIFICATION.md creation for Phase 1 and Phase 2, REQUIREMENTS.md traceability update
 
 ### Phase 7: Fix change_impact Pipeline
 **Goal:** Wire the LLM diff fallback into the production code path so change_impact jobs carry proper payloads and the LLM pipeline can assess them — fixing the silent failure identified in the v1.0 audit
@@ -136,10 +138,41 @@ Plans:
 Plans:
 - [x] 07-01-PLAN.md — Wire queueLlmDiffJob, fix change_impact payload, logger cleanup
 
+### Phase 8: Integration Fixes
+**Goal:** Fix all 4 integration issues identified in the v1.0 re-audit — toggle_llm first-call sequencing, MCP exposure of concepts/change_impact, budget exhaustion circuit breaker, LLM diff dedup — plus remaining tech debt
+**Depends on**: Phase 5, Phase 7
+**Requirements**: LLM-02, LLM-03, LLM-06, LLM-07, CHNG-03
+**Gap Closure:** Closes 4 integration issues + 1 broken E2E flow + 4 tech debt items from v1.0 re-audit
+**Success Criteria** (what must be TRUE):
+  1. `toggle_llm(true)` with no prior LLM config synthesizes config BEFORE calling coordinator.toggleLlm() — pipeline starts on first call
+  2. MCP clients can retrieve concepts and change_impact data computed by the LLM pipeline (new tools or extended existing tools)
+  3. When token budget is exhausted, no new LLM jobs are inserted into the queue — isExhausted() is consulted before queuing
+  4. `queueLlmDiffJob` uses `insertLlmJobIfNotPending` for dedup instead of `insertLlmJob`
+  5. Tech debt resolved: commented-out console.warn in file-utils.ts removed, orphaned migrateJsonToSQLite export removed, ROADMAP.md Phase 6 checkboxes checked
+**Plans:** 0/0
+
+Plans:
+(to be created via /gsd:plan-phase 8)
+
+### Phase 9: Verification Documentation
+**Goal:** Create VERIFICATION.md files for Phases 3, 4, 5, 6, 7 — citing specific test files, describe blocks, and test names as evidence — to close 18 partial requirements and bring all phases to the same verification standard as Phases 1-2
+**Depends on**: Phase 8 (integration fixes must land before verifying)
+**Requirements**: CHNG-01, CHNG-02, CHNG-03, CHNG-04, CHNG-05, CASC-01, CASC-02, CASC-03, CASC-04, CASC-05, LLM-01, LLM-02, LLM-03, LLM-04, LLM-05, LLM-06, LLM-07, LLM-08, COMPAT-02
+**Gap Closure:** Closes 18 partial requirements by adding independent verification documentation
+**Success Criteria** (what must be TRUE):
+  1. VERIFICATION.md exists for Phase 3 with test evidence for CHNG-01 through CHNG-05
+  2. VERIFICATION.md exists for Phase 4 with test evidence for CASC-01 through CASC-05
+  3. VERIFICATION.md exists for Phase 5 with test evidence for LLM-01 through LLM-08 and COMPAT-02
+  4. VERIFICATION.md exists for Phase 7 with test evidence for CHNG-03 and LLM-03
+  5. All 18 previously-partial requirements have independent verification evidence beyond SUMMARY frontmatter claims
+
+Plans:
+(to be created via /gsd:plan-phase 9)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
+Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -150,3 +183,5 @@ Phases execute in strict dependency order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 5. LLM Processing Pipeline | 3/3 | Complete   | 2026-03-18 |
 | 6. Verification & Tech Debt | 2/2 | Complete   | 2026-03-18 |
 | 7. Fix change_impact Pipeline | 1/1 | Complete   | 2026-03-18 |
+| 8. Integration Fixes | 0/0 | Pending | — |
+| 9. Verification Documentation | 0/0 | Pending | — |
