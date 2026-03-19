@@ -36,6 +36,7 @@ import {
   getDependents,
   getStaleness
 } from './db/repository.js';
+import { getSqlite } from './db/db.js';
 import { ServerCoordinator } from './coordinator.js';
 
 // Enable file logging for debugging
@@ -316,6 +317,9 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       }
 
       const importanceStale = getStaleness(normalizedPath);
+      const llmDataImportance = getSqlite()
+        .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
+        .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
       return createMcpResponse({
         path: node.path,
         importance: node.importance || 0,
@@ -326,6 +330,8 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
         ...(importanceStale.summaryStale !== null && { summaryStale: importanceStale.summaryStale }),
         ...(importanceStale.conceptsStale !== null && { conceptsStale: importanceStale.conceptsStale }),
         ...(importanceStale.changeImpactStale !== null && { changeImpactStale: importanceStale.changeImpactStale }),
+        concepts: llmDataImportance?.concepts ? JSON.parse(llmDataImportance.concepts) : null,
+        changeImpact: llmDataImportance?.change_impact ? JSON.parse(llmDataImportance.change_impact) : null,
       });
     } catch (error) {
       log('Error in get_file_importance: ' + error);
@@ -384,12 +390,18 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     }
 
     const summaryStale = getStaleness(normalizedPath);
+    const sqlite = getSqlite();
+    const llmData = sqlite
+      .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
+      .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
     return createMcpResponse({
       path: node.path,
       summary: node.summary,
       ...(summaryStale.summaryStale !== null && { summaryStale: summaryStale.summaryStale }),
       ...(summaryStale.conceptsStale !== null && { conceptsStale: summaryStale.conceptsStale }),
       ...(summaryStale.changeImpactStale !== null && { changeImpactStale: summaryStale.changeImpactStale }),
+      concepts: llmData?.concepts ? JSON.parse(llmData.concepts) : null,
+      changeImpact: llmData?.change_impact ? JSON.parse(llmData.change_impact) : null,
     });
   });
 
@@ -641,22 +653,44 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       return { content: [{ type: "text", text: "Error: Project not initialized. Call set_project_path first." }], isError: true };
     }
     try {
-      coordinator.toggleLlm(enabled);
-      // Persist the toggle to config file so restart respects it
       const config = getConfig();
-      if (config) {
-        if (!config.llm) {
-          config.llm = { enabled, provider: 'anthropic', model: 'claude-3-haiku-20240307' };
-        } else {
-          config.llm.enabled = enabled;
+      if (enabled && (!config?.llm)) {
+        // Synthesize default local-first config BEFORE calling coordinator
+        // Per locked decision: openai-compatible (Ollama), qwen3-coder:14b-instruct, localhost:11434
+        const defaultLlmConfig = {
+          enabled: true,
+          provider: 'openai-compatible' as const,
+          model: 'qwen3-coder:14b-instruct',
+          baseURL: 'http://localhost:11434/v1',
+        };
+        if (config) {
+          config.llm = defaultLlmConfig;
+          setConfig(config);
+          await saveConfig(config);
         }
+      } else if (config?.llm) {
+        config.llm.enabled = enabled;
         setConfig(config);
         await saveConfig(config);
       }
+      // NOW call toggleLlm — getConfig()?.llm is guaranteed to be set
+      coordinator.toggleLlm(enabled);
       return { content: [{ type: "text", text: `LLM pipeline ${enabled ? 'started' : 'stopped'}. Setting persisted to config.` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error toggling LLM: ${err}` }], isError: true };
     }
+  });
+
+  server.tool("get_llm_status", "Get LLM pipeline status including budget and rate limit info", {}, async () => {
+    if (!coordinator.isInitialized()) return projectPathNotSetError;
+    return createMcpResponse({
+      enabled: coordinator.isLlmRunning(),
+      running: coordinator.isLlmRunning(),
+      budgetExhausted: coordinator.isLlmBudgetExhausted(),
+      lifetimeTokensUsed: coordinator.getLlmLifetimeTokensUsed(),
+      tokenBudget: coordinator.getLlmTokenBudget(),
+      maxTokensPerMinute: coordinator.getLlmMaxTokensPerMinute(),
+    });
   });
 
   server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {
