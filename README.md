@@ -9,48 +9,79 @@
 
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/admica/FileScopeMCP)](https://archestra.ai/mcp-catalog/admica__filescopemcp)
 
-A TypeScript-based MCP server that ranks files by importance, tracks bidirectional dependencies, stores AI-generated summaries, and autonomously keeps all of that data fresh in the background as your codebase changes.
+A TypeScript-based MCP server and standalone daemon that ranks files by importance, tracks bidirectional dependencies, autonomously maintains AI-generated summaries, concepts, and change impact assessments — and keeps all of that metadata fresh in the background as your codebase changes.
 
 ## Overview
 
-FileScopeMCP is an **active-listening backend**. Once pointed at a project it:
+FileScopeMCP is a fully autonomous file intelligence platform. Once pointed at a project it:
 
 1. Scans the codebase and builds a dependency graph with 0–10 importance scores for every file.
-2. Watches the filesystem with chokidar. When files are added, changed, or deleted it incrementally updates dependency lists, recalculates importance scores, and persists the result — no manual rescan needed.
-3. Runs a self-healing integrity sweep every 30 seconds to catch anything the watcher missed (e.g. changes made while the server was offline).
+2. Watches the filesystem. When files change, it incrementally updates dependency lists and importance scores, then detects semantic changes via tree-sitter AST diffing (TS/JS) or LLM-powered diff analysis (all other languages), and propagates staleness through the dependency graph via the cascade engine.
+3. A background LLM pipeline auto-generates summaries, key concepts, and change impact assessments for stale files — keeping structured metadata current without any manual work.
 
 All of this information is exposed to your AI assistant through the Model Context Protocol so it always has accurate, up-to-date context about your codebase structure.
 
 ## Features
 
-- **🎯 File Importance Ranking**
+- **File Importance Ranking**
   - Rank every file on a 0–10 scale based on its role in the dependency graph.
   - Weighted formula considers incoming dependents, outgoing dependencies, file type, location, and name significance.
   - Instantly surface the most critical files in any project.
 
-- **🔗 Dependency Tracking**
+- **Dependency Tracking**
   - Bidirectional dependency relationships: which files import a given file (dependents) and which files it imports (dependencies).
   - Distinguishes local file dependencies from package dependencies.
   - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig, PHP, C#, Java.
 
-- **🔄 Autonomous Background Updates**
+- **Autonomous Background Updates**
   - Filesystem watcher detects `add`, `change`, and `unlink` events in real time.
   - Incremental updates: re-parses only the affected file, diffs old vs. new dependency lists, patches the reverse-dependency map, and recalculates importance — no full rescan.
   - Periodic integrity sweep auto-heals stale, missing, or newly discovered files.
   - All mutations are serialized through an async mutex to prevent concurrent corruption.
   - Per-event-type enable/disable and `autoRebuildTree` master switch.
+  - Semantic change detection classifies what changed before triggering cascade — avoids unnecessary LLM calls.
 
-- **📝 File Summaries**
-  - Store human- or AI-generated summaries on any file.
-  - Summaries persist across server restarts and are returned alongside importance data.
+- **File Summaries**
+  - Background LLM auto-generates summaries for files after they change.
+  - Manual override via `set_file_summary` — your summary is preserved until the file changes again.
+  - Summaries persist across server restarts in SQLite.
 
-- **📚 Multiple Project Support**
-  - Create and manage separate file trees for different projects or subdirectories.
-  - Switch between trees at any time; each tree has its own JSON file on disk.
+- **SQLite Storage**
+  - All data stored in `.filescope.db` in the project root using SQLite with WAL mode.
+  - Type-safe schema via drizzle-orm: `files`, `file_dependencies`, `llm_jobs`, `schema_version`, `llm_runtime_state` tables.
+  - Transparent auto-migration: existing JSON tree files are automatically imported on first run — no manual migration step.
 
-- **💾 Persistent Storage**
-  - All data saved to JSON files automatically after every mutation.
-  - Load existing trees without rescanning.
+- **Semantic Change Detection**
+  - tree-sitter AST diffing for TypeScript and JavaScript files — fast, accurate, and token-free.
+  - Classifies changes as: `body-only` (function internals only), `exports-changed` (public API changed), `types-changed` (type signatures changed), or `unknown`.
+  - LLM-powered diff fallback for all other languages (Python, Rust, C/C++, etc.).
+  - Change classification drives the cascade engine — body-only changes skip dependent propagation entirely.
+
+- **Cascade Engine**
+  - BFS staleness propagation through the dependency graph when exports or types change.
+  - Per-field granularity: marks `summary`, `concepts`, and `change_impact` fields stale independently.
+  - Circular dependency protection via visited set — no infinite loops.
+  - Depth cap of 10 levels prevents runaway propagation on deeply nested graphs.
+
+- **Background LLM Pipeline**
+  - Auto-generates summaries, concepts (functions, classes, interfaces, exports, purpose), and change impact (risk level, affected areas, breaking changes) for stale files.
+  - Priority-ordered job queue: interactive (tier 1) > cascade (tier 2) > background (tier 3).
+  - Token budget limits and per-minute rate limiting prevent runaway API costs.
+  - Recovers orphaned `in_progress` jobs on restart — no stuck jobs after crashes.
+  - Toggle on/off at runtime via `toggle_llm` MCP tool or config file.
+
+- **Multi-Provider LLM Support**
+  - Anthropic (Claude) via `@ai-sdk/anthropic` — uses `ANTHROPIC_API_KEY` environment variable.
+  - OpenAI-compatible via `@ai-sdk/openai-compatible` — works with Ollama, vLLM, and any OpenAI-compatible API.
+  - Configurable model, baseURL, and apiKey per-project in `FileScopeMCP-config.json`.
+  - Local-first default: Ollama on `localhost:11434` with `qwen3-coder:14b-instruct`.
+  - Structured output with JSON repair fallback for local models that don't follow schemas perfectly.
+
+- **Daemon Mode**
+  - Runs as a standalone daemon (`--daemon --base-dir=<path>`) for 24/7 operation without an MCP client connected.
+  - PID file guard (`/tmp/filescope-<hash>.pid`) prevents concurrent daemons on the same project.
+  - Graceful shutdown on SIGTERM/SIGINT — flushes pending jobs before exit.
+  - File-only logging to `.filescope-daemon.log` in the project root — no stdout pollution.
 
 ## Installation
 
@@ -87,7 +118,11 @@ The server is registered globally — no `--base-dir` is needed. When you start 
 set_project_path(path: "/path/to/your/project")
 ```
 
-After that you can optionally call `create_file_tree` to create additional named trees for sub-directories.
+After that you can optionally enable the background LLM pipeline:
+
+```
+toggle_llm(enabled: true)
+```
 
 ### Cursor AI (Linux/WSL — Cursor running on Windows)
 
@@ -137,6 +172,16 @@ Build inside WSL, then copy `mcp.json` to your project's `.cursor/` directory:
 }
 ```
 
+### Daemon Mode
+
+To run FileScopeMCP as a standalone background process (no MCP client required):
+
+```bash
+node dist/mcp-server.js --daemon --base-dir=/path/to/project
+```
+
+The daemon watches the project, runs the integrity sweep, and keeps the LLM pipeline active 24/7. Logs are written to `.filescope-daemon.log` in the project root.
+
 ## How It Works
 
 ### Dependency Detection
@@ -169,11 +214,13 @@ The formula is evaluated from scratch on every calculation, so calling `recalcul
 When a file event fires, the update pipeline is:
 
 1. **Debounce** — events are coalesced per `filePath:eventType` key (default 2 s) to avoid thrashing on rapid saves.
-2. **Acquire mutex** — all tree mutations are serialized through `AsyncMutex` so the watcher and the integrity sweep can never corrupt the tree simultaneously.
-3. **Incremental update** — `updateFileNodeOnChange` re-parses the file, diffs old vs. new dependency lists, patches `dependents[]` on affected nodes, and calls `recalculateImportanceForAffected`.
-4. **Persist** — `saveFileTree` writes the updated JSON to disk.
+2. **Acquire mutex** — all tree mutations are serialized through `AsyncMutex` so the watcher and the integrity sweep can never corrupt the database simultaneously.
+3. **Semantic change detection** — tree-sitter AST diffing for TS/JS files classifies the change (body-only, exports-changed, types-changed, unknown). LLM-powered diff analysis handles all other languages.
+4. **Incremental update** — re-parses the file, diffs old vs. new dependency lists, patches `dependents[]` on affected nodes, and recalculates importance.
+5. **Cascade engine** — if exports or types changed, BFS propagates staleness to all transitive dependents; if body-only, only the changed file is marked stale.
+6. **LLM pipeline** — picks up stale files and regenerates summaries, concepts, and change impact assessments in priority order.
 
-The integrity sweep runs every 30 seconds inside the same mutex and respects the `autoRebuildTree` flag, so users who disable auto-rebuild are fully opted out of both paths.
+The integrity sweep runs every 30 seconds inside the same mutex and respects the `autoRebuildTree` flag.
 
 ### Path Normalization
 
@@ -183,27 +230,54 @@ The system handles various path formats to ensure consistent file identification
 - URL-encoded paths
 - Cross-platform compatibility
 
-### File Storage
+### Storage
 
-All file tree data is stored in JSON files with the following structure:
-- Configuration metadata (filename, base directory, last updated timestamp)
-- Complete file tree with dependencies, dependents, importance scores, and summaries
+All file tree data is stored in `.filescope.db` (SQLite, WAL mode) in the project root.
+
+- **Schema** — drizzle-orm manages: `files` (metadata, staleness, concepts, change_impact), `file_dependencies` (bidirectional relationships), `llm_jobs` (background job queue), `schema_version` (migration versioning), `llm_runtime_state` (token budget persistence).
+- **Auto-migration** — on first run, any legacy JSON tree files are automatically detected and imported into SQLite. The original JSON files are left in place but are no longer used.
 
 **Persistent exclusions:** When you call `exclude_and_remove`, the pattern is written to `FileScopeMCP-excludes.json` in the project root. This file is loaded automatically on every server start, so exclusions survive restarts without needing to be re-applied.
 
+## LLM Configuration
+
+Configure the LLM pipeline in `FileScopeMCP-config.json` in the project root:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "model": "qwen3-coder:14b-instruct",
+    "baseURL": "http://localhost:11434/v1",
+    "maxTokensPerMinute": 40000,
+    "tokenBudget": 1000000
+  }
+}
+```
+
+**Provider options:**
+- `"openai-compatible"` — Ollama, vLLM, or any OpenAI-compatible API. Set `baseURL` to the API endpoint and optionally `apiKey`.
+- `"anthropic"` — Claude models via Anthropic API. Uses `ANTHROPIC_API_KEY` environment variable (or override with `apiKey` field).
+
+When `toggle_llm` is called with `enabled: true` and no existing config, defaults to Ollama with `qwen3-coder:14b-instruct` on `localhost:11434`.
+
 ## Technical Details
 
-- **TypeScript/Node.js** — built with TypeScript for type safety and modern JavaScript features
-- **Model Context Protocol** — implements the MCP specification for integration with Claude Code, Cursor, and other MCP clients
+- **TypeScript 5.8 / Node.js 22** — ESM modules throughout
+- **Model Context Protocol** — `@modelcontextprotocol/sdk` for MCP server interface
 - **chokidar** — cross-platform filesystem watcher for real-time change detection
 - **esbuild** — fast TypeScript compilation to ESM
-- **JSON Storage** — simple JSON files for persistence; all writes happen after mutations complete
+- **better-sqlite3** — SQLite storage with WAL mode (loaded via `createRequire` for ESM compatibility)
+- **drizzle-orm** — type-safe SQL schema and queries
+- **tree-sitter** — AST parsing for semantic change detection (loaded via `createRequire`)
+- **Vercel AI SDK** (`ai`, `@ai-sdk/anthropic`, `@ai-sdk/openai-compatible`) — multi-provider LLM abstraction
+- **zod** — runtime validation and structured output schemas
 - **AsyncMutex** — serializes concurrent tree mutations from the watcher and integrity sweep
-- **Path Normalization** — cross-platform path handling to support Windows and Unix
 
 ## Available Tools
 
-The MCP server exposes the following tools:
+The MCP server exposes 22 tools organized by category:
 
 ### Project Setup
 
@@ -216,16 +290,21 @@ The MCP server exposes the following tools:
 ### File Analysis
 
 - **list_files**: List all files in the project with their importance rankings
-- **get_file_importance**: Get detailed information about a specific file, including dependencies and dependents
-- **find_important_files**: Find the most important files in the project based on configurable criteria
+- **get_file_importance**: Get detailed information about a specific file — includes importance, dependencies, dependents, summary, concepts, changeImpact, and staleness fields
+- **find_important_files**: Find the most important files in the project — includes staleness fields
 - **set_file_importance**: Manually override the importance score for a specific file
 - **recalculate_importance**: Recalculate importance values for all files based on dependencies
 - **read_file_content**: Read the content of a specific file
 
 ### File Summaries
 
-- **get_file_summary**: Get the stored summary of a specific file
+- **get_file_summary**: Get the stored summary of a specific file — includes concepts, changeImpact, and staleness fields
 - **set_file_summary**: Set or update the summary of a specific file
+
+### LLM Pipeline
+
+- **toggle_llm**: Enable or disable background LLM processing. When enabled with no prior config, defaults to Ollama (`openai-compatible`, `qwen3-coder:14b-instruct`, `localhost:11434`)
+- **get_llm_status**: Get pipeline status — running state, budget exhaustion flag, lifetime tokens used, token budget, and max tokens per minute
 
 ### File Watching
 
@@ -240,7 +319,7 @@ The MCP server exposes the following tools:
 
 ## Usage Examples
 
-The easiest way to get started is to enable this MCP in your AI client and let the AI figure it out. As soon as the MCP starts, it builds an initial JSON tree. Ask your AI to read important files and use `set_file_summary` to store summaries on them.
+The easiest way to get started is to enable this MCP in your AI client and let the AI figure it out. As soon as the MCP starts, it builds an initial file tree. Ask your AI to read important files and use `set_file_summary` to store summaries on them.
 
 ### Analyzing a Project
 
@@ -274,6 +353,24 @@ The easiest way to get started is to enable this MCP in your AI client and let t
 3. Retrieve the summary later:
    ```
    get_file_summary(filepath: "/path/to/project/src/main.ts")
+   ```
+
+### Using the LLM Pipeline
+
+1. Enable background LLM processing (uses Ollama by default):
+   ```
+   toggle_llm(enabled: true)
+   ```
+
+2. Check LLM pipeline status:
+   ```
+   get_llm_status()
+   ```
+
+3. View auto-generated metadata for a file:
+   ```
+   get_file_importance(filepath: "/path/to/project/src/main.ts")
+   # Returns: importance, dependencies, dependents, summary, concepts, changeImpact, staleness fields
    ```
 
 ### Configuring File Watching
