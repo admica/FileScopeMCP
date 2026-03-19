@@ -944,7 +944,6 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
                         await fsPromises.access(normalizedResolvedPath);
                         dependencies.push(normalizedResolvedPath);
                       } catch {
-                        //console.warn(`[analyzeNewFile] Referenced local file not found: ${normalizedResolvedPath}`);
                       }
                   }
               } catch (resolveError) {
@@ -1312,7 +1311,6 @@ async function updateDependentsForNewNode(newNode: FileNode, activeFileTree: Fil
                log(`[updateDependentsForNewNode] Added ${newNode.path} as dependent for ${depNode.path}`);
            }
        } else {
-          // console.warn(`[updateDependentsForNewNode] Dependency node not found or is directory: ${depPath}`);
        }
    }
    // Package dependencies don't have dependents lists in our model
@@ -1397,7 +1395,6 @@ async function recalculateImportanceForAffected(
           // Potential future enhancement: trigger recursive recalculation if importance changed significantly
        }
     } else {
-       // console.warn(`[recalculateImportanceForAffected] Node not found or is directory during recalculation: ${filePath}`);
     }
   }
 }
