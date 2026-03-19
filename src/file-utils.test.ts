@@ -1,4 +1,5 @@
-import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp } from './file-utils';
+import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp, calculateImportance } from './file-utils';
+import { FileNode } from './types';
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 
@@ -271,9 +272,70 @@ describe('globToRegExp', () => {
 
   it('should handle leading slash in glob pattern', () => {
     const regex = globToRegExp('/abs/path/*.txt');
-    expect(regex.test('/abs/path/file.txt')).toBe(true); 
-    expect(regex.test('abs/path/file.txt')).toBe(false); 
-    expect(regex.test('project/abs/path/file.txt')).toBe(false); 
-    expect(regex.test('project//abs/path/file.txt')).toBe(true); 
+    expect(regex.test('/abs/path/file.txt')).toBe(true);
+    expect(regex.test('abs/path/file.txt')).toBe(false);
+    expect(regex.test('project/abs/path/file.txt')).toBe(false);
+    expect(regex.test('project//abs/path/file.txt')).toBe(true);
+  });
+});
+
+describe('transitive importance propagation', () => {
+  it('should give higher importance to files with dependents than files with none', () => {
+    // Build a chain: A <- B <- C (C imports B, B imports A)
+    // A has 2 files depending on it (B and C directly list A); C has none depending on it
+    const fileA = new FileNode();
+    fileA.path = '/project/src/a.ts';
+    fileA.name = 'a.ts';
+    fileA.isDirectory = false;
+    fileA.dependents = ['/project/src/b.ts', '/project/src/c.ts'];
+    fileA.dependencies = [];
+
+    const fileB = new FileNode();
+    fileB.path = '/project/src/b.ts';
+    fileB.name = 'b.ts';
+    fileB.isDirectory = false;
+    fileB.dependents = ['/project/src/c.ts'];
+    fileB.dependencies = ['/project/src/a.ts'];
+
+    const fileC = new FileNode();
+    fileC.path = '/project/src/c.ts';
+    fileC.name = 'c.ts';
+    fileC.isDirectory = false;
+    fileC.dependents = [];
+    fileC.dependencies = ['/project/src/b.ts'];
+
+    const root = new FileNode();
+    root.path = '/project/src';
+    root.name = 'src';
+    root.isDirectory = true;
+    root.children = [fileA, fileB, fileC];
+
+    calculateImportance(root);
+
+    // A has 2 dependents (+2 bonus) vs C has 0 dependents (+0 bonus from dependents)
+    // A should have a higher importance score
+    expect(fileA.importance).toBeGreaterThan(fileC.importance!);
+  });
+
+  it('should handle a file with no dependents and no dependencies', () => {
+    const fileIsolated = new FileNode();
+    fileIsolated.path = '/project/src/isolated.ts';
+    fileIsolated.name = 'isolated.ts';
+    fileIsolated.isDirectory = false;
+    fileIsolated.dependents = [];
+    fileIsolated.dependencies = [];
+
+    const root = new FileNode();
+    root.path = '/project/src';
+    root.name = 'src';
+    root.isDirectory = true;
+    root.children = [fileIsolated];
+
+    calculateImportance(root);
+
+    // Isolated file gets no dependency bonuses — base importance only
+    expect(fileIsolated.importance).toBeDefined();
+    expect(fileIsolated.importance!).toBeGreaterThanOrEqual(0);
+    expect(fileIsolated.importance!).toBeLessThanOrEqual(10);
   });
 });
