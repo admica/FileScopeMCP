@@ -29,7 +29,7 @@ See: `.planning/milestones/v1.0-ROADMAP.md` for full phase details.
 **Milestone Goal:** Fix open bugs, improve code quality, add cycle detection and richer language support, and harden performance for large codebases.
 
 - [x] **Phase 10: Code Quality and Bug Fixes** - Establish a clean, correct baseline by eliminating dead code, consolidating imports, fixing path normalization, correcting the firebase false positive, fixing transitive importance propagation, and fixing watcher restart backoff (completed 2026-03-19)
-- [ ] **Phase 11: .filescopeignore Support** - Add gitignore-syntax project exclusion file that gates directory recursion at scan time
+- [x] **Phase 11: .filescopeignore Support** - Add gitignore-syntax project exclusion file that gates directory recursion at scan time (completed 2026-03-19)
 - [ ] **Phase 12: Go and Ruby Language Support** - Add full dependency parsing for Go (import blocks + go.mod resolution) and Ruby (require/require_relative)
 - [ ] **Phase 13: Streaming Directory Scan** - Replace eager full-tree memory build with async generator that yields one FileNode at a time
 - [ ] **Phase 14: mtime-Based Lazy Validation** - Replace 30-second polling integrity sweep with mtime comparison on MCP tool access
@@ -60,7 +60,7 @@ Plans:
   1. A `.filescopeignore` file with gitignore-style patterns causes matching directories to be skipped entirely during recursive directory scan — their contents never appear in the file tree
   2. The ignore rules apply to both the initial scan and real-time file watching, with no additional configuration required beyond creating the file
   3. Standard gitignore syntax (negation, globstar, directory anchoring, comments) works correctly in `.filescopeignore`
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 11-01-PLAN.md — Install ignore package, global-state integration, isExcluded wiring with tests
 - [ ] 11-02-PLAN.md — FileWatcher integration with .filescopeignore for watch-time exclusion
@@ -120,7 +120,7 @@ Plans:
 | 8. Integration Fixes | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 9. Verification Documentation | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
-| 11. .filescopeignore Support | 1/2 | In Progress|  | - |
+| 11. .filescopeignore Support | 2/2 | Complete   | 2026-03-19 | - |
 | 12. Go and Ruby Language Support | v1.1 | 0/TBD | Not started | - |
 | 13. Streaming Directory Scan | v1.1 | 0/TBD | Not started | - |
 | 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |

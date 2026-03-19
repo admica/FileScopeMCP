@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
 status: unknown
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-03-19T17:23:46.299Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-03-19T17:28:07.151Z"
 last_activity: 2026-03-19
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -45,6 +45,7 @@ Plan: 1 of 2
 | Phase 10-code-quality-and-bug-fixes P01 | 3 | 2 tasks | 3 files |
 | Phase 10-code-quality-and-bug-fixes P02 | 6 | 2 tasks | 5 files |
 | Phase 11-filescopeignore-support P01 | 4 | 2 tasks | 5 files |
+| Phase 11 P02 | 8 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Key v1.1 decisions:
 - [Phase 11-filescopeignore-support]: ignore package chosen for full gitignore semantics in .filescopeignore support — negation, globstar, directory anchoring all handled correctly
 - [Phase 11-filescopeignore-support]: isDir parameter added to isExcluded() for directory-only pattern disambiguation (dist/ probed as rel+'/')
 - [Phase 11-filescopeignore-support]: Removed early return in isExcluded() when excludePatterns empty — .filescopeignore rules must evaluate even without config patterns
+- [Phase 11]: Two ignore points in FileWatcher: chokidar ignored option (buildIgnoredOption) AND onFileEvent check — belt-and-suspenders prevents event leakage for .filescopeignore
+- [Phase 11]: buildIgnoredOption returns array when no .filescopeignore (backward compat) and a function when active — enables gitignore negation semantics and directory-pattern disambiguation
 
 ### Pending Todos
 
@@ -86,5 +89,5 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-19
-Stopped at: Completed 11-01-PLAN.md
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
