@@ -28,6 +28,8 @@ export class FileWatcher {
   private errorCount: number = 0;
   private restartAttempts: number = 0;
   private readonly maxRestartDelay: number = 30_000;
+  private stabilityTimer: NodeJS.Timeout | null = null;
+  private static readonly STABILITY_THRESHOLD_MS = 60_000;
 
   /**
    * Create a new FileWatcher instance
@@ -99,6 +101,7 @@ export class FileWatcher {
       });
 
       this.isWatching = true;
+      this.startStabilityTimer();
       logInfo('FileWatcher: Started successfully');
     } catch (err) {
       logError('FileWatcher: Error starting:', err);
@@ -115,6 +118,12 @@ export class FileWatcher {
     }
 
     logInfo('FileWatcher: Stopping...');
+
+    // Clear stability timer to prevent it firing after shutdown
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer);
+      this.stabilityTimer = null;
+    }
 
     // Clear all throttle timers
     this.throttleTimers.forEach(timer => clearTimeout(timer));
@@ -139,6 +148,12 @@ export class FileWatcher {
    * Restart the file watcher with exponential backoff
    */
   public restart(): void {
+    // Clear any pending stability timer since we're restarting due to failure
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer);
+      this.stabilityTimer = null;
+    }
+
     const delay = Math.min(1000 * Math.pow(2, this.restartAttempts), this.maxRestartDelay);
     this.restartAttempts++;
     logWarn(`FileWatcher: Restarting in ${delay}ms (attempt ${this.restartAttempts})...`);
@@ -146,9 +161,26 @@ export class FileWatcher {
     setTimeout(() => {
       if (!this.isWatching) {
         this.start();
-        this.restartAttempts = 0; // Reset on successful start
+        // Do NOT reset restartAttempts here — start the stability timer instead
+        this.startStabilityTimer();
       }
     }, delay);
+  }
+
+  /**
+   * Starts a timer that resets restartAttempts after 60 consecutive seconds
+   * of stable operation (no errors triggering restart).
+   */
+  private startStabilityTimer(): void {
+    // Clear any existing stability timer
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer);
+    }
+    this.stabilityTimer = setTimeout(() => {
+      logInfo(`FileWatcher: Stable for ${FileWatcher.STABILITY_THRESHOLD_MS / 1000}s, resetting restart backoff counter`);
+      this.restartAttempts = 0;
+      this.stabilityTimer = null;
+    }, FileWatcher.STABILITY_THRESHOLD_MS);
   }
 
   /**
