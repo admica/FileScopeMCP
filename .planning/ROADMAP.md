@@ -28,7 +28,7 @@ See: `.planning/milestones/v1.0-ROADMAP.md` for full phase details.
 
 **Milestone Goal:** Fix open bugs, improve code quality, add cycle detection and richer language support, and harden performance for large codebases.
 
-- [ ] **Phase 10: Code Quality and Bug Fixes** - Establish a clean, correct baseline by eliminating dead code, consolidating imports, fixing path normalization, correcting the firebase false positive, fixing transitive importance propagation, and fixing watcher restart backoff
+- [x] **Phase 10: Code Quality and Bug Fixes** - Establish a clean, correct baseline by eliminating dead code, consolidating imports, fixing path normalization, correcting the firebase false positive, fixing transitive importance propagation, and fixing watcher restart backoff (completed 2026-03-19)
 - [ ] **Phase 11: .filescopeignore Support** - Add gitignore-syntax project exclusion file that gates directory recursion at scan time
 - [ ] **Phase 12: Go and Ruby Language Support** - Add full dependency parsing for Go (import blocks + go.mod resolution) and Ruby (require/require_relative)
 - [ ] **Phase 13: Streaming Directory Scan** - Replace eager full-tree memory build with async generator that yields one FileNode at a time
@@ -47,7 +47,7 @@ See: `.planning/milestones/v1.0-ROADMAP.md` for full phase details.
   3. file-utils.ts has one consolidated fs import block with no duplicate `import * as fs` or `import * as fsSync` declarations
   4. `normalizePath` and `normalizeAndResolvePath` are replaced by a single canonical path normalization function with unambiguous naming
   5. Local files are never misclassified as package dependencies (react, firebase, etc.) due to a hardcoded fallback list, and the dead `createFileTree` export is absent from file-utils.ts
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 10-01-PLAN.md — Dead code cleanup (fs imports, createFileTree, commonPkgs) and watcher backoff fix
 - [ ] 10-02-PLAN.md — Path normalization consolidation and transitive importance propagation fix
@@ -116,7 +116,7 @@ Plans:
 | 7. Fix change_impact Pipeline | v1.0 | 1/1 | Complete | 2026-03-18 |
 | 8. Integration Fixes | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 9. Verification Documentation | v1.0 | 2/2 | Complete | 2026-03-19 |
-| 10. Code Quality and Bug Fixes | 1/2 | In Progress|  | - |
+| 10. Code Quality and Bug Fixes | 2/2 | Complete   | 2026-03-19 | - |
 | 11. .filescopeignore Support | v1.1 | 0/TBD | Not started | - |
 | 12. Go and Ruby Language Support | v1.1 | 0/TBD | Not started | - |
 | 13. Streaming Directory Scan | v1.1 | 0/TBD | Not started | - |

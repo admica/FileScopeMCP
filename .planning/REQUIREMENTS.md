@@ -9,13 +9,13 @@ Requirements for v1.1 Hardening release. Each maps to roadmap phases.
 
 ### Bug Fixes
 
-- [ ] **BUG-01**: Importance propagation recurses through all transitive dependents when a file's importance changes, using a visited set to prevent infinite loops
+- [x] **BUG-01**: Importance propagation recurses through all transitive dependents when a file's importance changes, using a visited set to prevent infinite loops
 - [x] **BUG-02**: Watcher restart backoff counter only resets after the watcher has been stable for at least 60 seconds, not immediately on successful start
 
 ### Code Quality
 
 - [x] **QUAL-01**: file-utils.ts uses a single consolidated set of fs imports (no duplicate `import * as fs` and `import * as fsSync from 'fs'`)
-- [ ] **QUAL-02**: Path normalization uses one canonical function with clear naming, eliminating the confusing `normalizePath` vs `normalizeAndResolvePath` split
+- [x] **QUAL-02**: Path normalization uses one canonical function with clear naming, eliminating the confusing `normalizePath` vs `normalizeAndResolvePath` split
 - [x] **QUAL-03**: `PackageDependency.fromPath()` no longer misclassifies local files as package dependencies due to the hardcoded fallback list (`react`, `firebase`, etc.)
 - [x] **QUAL-04**: Dead `createFileTree` export removed from file-utils.ts
 
@@ -70,10 +70,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUG-01 | Phase 10 | Pending |
+| BUG-01 | Phase 10 | Complete |
 | BUG-02 | Phase 10 | Complete |
 | QUAL-01 | Phase 10 | Complete |
-| QUAL-02 | Phase 10 | Pending |
+| QUAL-02 | Phase 10 | Complete |
 | QUAL-03 | Phase 10 | Complete |
 | QUAL-04 | Phase 10 | Complete |
 | PERF-01 | Phase 11 | Pending |

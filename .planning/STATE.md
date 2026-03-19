@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
 status: unknown
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-03-19T16:22:35.160Z"
-last_activity: 2026-03-19 — v1.1 roadmap created
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-03-19T16:31:30Z"
+last_activity: 2026-03-19 — path normalization unified, transitive importance fixed
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -24,8 +24,8 @@ See: .planning/PROJECT.md (updated 2026-03-19)
 
 ## Current Position
 
-Phase: 10 (code-quality-and-bug-fixes) — EXECUTING
-Plan: 1 of 2
+Phase: 10 (code-quality-and-bug-fixes) — COMPLETE
+Plan: 2 of 2 (complete)
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Plan: 1 of 2
 
 *Updated after each plan completion*
 | Phase 10-code-quality-and-bug-fixes P01 | 3 | 2 tasks | 3 files |
+| Phase 10-code-quality-and-bug-fixes P02 | 6 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -59,6 +60,8 @@ Key v1.1 decisions:
 - **Streaming scan uses two-pass constraint** — metadata collection streamed; dependency resolution deferred until all paths are indexed
 - [Phase 10-code-quality-and-bug-fixes]: Removed commonPkgs hardcoded list in PackageDependency.fromPath — structural detection is sufficient without false positive risk
 - [Phase 10-code-quality-and-bug-fixes]: stabilityTimer approach: 60s consecutive uptime required to reset backoff counter, timer cleared on any restart or shutdown
+- [Phase 10-code-quality-and-bug-fixes P02]: canonicalizePath lives in file-utils.ts; storage-utils.ts re-exports it — eliminates circular dependency that existed when file-utils.ts imported saveFileTree (unused)
+- [Phase 10-code-quality-and-bug-fixes P02]: BFS with visited set in recalculateImportanceForAffected — prevents stack overflow on deep chains and handles circular deps safely
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None.
 
 ## Session Continuity
 
-Last activity: 2026-03-19 — v1.1 roadmap created
-Stopped at: Completed 10-01-PLAN.md
+Last activity: 2026-03-19 — path normalization unified, transitive importance BFS fix
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
