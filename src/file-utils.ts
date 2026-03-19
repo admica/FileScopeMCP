@@ -72,6 +72,10 @@ const GO_SINGLE_IMPORT_RE = /^import\s+(?:[\w_.]+\s+)?"([^"]+)"/gm;
 const GO_GROUPED_BLOCK_RE = /^import\s*\(([\s\S]*?)\)/gm;
 const GO_BLOCK_LINE_RE = /^\s*(?:[\w_.]+\s+)?"([^"]+)"/gm;
 
+// Ruby import regex — captures keyword (group 1) and path (group 2)
+// Matches: require_relative 'path', require './path', require 'gem', require('path'), require_relative('path')
+const RUBY_IMPORT_RE = /(require_relative|require)\s*\(?\s*['"]([^'"]+)['"]\s*\)?/g;
+
 // Note: .ts, .tsx, .js, .jsx entries removed — those file types now use AST-based
 // import extraction via extractSnapshot() from change-detector/ast-parser.ts (CHNG-04).
 // All other languages continue to use the regex patterns below.
@@ -170,9 +174,81 @@ async function resolveGoImports(
 
 function isUnresolvedTemplateLiteral(str: string): boolean {
   // Check for ${...} pattern which indicates an unresolved template literal
-  return typeof str === 'string' && 
-         str.includes('${') && 
+  return typeof str === 'string' &&
+         str.includes('${') &&
          str.includes('}');
+}
+
+function isRubyInterpolation(str: string): boolean {
+  return typeof str === 'string' && str.includes('#{');
+}
+
+/**
+ * Parses Ruby require/require_relative statements and resolves them to either
+ * local filesystem dependencies (with .rb extension probing) or gem/stdlib package dependencies.
+ *
+ * require_relative and require with ./ or ../ prefix resolve relative to the calling file.
+ * Bare require (no relative prefix) is classified as a gem/stdlib package dependency.
+ */
+async function resolveRubyImports(
+  content: string,
+  currentFile: string,
+  projectRoot: string
+): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[] }> {
+  const dependencies: string[] = [];
+  const packageDependencies: PackageDependency[] = [];
+
+  const re = new RegExp(RUBY_IMPORT_RE.source, RUBY_IMPORT_RE.flags);
+  let match;
+  while ((match = re.exec(content)) !== null) {
+    const keyword = match[1]; // 'require_relative' or 'require'
+    const importPath = match[2];
+
+    if (!importPath) continue;
+
+    // Skip Ruby string interpolation
+    if (isRubyInterpolation(importPath)) {
+      log(`Skipping Ruby import with interpolation: ${importPath}`);
+      continue;
+    }
+
+    // Also skip JS-style template literals
+    if (isUnresolvedTemplateLiteral(importPath)) {
+      log(`Skipping unresolved template literal in Ruby import: ${importPath}`);
+      continue;
+    }
+
+    // require_relative is always relative to the current file
+    if (keyword === 'require_relative' || importPath.startsWith('./') || importPath.startsWith('../')) {
+      const base = path.dirname(currentFile);
+      const resolved = path.resolve(base, importPath);
+      const normalizedResolved = canonicalizePath(resolved);
+
+      // Probe .rb extension (Ruby conventionally omits it)
+      // Try '' first so explicit .rb doesn't get doubled to .rb.rb
+      const rubyExtensions = ['', '.rb'];
+      let found = false;
+      for (const ext of rubyExtensions) {
+        const pathToCheck = normalizedResolved + ext;
+        try {
+          await fsPromises.access(pathToCheck);
+          dependencies.push(canonicalizePath(pathToCheck));
+          found = true;
+          break;
+        } catch { /* try next */ }
+      }
+      if (!found) {
+        log(`Ruby import not found on disk: ${importPath} (from ${currentFile})`);
+      }
+    } else {
+      // Bare require: gem/stdlib dependency
+      const pkgDep = new PackageDependency();
+      pkgDep.name = importPath.includes('/') ? importPath.split('/')[0] : importPath;
+      packageDependencies.push(pkgDep);
+    }
+  }
+
+  return { dependencies, packageDependencies };
 }
 
 // Helper to resolve TypeScript/JavaScript import paths
@@ -254,8 +330,16 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
       if (fileName === 'go') importance += 3;
       else importance += 1;
       break;
+    case '.rb':
+      importance += 2;
+      break;
     default:
       importance += 0;
+  }
+
+  // Ruby project manifest — explicit importance like go.mod
+  if (fileName === 'Gemfile') {
+    importance += 3;
   }
 
   // Importance by location
@@ -650,6 +734,15 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
           packageDependencies.push(...goResult.packageDependencies);
         } catch (error) {
           log(`Failed to read or process Go file ${fullPath}:`, error);
+        }
+      } else if (ext === '.rb') {
+        try {
+          const content = await fsPromises.readFile(fullPath, 'utf-8');
+          const rbResult = await resolveRubyImports(content, normalizedFullPath, normalizedBaseDir);
+          dependencies.push(...rbResult.dependencies);
+          packageDependencies.push(...rbResult.packageDependencies);
+        } catch (error) {
+          log(`Failed to read or process Ruby file ${fullPath}:`, error);
         }
       } else if (importPattern) {
         try {
@@ -1051,6 +1144,15 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
       packageDependencies.push(...goResult.packageDependencies);
     } catch (readError) {
       log(`[analyzeNewFile] Error reading Go file ${filePath}: ${readError}`);
+    }
+  } else if (ext === '.rb') {
+    try {
+      const content = await fsPromises.readFile(filePath, 'utf-8');
+      const rbResult = await resolveRubyImports(content, filePath, projectRoot);
+      dependencies.push(...rbResult.dependencies);
+      packageDependencies.push(...rbResult.packageDependencies);
+    } catch (readError) {
+      log(`[analyzeNewFile] Error reading Ruby file ${filePath}: ${readError}`);
     }
   } else {
     const pattern = IMPORT_PATTERNS[ext];
