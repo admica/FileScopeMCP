@@ -9,44 +9,13 @@ import {
   getAllFiles,
 } from "./db/repository.js";
 import { error as logError, info as logInfo, debug as logDebug } from "./logger.js";
+import { canonicalizePath } from './file-utils.js';
 
-/**
- * Normalizes paths to use forward slashes and handles URL encoding
- * Works with both relative and absolute paths on any platform
- * @param inputPath The path to normalize
- * @param baseDirectory Optional base directory to resolve relative paths against (defaults to project root)
- */
-export function normalizeAndResolvePath(inputPath: string, baseDirectory?: string): string {
-  try {
-    // Handle special case for current directory
-    if (inputPath === '.' || inputPath === './') {
-      return getProjectRoot().replace(/\\/g, '/').replace(/\/+/g, '/');
-    }
+// Re-export canonicalizePath for direct usage
+export { canonicalizePath } from './file-utils.js';
 
-    // Decode URL encoding if present
-    const decoded = inputPath.includes('%') ? decodeURIComponent(inputPath) : inputPath;
-
-    // Handle Windows paths with drive letters that may start with a slash
-    const cleanPath = decoded.match(/^\/[a-zA-Z]:/) ? decoded.substring(1) : decoded;
-
-    // If it's already an absolute path, normalize it directly
-    if (path.isAbsolute(cleanPath)) {
-      return cleanPath.replace(/\\/g, '/').replace(/\/+/g, '/');
-    }
-
-    // For relative paths, resolve against the base directory
-    const base = baseDirectory || getProjectRoot();
-    logDebug(`Resolving relative path ${cleanPath} against base ${base}`);
-    const fullPath = path.resolve(base, cleanPath);
-
-    // Normalize to forward slashes for consistency and remove duplicate slashes
-    return fullPath.replace(/\\/g, '/').replace(/\/+/g, '/');
-  } catch (err) {
-    logError(`Failed to normalize path: ${inputPath}`, err);
-    // Return the input as fallback
-    return inputPath;
-  }
-}
+// Re-export for backward compatibility — callers should migrate to canonicalizePath
+export { canonicalizePath as normalizeAndResolvePath } from './file-utils.js';
 
 /**
  * Ensures a directory exists, creating it if necessary
@@ -76,8 +45,8 @@ export async function createFileTreeConfig(filename: string, baseDirectory: stri
     logDebug('Resolved "." to project root:', baseDirectory);
   }
 
-  // Normalize paths
-  const normalizedBase = normalizeAndResolvePath(baseDirectory);
+  // Normalize paths (resolve against project root for relative paths)
+  const normalizedBase = canonicalizePath(baseDirectory, getProjectRoot());
   logDebug('Normalized base directory:', normalizedBase);
 
   // For the filename, we only want the basename, not the full path

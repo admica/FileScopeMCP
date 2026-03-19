@@ -12,14 +12,13 @@ import {
   FileTreeStorage,
   FileWatchingConfig
 } from "./types.js";
-import { normalizePath, buildDependentMap, calculateImportance, excludeAndRemoveFile } from "./file-utils.js";
+import { normalizePath, canonicalizePath, buildDependentMap, calculateImportance, excludeAndRemoveFile } from "./file-utils.js";
 import {
   createFileTreeConfig,
   saveFileTree,
   loadFileTree,
   listSavedFileTrees,
   updateFileNode,
-  normalizeAndResolvePath,
   clearTreeCache
 } from "./storage-utils.js";
 import * as fsSync from "fs";
@@ -206,7 +205,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
   }, async (params: { filename: string }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
     try {
-      const normalizedPath = normalizeAndResolvePath(params.filename);
+      const normalizedPath = canonicalizePath(params.filename, getProjectRoot());
       await fs.unlink(normalizedPath);
 
       // Update coordinator config if it was the current tree

@@ -1,83 +1,93 @@
-import { normalizePath, toPlatformPath, globToRegExp } from './file-utils';
+import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp } from './file-utils';
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 
-describe('normalizePath', () => {
+describe('canonicalizePath', () => {
   it('should return an empty string for empty input', () => {
-    expect(normalizePath('')).toBe('');
+    expect(canonicalizePath('')).toBe('');
   });
 
   it('should handle basic Unix paths', () => {
-    expect(normalizePath('/usr/local/bin')).toBe('/usr/local/bin');
+    expect(canonicalizePath('/usr/local/bin')).toBe('/usr/local/bin');
   });
 
   it('should handle basic Windows paths', () => {
-    expect(normalizePath('C:\\Users\\Default')).toBe('C:/Users/Default');
+    expect(canonicalizePath('C:\\Users\\Default')).toBe('C:/Users/Default');
   });
 
   it('should convert backslashes to forward slashes', () => {
-    expect(normalizePath('some\\path\\to\\file.txt')).toBe('some/path/to/file.txt');
+    expect(canonicalizePath('some\\path\\to\\file.txt')).toBe('some/path/to/file.txt');
   });
 
   it('should remove duplicate slashes', () => {
-    expect(normalizePath('some//path///to////file.txt')).toBe('some/path/to/file.txt');
-    expect(normalizePath('C:\\\\Users')).toBe('C:/Users');
+    expect(canonicalizePath('some//path///to////file.txt')).toBe('some/path/to/file.txt');
+    expect(canonicalizePath('C:\\\\Users')).toBe('C:/Users');
   });
 
   it('should remove trailing slashes but not from root (actual behavior)', () => {
-    expect(normalizePath('/some/path/')).toBe('/some/path');
-    expect(normalizePath('C:\\Users\\Default\\')).toBe('C:/Users/Default');
-    expect(normalizePath('C:/Users/Default/')).toBe('C:/Users/Default');
+    expect(canonicalizePath('/some/path/')).toBe('/some/path');
+    expect(canonicalizePath('C:\\Users\\Default\\')).toBe('C:/Users/Default');
+    expect(canonicalizePath('C:/Users/Default/')).toBe('C:/Users/Default');
     // Corrected expectations based on actual function behavior:
-    expect(normalizePath('C:/')).toBe('C:'); 
-    expect(normalizePath('/')).toBe(''); 
+    expect(canonicalizePath('C:/')).toBe('C:');
+    expect(canonicalizePath('/')).toBe('');
   });
 
   it('should handle URL encoded paths', () => {
-    expect(normalizePath('/path%20with%20spaces/file%23name.txt')).toBe('/path with spaces/file#name.txt');
+    expect(canonicalizePath('/path%20with%20spaces/file%23name.txt')).toBe('/path with spaces/file#name.txt');
   });
-  
+
   it('should handle paths starting with a slash and drive letter', () => {
-    expect(normalizePath('/C:/Users/Test')).toBe('C:/Users/Test');
+    expect(canonicalizePath('/C:/Users/Test')).toBe('C:/Users/Test');
   });
 
   it('should remove only double quotes from paths (actual behavior)', () => {
-    expect(normalizePath('"C:\\Users\\Default"')).toBe('C:/Users/Default');
-    expect(normalizePath('"/usr/local/bin"')).toBe('/usr/local/bin');
+    expect(canonicalizePath('"C:\\Users\\Default"')).toBe('C:/Users/Default');
+    expect(canonicalizePath('"/usr/local/bin"')).toBe('/usr/local/bin');
     // Corrected expectations: single quotes are not removed
-    expect(normalizePath("'C:\\Users\\Default'")).toBe("'C:/Users/Default'"); 
-    expect(normalizePath("'/usr/local/bin'")).toBe("'/usr/local/bin'");
+    expect(canonicalizePath("'C:\\Users\\Default'")).toBe("'C:/Users/Default'");
+    expect(canonicalizePath("'/usr/local/bin'")).toBe("'/usr/local/bin'");
   });
 
   // Additional tests based on previous generation that are good to keep
   it('should handle mixed slashes, duplicate slashes, and trailing slashes together', () => {
-    expect(normalizePath('C:\\mixed//slashes\\path///')).toBe('C:/mixed/slashes/path');
+    expect(canonicalizePath('C:\\mixed//slashes\\path///')).toBe('C:/mixed/slashes/path');
   });
 
   it('should handle already normalized paths', () => {
-    expect(normalizePath('already/normalized/path')).toBe('already/normalized/path');
+    expect(canonicalizePath('already/normalized/path')).toBe('already/normalized/path');
   });
 
   it('should handle paths with only slashes (actual behavior)', () => {
     // Corrected expectations:
-    expect(normalizePath('///')).toBe(''); 
-    expect(normalizePath('\\\\\\')).toBe('');
+    expect(canonicalizePath('///')).toBe('');
+    expect(canonicalizePath('\\\\\\')).toBe('');
   });
 
   it('should handle single character path components', () => {
-    expect(normalizePath('a/b/c')).toBe('a/b/c');
-    expect(normalizePath('C:\\a\\b\\c')).toBe('C:/a/b/c');
+    expect(canonicalizePath('a/b/c')).toBe('a/b/c');
+    expect(canonicalizePath('C:\\a\\b\\c')).toBe('C:/a/b/c');
   });
 
   it('should preserve case', () => {
-    expect(normalizePath('CaSe/SeNsItIvE/PaTh')).toBe('CaSe/SeNsItIvE/PaTh');
-    expect(normalizePath('C:\\CaSe\\SeNsItIvE\\PaTh')).toBe('C:/CaSe/SeNsItIvE/PaTh');
+    expect(canonicalizePath('CaSe/SeNsItIvE/PaTh')).toBe('CaSe/SeNsItIvE/PaTh');
+    expect(canonicalizePath('C:\\CaSe\\SeNsItIvE\\PaTh')).toBe('C:/CaSe/SeNsItIvE/PaTh');
   });
 
-  it('should handle paths with dots (normalizePath does not resolve them)', () => {
-    expect(normalizePath('./path/to/file.txt')).toBe('./path/to/file.txt');
-    expect(normalizePath('../path/to/file.txt')).toBe('../path/to/file.txt');
-    expect(normalizePath('path/./to/./file.txt')).toBe('path/./to/./file.txt'); 
+  it('should handle paths with dots without baseDir (cosmetic only, no resolution)', () => {
+    expect(canonicalizePath('./path/to/file.txt')).toBe('./path/to/file.txt');
+    expect(canonicalizePath('../path/to/file.txt')).toBe('../path/to/file.txt');
+    expect(canonicalizePath('path/./to/./file.txt')).toBe('path/./to/./file.txt');
+  });
+
+  it('should resolve relative paths when baseDir is provided', () => {
+    const result = canonicalizePath('./sub/file.ts', '/project/root');
+    expect(result).toBe('/project/root/sub/file.ts');
+  });
+
+  it('should resolve dot to baseDir', () => {
+    const result = canonicalizePath('.', '/project/root');
+    expect(result).toBe('/project/root');
   });
 });
 

@@ -2,45 +2,66 @@ import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
-import { normalizeAndResolvePath } from "./storage-utils.js";
 import { getProjectRoot, getConfig, addExclusionPattern } from './global-state.js';
-import { saveFileTree } from './storage-utils.js'; // Import saveFileTree
 import { log } from './logger.js'; // Import the logger
 import { upsertFile, deleteFile, setDependencies } from './db/repository.js';
 import { extractSnapshot, isTreeSitterLanguage } from './change-detector/ast-parser.js';
 
 /**
- * Normalizes a file path for consistent comparison across platforms
- * Handles Windows and Unix paths, relative and absolute paths
+ * Canonical path normalization for the entire codebase.
+ *
+ * Cosmetic normalization (always applied):
+ *  - URL-decode percent-encoded characters
+ *  - Strip leading slash before Windows drive letters (/C: -> C:)
+ *  - Convert backslashes to forward slashes
+ *  - Remove double-quote wrappers
+ *  - Collapse duplicate slashes
+ *  - Remove trailing slash
+ *
+ * Resolution (applied only when baseDir is provided):
+ *  - Relative paths are resolved against baseDir via path.resolve
+ *  - '.' and './' resolve to baseDir itself
+ *
+ * @param filepath The path to canonicalize.
+ * @param baseDir  Optional base directory for resolving relative paths.
+ *                 When omitted, relative paths are left as-is (cosmetic only).
  */
-export function normalizePath(filepath: string): string {
+export function canonicalizePath(filepath: string, baseDir?: string): string {
   if (!filepath) return '';
-  
+
   try {
+    // Handle special case for current directory when resolving
+    if (baseDir && (filepath === '.' || filepath === './')) {
+      return baseDir.replace(/\\/g, '/').replace(/\/+/g, '/');
+    }
+
     // Handle URL-encoded paths
     const decoded = filepath.includes('%') ? decodeURIComponent(filepath) : filepath;
-    
+
     // Handle Windows paths with drive letters that may start with a slash
     const cleanPath = decoded.match(/^\/[a-zA-Z]:/) ? decoded.substring(1) : decoded;
-    
-    // Handle Windows backslashes by converting to forward slashes
-    // Note: we need to escape the backslash in regex since it's a special character
+
+    // If baseDir is provided and path is relative, resolve it
+    if (baseDir && !path.isAbsolute(cleanPath)) {
+      const fullPath = path.resolve(baseDir, cleanPath);
+      return fullPath.replace(/\\/g, '/').replace(/\/+/g, '/');
+    }
+
+    // Cosmetic normalization only
     const forwardSlashed = cleanPath.replace(/\\/g, '/');
-    
-    // Remove any double quotes that might be present
     const noQuotes = forwardSlashed.replace(/"/g, '');
-    
-    // Remove duplicate slashes
     const deduped = noQuotes.replace(/\/+/g, '/');
-    
-    // Remove trailing slash
     return deduped.endsWith('/') ? deduped.slice(0, -1) : deduped;
   } catch (error) {
-    log(`Failed to normalize path: ${filepath} - ${error}`);
-    // Return original as fallback
+    log(`Failed to canonicalize path: ${filepath} - ${error}`);
     return filepath;
   }
 }
+
+/**
+ * @deprecated Use canonicalizePath instead. Will be removed in v1.2.
+ */
+export const normalizePath = canonicalizePath;
 
 export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);

@@ -8,7 +8,7 @@ import {
   FileWatchingConfig
 } from './types.js';
 import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck } from './file-utils.js';
-import { saveFileTree, normalizeAndResolvePath } from './storage-utils.js';
+import { saveFileTree, canonicalizePath } from './storage-utils.js';
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
@@ -185,7 +185,7 @@ export class ServerCoordinator {
    * @returns ToolResponse indicating success or failure.
    */
   async init(projectPath: string): Promise<ToolResponse> {
-    const projectRoot = normalizeAndResolvePath(projectPath);
+    const projectRoot = canonicalizePath(projectPath, process.cwd());
     log(`Initializing project at: ${projectRoot}`);
 
     try {
