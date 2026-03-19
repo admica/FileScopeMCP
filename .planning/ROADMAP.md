@@ -60,7 +60,7 @@ Plans:
   1. A `.filescopeignore` file with gitignore-style patterns causes matching directories to be skipped entirely during recursive directory scan — their contents never appear in the file tree
   2. The ignore rules apply to both the initial scan and real-time file watching, with no additional configuration required beyond creating the file
   3. Standard gitignore syntax (negation, globstar, directory anchoring, comments) works correctly in `.filescopeignore`
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 11-01-PLAN.md — Install ignore package, global-state integration, isExcluded wiring with tests
 - [ ] 11-02-PLAN.md — FileWatcher integration with .filescopeignore for watch-time exclusion
@@ -120,7 +120,7 @@ Plans:
 | 8. Integration Fixes | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 9. Verification Documentation | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
-| 11. .filescopeignore Support | v1.1 | 0/2 | In progress | - |
+| 11. .filescopeignore Support | 1/2 | In Progress|  | - |
 | 12. Go and Ruby Language Support | v1.1 | 0/TBD | Not started | - |
 | 13. Streaming Directory Scan | v1.1 | 0/TBD | Not started | - |
 | 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |

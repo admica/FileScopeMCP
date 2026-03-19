@@ -21,7 +21,7 @@ Requirements for v1.1 Hardening release. Each maps to roadmap phases.
 
 ### Performance
 
-- [ ] **PERF-01**: Project supports a `.filescopeignore` file (gitignore syntax) that gates directory recursion at scan time — ignored directories are never entered
+- [x] **PERF-01**: Project supports a `.filescopeignore` file (gitignore syntax) that gates directory recursion at scan time — ignored directories are never entered
 - [ ] **PERF-02**: `scanDirectory` uses streaming (async generator via `fs.promises.opendir`) instead of building the full tree in memory
 - [ ] **PERF-03**: Integrity sweep no longer polls on a fixed 30-second interval; instead, file freshness is validated lazily via mtime comparison on MCP tool access, with a full sweep only at startup
 
@@ -76,7 +76,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QUAL-02 | Phase 10 | Complete |
 | QUAL-03 | Phase 10 | Complete |
 | QUAL-04 | Phase 10 | Complete |
-| PERF-01 | Phase 11 | Pending |
+| PERF-01 | Phase 11 | Complete |
 | PERF-02 | Phase 13 | Pending |
 | PERF-03 | Phase 14 | Pending |
 | LANG-01 | Phase 12 | Pending |

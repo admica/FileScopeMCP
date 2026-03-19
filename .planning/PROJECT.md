@@ -41,7 +41,18 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ### Active
 
-(No active requirements — next milestone not yet planned)
+**Current Milestone: v1.1 Hardening**
+
+**Goal:** Fix open bugs, improve code quality, add cycle detection and richer language support, and harden performance for large codebases.
+
+**Target:**
+- ✓ Fix shallow importance propagation — BFS transitive propagation with cycle safety — Phase 10
+- ✓ Fix watcher restart backoff reset — 60s stability timer — Phase 10
+- Replace polling integrity sweep with mtime-based lazy validation
+- Add cycle detection (Tarjan's SCC) and expose via tools
+- Add Go and Ruby language support, improve existing parsers
+- Large codebase performance (streaming scan, .filescopeignore, lazy file content)
+- ✓ Code quality: consolidated fs imports, unified canonicalizePath, fixed firebase false positive, removed dead code — Phase 10
 
 ### Out of Scope
 
@@ -55,7 +66,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Context
 
-Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 180 tests passing.
+Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 184 tests passing. Phase 10 (code quality + bug fixes) complete.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -84,4 +95,4 @@ The system is a complete autonomous file intelligence platform: watches director
 | Vercel AI SDK for LLM abstraction | Unified interface across OpenAI-compatible and Anthropic providers | ✓ Good — structured output with JSON repair fallback |
 
 ---
-*Last updated: 2026-03-19 after v1.0 milestone*
+*Last updated: 2026-03-19 after Phase 10 completion*

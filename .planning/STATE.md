@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
 status: unknown
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-03-19T16:31:30Z"
-last_activity: 2026-03-19 — path normalization unified, transitive importance fixed
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-03-19T17:23:46.299Z"
+last_activity: 2026-03-19
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 3
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 10 — code-quality-and-bug-fixes
+**Current focus:** Phase 11 — .filescopeignore-support
 
 ## Current Position
 
-Phase: 10 (code-quality-and-bug-fixes) — COMPLETE
-Plan: 2 of 2 (complete)
+Phase: 11 (.filescopeignore-support) — EXECUTING
+Plan: 1 of 2
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ Plan: 2 of 2 (complete)
 *Updated after each plan completion*
 | Phase 10-code-quality-and-bug-fixes P01 | 3 | 2 tasks | 3 files |
 | Phase 10-code-quality-and-bug-fixes P02 | 6 | 2 tasks | 5 files |
+| Phase 11-filescopeignore-support P01 | 4 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,9 @@ Key v1.1 decisions:
 - [Phase 10-code-quality-and-bug-fixes]: stabilityTimer approach: 60s consecutive uptime required to reset backoff counter, timer cleared on any restart or shutdown
 - [Phase 10-code-quality-and-bug-fixes P02]: canonicalizePath lives in file-utils.ts; storage-utils.ts re-exports it — eliminates circular dependency that existed when file-utils.ts imported saveFileTree (unused)
 - [Phase 10-code-quality-and-bug-fixes P02]: BFS with visited set in recalculateImportanceForAffected — prevents stack overflow on deep chains and handles circular deps safely
+- [Phase 11-filescopeignore-support]: ignore package chosen for full gitignore semantics in .filescopeignore support — negation, globstar, directory anchoring all handled correctly
+- [Phase 11-filescopeignore-support]: isDir parameter added to isExcluded() for directory-only pattern disambiguation (dist/ probed as rel+'/')
+- [Phase 11-filescopeignore-support]: Removed early return in isExcluded() when excludePatterns empty — .filescopeignore rules must evaluate even without config patterns
 
 ### Pending Todos
 
@@ -81,6 +85,6 @@ None.
 
 ## Session Continuity
 
-Last activity: 2026-03-19 — path normalization unified, transitive importance BFS fix
-Stopped at: Completed 10-02-PLAN.md
+Last activity: 2026-03-19
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None

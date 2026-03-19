@@ -1,6 +1,6 @@
 import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp, calculateImportance, isExcluded } from './file-utils';
 import { FileNode } from './types';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -415,5 +415,104 @@ describe('.filescopeignore integration in isExcluded', () => {
 
     const dirPath = path.join(tempDir, 'coverage');
     expect(isExcluded(dirPath, tempDir, true)).toBe(true);
+  });
+});
+
+describe('FileWatcher .filescopeignore integration', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescopemcp-watcher-'));
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('suppresses onFileEvent callback for paths matching .filescopeignore rules (build/ pattern)', async () => {
+    const { FileWatcher } = await import('./file-watcher.js');
+    const globalState = await import('./global-state.js');
+
+    // Mock getFilescopeIgnore to return an Ignore instance matching "build/"
+    const ignoreLib = (await import('ignore')).default;
+    const ig = ignoreLib().add('build/');
+    vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(ig);
+    vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: [] } as any);
+
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const watcher = new FileWatcher(config as any, tempDir);
+
+    const callback = vi.fn();
+    watcher.addEventCallback(callback);
+
+    // Directly call the private onFileEvent via prototype access
+    const ignoredFilePath = path.join(tempDir, 'build', 'output.js');
+    (watcher as any).onFileEvent(ignoredFilePath, 'add');
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('delivers onFileEvent callback for paths NOT matching .filescopeignore rules', async () => {
+    const { FileWatcher } = await import('./file-watcher.js');
+    const globalState = await import('./global-state.js');
+
+    const ignoreLib = (await import('ignore')).default;
+    const ig = ignoreLib().add('build/');
+    vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(ig);
+    vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: [] } as any);
+
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const watcher = new FileWatcher(config as any, tempDir);
+
+    const callback = vi.fn();
+    watcher.addEventCallback(callback);
+
+    // src/index.ts is NOT in build/ — should fire the callback
+    const allowedFilePath = path.join(tempDir, 'src', 'index.ts');
+    (watcher as any).onFileEvent(allowedFilePath, 'change');
+
+    expect(callback).toHaveBeenCalledOnce();
+    expect(callback).toHaveBeenCalledWith(expect.stringContaining('src'), 'change');
+  });
+
+  it('getIgnoredPatterns returns existing config patterns when no .filescopeignore exists', async () => {
+    const { FileWatcher } = await import('./file-watcher.js');
+    const globalState = await import('./global-state.js');
+
+    vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(null);
+    vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: ['**/*.log', 'node_modules'] } as any);
+
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const watcher = new FileWatcher(config as any, tempDir);
+
+    const patterns = (watcher as any).getIgnoredPatterns();
+    expect(patterns).toContain('**/*.log');
+    expect(patterns).toContain('node_modules');
+  });
+
+  it('buildIgnoredOption returns a function when .filescopeignore is present', async () => {
+    const { FileWatcher } = await import('./file-watcher.js');
+    const globalState = await import('./global-state.js');
+
+    const ignoreLib = (await import('ignore')).default;
+    const ig = ignoreLib().add('build/');
+    vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(ig);
+    vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: [] } as any);
+
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const watcher = new FileWatcher(config as any, tempDir);
+
+    const ignoredOption = (watcher as any).buildIgnoredOption();
+    expect(typeof ignoredOption).toBe('function');
+
+    // Should return true for a path inside build/
+    const buildPath = path.join(tempDir, 'build', 'output.js');
+    expect(ignoredOption(buildPath)).toBe(true);
+
+    // Should return false for a path not in build/
+    const srcPath = path.join(tempDir, 'src', 'index.ts');
+    expect(ignoredOption(srcPath)).toBe(false);
   });
 });
