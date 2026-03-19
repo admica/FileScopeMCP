@@ -67,6 +67,11 @@ export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);
 }
 
+// Go import regexes — two-pass approach per Go Language Specification
+const GO_SINGLE_IMPORT_RE = /^import\s+(?:[\w_.]+\s+)?"([^"]+)"/gm;
+const GO_GROUPED_BLOCK_RE = /^import\s*\(([\s\S]*?)\)/gm;
+const GO_BLOCK_LINE_RE = /^\s*(?:[\w_.]+\s+)?"([^"]+)"/gm;
+
 // Note: .ts, .tsx, .js, .jsx entries removed — those file types now use AST-based
 // import extraction via extractSnapshot() from change-detector/ast-parser.ts (CHNG-04).
 // All other languages continue to use the regex patterns below.
@@ -87,6 +92,82 @@ const IMPORT_PATTERNS: { [key: string]: RegExp } = {
  * Utility function to detect unresolved template literals in strings
  * This helps prevent treating template literals like ${importPath} as actual import paths
  */
+/**
+ * Reads the Go module name from go.mod in the given project root.
+ * Returns null if go.mod is absent or doesn't contain a valid module directive.
+ */
+export async function readGoModuleName(projectRoot: string): Promise<string | null> {
+  try {
+    const goModPath = path.join(projectRoot, 'go.mod');
+    const content = await fsPromises.readFile(goModPath, 'utf-8');
+    const m = content.match(/^module\s+(\S+)/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parses Go import statements from file content and resolves them to either
+ * local filesystem dependencies (intra-project) or external package dependencies.
+ *
+ * Go imports reference packages (directories), not individual files.
+ * Intra-project imports are identified by matching the go.mod module name prefix.
+ */
+async function resolveGoImports(
+  content: string,
+  currentFile: string,
+  projectRoot: string,
+  moduleName: string | null
+): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[] }> {
+  const dependencies: string[] = [];
+  const packageDependencies: PackageDependency[] = [];
+  const importPaths: string[] = [];
+
+  // Pass 1: Single-line imports
+  let match;
+  const singleRe = new RegExp(GO_SINGLE_IMPORT_RE.source, GO_SINGLE_IMPORT_RE.flags);
+  while ((match = singleRe.exec(content)) !== null) {
+    importPaths.push(match[1]);
+  }
+
+  // Pass 2: Grouped import blocks
+  const blockRe = new RegExp(GO_GROUPED_BLOCK_RE.source, GO_GROUPED_BLOCK_RE.flags);
+  while ((match = blockRe.exec(content)) !== null) {
+    const blockContent = match[1];
+    const lineRe = new RegExp(GO_BLOCK_LINE_RE.source, GO_BLOCK_LINE_RE.flags);
+    let lineMatch;
+    while ((lineMatch = lineRe.exec(blockContent)) !== null) {
+      importPaths.push(lineMatch[1]);
+    }
+  }
+
+  // Classify and resolve each import path
+  for (const importPath of importPaths) {
+    if (moduleName && importPath.startsWith(moduleName + '/')) {
+      // Intra-project import: strip module prefix, resolve to filesystem
+      const relPath = importPath.slice(moduleName.length + 1);
+      const absPath = path.join(projectRoot, relPath);
+      const normalizedAbsPath = canonicalizePath(absPath);
+      // Go imports reference packages (directories), not individual files.
+      // Check if the directory exists.
+      try {
+        await fsPromises.access(normalizedAbsPath);
+        dependencies.push(normalizedAbsPath);
+      } catch {
+        // Directory doesn't exist — skip silently
+      }
+    } else {
+      // External package dependency
+      const pkgDep = new PackageDependency();
+      pkgDep.name = importPath;
+      packageDependencies.push(pkgDep);
+    }
+  }
+
+  return { dependencies, packageDependencies };
+}
+
 function isUnresolvedTemplateLiteral(str: string): boolean {
   // Check for ${...} pattern which indicates an unresolved template literal
   return typeof str === 'string' && 
@@ -165,6 +246,13 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
       } else {
         importance += 1;
       }
+      break;
+    case '.go':
+      importance += 2;
+      break;
+    case '.mod':
+      if (fileName === 'go') importance += 3;
+      else importance += 1;
       break;
     default:
       importance += 0;
@@ -419,6 +507,9 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
   // Handle special case for current directory
   const normalizedBaseDir = path.normalize(baseDir);
   const normalizedDirPath = path.normalize(currentDir);
+
+  // Cache go.mod module name — read once per top-level scan
+  let goModuleName: string | null | undefined = undefined;
   
   log(`  - Normalized base dir: ${normalizedBaseDir}`);
   log(`  - Normalized current dir: ${normalizedDirPath}`);
@@ -547,6 +638,18 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
           }
         } catch (error) {
           log(`Failed to read or process file ${fullPath} (AST path):`, error);
+        }
+      } else if (ext === '.go') {
+        try {
+          const content = await fsPromises.readFile(fullPath, 'utf-8');
+          if (goModuleName === undefined) {
+            goModuleName = await readGoModuleName(normalizedBaseDir);
+          }
+          const goResult = await resolveGoImports(content, normalizedFullPath, normalizedBaseDir, goModuleName);
+          dependencies.push(...goResult.dependencies);
+          packageDependencies.push(...goResult.packageDependencies);
+        } catch (error) {
+          log(`Failed to read or process Go file ${fullPath}:`, error);
         }
       } else if (importPattern) {
         try {
@@ -938,6 +1041,16 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
       }
     } catch (readError) {
       log(`[analyzeNewFile] Error reading file ${filePath} (AST path): ${readError}`);
+    }
+  } else if (ext === '.go') {
+    try {
+      const content = await fsPromises.readFile(filePath, 'utf-8');
+      const moduleName = await readGoModuleName(projectRoot);
+      const goResult = await resolveGoImports(content, filePath, projectRoot, moduleName);
+      dependencies.push(...goResult.dependencies);
+      packageDependencies.push(...goResult.packageDependencies);
+    } catch (readError) {
+      log(`[analyzeNewFile] Error reading Go file ${filePath}: ${readError}`);
     }
   } else {
     const pattern = IMPORT_PATTERNS[ext];
