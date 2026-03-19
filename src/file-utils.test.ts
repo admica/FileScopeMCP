@@ -707,3 +707,167 @@ func main() {}
     expect(modNode!.importance).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('Ruby import parsing', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescopemcp-ruby-'));
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('resolveRubyImports extracts require_relative and resolves relative to calling file with .rb probing', async () => {
+    // Create lib/helper.rb
+    const libDir = path.join(tempDir, 'lib');
+    fs.mkdirSync(libDir, { recursive: true });
+    fs.writeFileSync(path.join(libDir, 'helper.rb'), '# helper');
+
+    // Create app.rb that require_relative 'lib/helper'
+    const appContent = "require_relative 'lib/helper'\n";
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
+    expect(appNode!.dependencies![0]).toContain('helper.rb');
+  });
+
+  it('resolveRubyImports extracts require with ./ prefix and resolves with .rb probing', async () => {
+    const modelsDir = path.join(tempDir, 'models');
+    fs.mkdirSync(modelsDir, { recursive: true });
+    fs.writeFileSync(path.join(modelsDir, 'user.rb'), '# user model');
+
+    const appContent = "require './models/user'\n";
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
+    expect(appNode!.dependencies![0]).toContain('user.rb');
+  });
+
+  it('resolveRubyImports extracts require with ../ prefix and resolves with .rb probing', async () => {
+    const sharedDir = path.join(tempDir, 'shared');
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.writeFileSync(path.join(sharedDir, 'utils.rb'), '# utils');
+
+    const subDir = path.join(tempDir, 'sub');
+    fs.mkdirSync(subDir, { recursive: true });
+    const appContent = "require '../shared/utils'\n";
+    const appFile = path.join(subDir, 'worker.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    // Navigate into sub/ directory to find worker.rb
+    const subNode = tree.children?.find(c => c.name === 'sub');
+    const workerNode = subNode?.children?.find(c => c.name === 'worker.rb');
+    expect(workerNode).toBeDefined();
+    expect(workerNode!.dependencies!.length).toBeGreaterThan(0);
+    expect(workerNode!.dependencies![0]).toContain('utils.rb');
+  });
+
+  it('resolveRubyImports classifies bare require as package dependency', async () => {
+    const appContent = "require 'json'\nrequire 'active_record'\n";
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    const pkgNames = appNode!.packageDependencies!.map(p => p.name);
+    expect(pkgNames).toContain('json');
+    expect(pkgNames).toContain('active_record');
+  });
+
+  it('resolveRubyImports skips paths containing Ruby interpolation #{}', async () => {
+    const appContent = `require "#{ENV['HOME']}/config"\nrequire 'json'\n`;
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    // Should have json as package dep but NOT the interpolated path
+    expect(appNode!.packageDependencies!.some(p => p.name === 'json')).toBe(true);
+    expect(appNode!.dependencies!.length).toBe(0);
+    // The interpolated string should not appear anywhere
+    expect(appNode!.packageDependencies!.some(p => p.name?.includes('ENV'))).toBe(false);
+  });
+
+  it('resolveRubyImports handles parenthesized require form', async () => {
+    const appContent = "require('net/http')\n";
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    expect(appNode!.packageDependencies!.some(p => p.name === 'net')).toBe(true);
+  });
+
+  it('resolveRubyImports handles parenthesized require_relative form', async () => {
+    fs.writeFileSync(path.join(tempDir, 'foo.rb'), '# foo');
+    const appContent = "require_relative('foo')\n";
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
+    expect(appNode!.dependencies![0]).toContain('foo.rb');
+  });
+
+  it('resolveRubyImports resolves path with explicit .rb extension without doubling', async () => {
+    fs.writeFileSync(path.join(tempDir, 'foo.rb'), '# foo');
+    const appContent = "require_relative 'foo.rb'\n";
+    const appFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(appFile, appContent);
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
+    // Should resolve to foo.rb, NOT foo.rb.rb
+    expect(appNode!.dependencies![0]).toContain('foo.rb');
+    expect(appNode!.dependencies![0]).not.toContain('foo.rb.rb');
+  });
+
+  it('calculateInitialImportance returns >= 2 for .rb files', async () => {
+    const rbFile = path.join(tempDir, 'app.rb');
+    fs.writeFileSync(rbFile, '# ruby file');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const appNode = tree.children?.find(c => c.name === 'app.rb');
+    expect(appNode).toBeDefined();
+    expect(appNode!.importance).toBeGreaterThanOrEqual(2);
+  });
+
+  it('calculateInitialImportance returns >= 3 for Gemfile', async () => {
+    fs.writeFileSync(path.join(tempDir, 'Gemfile'), "source 'https://rubygems.org'\ngem 'rails'\n");
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const tree = await scanDirectory(tempDir);
+    const gemfileNode = tree.children?.find(c => c.name === 'Gemfile');
+    expect(gemfileNode).toBeDefined();
+    expect(gemfileNode!.importance).toBeGreaterThanOrEqual(3);
+  });
+});
