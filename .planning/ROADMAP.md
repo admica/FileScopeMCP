@@ -86,7 +86,10 @@ Plans:
   1. Projects with 10,000+ files complete an initial scan without exhausting process memory, measured by peak RSS not growing proportionally with file count
   2. The streamed scan produces an identical file tree and dependency graph to the previous eager scan for the same project directory
   3. `.filescopeignore` exclusion remains a pre-recursion gate in the streaming scan — excluded directories are never entered by the async generator
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 13-01-PLAN.md — Convert scanDirectory to async generator with opendir, add collectStream test helper
+- [ ] 13-02-PLAN.md — Coordinator two-pass integration (stream-to-SQLite, dependency extraction, importance calculation)
 
 ### Phase 14: mtime-Based Lazy Validation
 **Goal**: The 30-second polling integrity sweep is eliminated — file freshness is validated on demand when MCP tools access file data, with a startup-only full sweep for new/deleted file detection
@@ -124,7 +127,7 @@ Plans:
 | 9. Verification Documentation | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
 | 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
-| 12. Go and Ruby Language Support | 2/2 | Complete   | 2026-03-19 | - |
-| 13. Streaming Directory Scan | v1.1 | 0/TBD | Not started | - |
+| 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
+| 13. Streaming Directory Scan | v1.1 | 0/2 | Not started | - |
 | 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |
 | 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |
