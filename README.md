@@ -4,7 +4,7 @@
 
 <!-- Add Badges Here (e.g., License, Version, Build Status) -->
 [![Build Status](https://github.com/admica/FileScopeMCP/actions/workflows/build.yml/badge.svg)](https://github.com/admica/FileScopeMCP/actions)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.x-green)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.x-green)](https://nodejs.org/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/admica/FileScopeMCP)](https://archestra.ai/mcp-catalog/admica__filescopemcp)
@@ -73,15 +73,24 @@ All of this information is exposed to your AI assistant through the Model Contex
 - **Multi-Provider LLM Support**
   - Anthropic (Claude) via `@ai-sdk/anthropic` — uses `ANTHROPIC_API_KEY` environment variable.
   - OpenAI-compatible via `@ai-sdk/openai-compatible` — works with Ollama, vLLM, and any OpenAI-compatible API.
-  - Configurable model, baseURL, and apiKey per-project in `FileScopeMCP-config.json`.
+  - Configurable model, baseURL, and apiKey per-project in `config.json`.
   - Local-first default: Ollama on `localhost:11434` with `qwen3-coder:14b-instruct`.
   - Structured output with JSON repair fallback for local models that don't follow schemas perfectly.
 
 - **Daemon Mode**
   - Runs as a standalone daemon (`--daemon --base-dir=<path>`) for 24/7 operation without an MCP client connected.
-  - PID file guard (`/tmp/filescope-<hash>.pid`) prevents concurrent daemons on the same project.
+  - PID file guard (`.filescope.pid` in the project root) prevents concurrent daemons on the same project.
   - Graceful shutdown on SIGTERM/SIGINT — flushes pending jobs before exit.
   - File-only logging to `.filescope-daemon.log` in the project root — no stdout pollution.
+
+## Prerequisites
+
+- **Node.js 22+** — required. Earlier versions may work but are untested. Download from [nodejs.org](https://nodejs.org/).
+- **npm** — comes with Node.js.
+- **Native build tools** (usually optional) — `better-sqlite3` and `tree-sitter` ship prebuilt binaries for most platforms. If prebuilds aren't available for your OS/arch, `npm install` will fall back to compiling from source, which requires:
+  - **Linux:** `python3`, `make`, `gcc` (e.g., `sudo apt install build-essential python3`)
+  - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+  - **Windows:** Visual Studio Build Tools with C++ workload
 
 ## Installation
 
@@ -182,6 +191,55 @@ node dist/mcp-server.js --daemon --base-dir=/path/to/project
 
 The daemon watches the project, runs the integrity sweep, and keeps the LLM pipeline active 24/7. Logs are written to `.filescope-daemon.log` in the project root.
 
+## Quick Start Checklist
+
+After installation, walk through these steps to verify everything is working:
+
+**1. Verify the build succeeded:**
+```bash
+ls dist/mcp-server.js   # Should exist after build
+```
+
+**2. Verify Claude Code registration:**
+```bash
+claude mcp list          # Should show FileScopeMCP in the list
+```
+
+**3. Start a Claude Code session and initialize:**
+```
+set_project_path(path: "/path/to/your/project")
+```
+You should see: `Project path set to /path/to/your/project. File tree built and saved to SQLite.`
+
+**4. Confirm files are tracked:**
+```
+find_important_files(limit: 5)
+```
+You should see a list of your most important files with importance scores.
+
+**5. (Optional) Enable the LLM pipeline:**
+```
+toggle_llm(enabled: true)
+```
+Requires Ollama running locally (default) or a configured LLM provider — see [Configuration](#configuration).
+
+**6. (Optional) Check LLM status:**
+```
+get_llm_status()
+```
+Should show `running: true` and token counters.
+
+**7. Add generated files to your `.gitignore`:**
+```gitignore
+# FileScopeMCP
+.filescope.db
+.filescope.db-wal
+.filescope.db-shm
+.filescope.pid
+.filescope-daemon.log
+mcp-debug.log
+```
+
 ## How It Works
 
 ### Dependency Detection
@@ -239,12 +297,31 @@ All file tree data is stored in `.filescope.db` (SQLite, WAL mode) in the projec
 
 **Persistent exclusions:** When you call `exclude_and_remove`, the pattern is written to `FileScopeMCP-excludes.json` in the project root. This file is loaded automatically on every server start, so exclusions survive restarts without needing to be re-applied.
 
-## LLM Configuration
+## Configuration
 
-Configure the LLM pipeline in `FileScopeMCP-config.json` in the project root:
+FileScopeMCP uses `config.json` in the project root for all settings. This file is **optional** — sensible defaults are used when it doesn't exist, and it's created automatically when you change settings via MCP tools.
+
+### Full config.json example
 
 ```json
 {
+  "baseDirectory": "/path/to/your/project",
+  "excludePatterns": [
+    "**/node_modules",
+    "**/.git",
+    "**/dist",
+    "**/build",
+    "**/coverage"
+  ],
+  "fileWatching": {
+    "enabled": true,
+    "ignoreDotFiles": true,
+    "autoRebuildTree": true,
+    "maxWatchedDirectories": 1000,
+    "watchForNewFiles": true,
+    "watchForDeleted": true,
+    "watchForChanged": true
+  },
   "llm": {
     "enabled": true,
     "provider": "openai-compatible",
@@ -252,15 +329,34 @@ Configure the LLM pipeline in `FileScopeMCP-config.json` in the project root:
     "baseURL": "http://localhost:11434/v1",
     "maxTokensPerMinute": 40000,
     "tokenBudget": 1000000
-  }
+  },
+  "version": "1.0.0"
 }
 ```
 
-**Provider options:**
-- `"openai-compatible"` — Ollama, vLLM, or any OpenAI-compatible API. Set `baseURL` to the API endpoint and optionally `apiKey`.
-- `"anthropic"` — Claude models via Anthropic API. Uses `ANTHROPIC_API_KEY` environment variable (or override with `apiKey` field).
+### LLM provider options
 
-When `toggle_llm` is called with `enabled: true` and no existing config, defaults to Ollama with `qwen3-coder:14b-instruct` on `localhost:11434`.
+| Provider | `provider` value | Auth | Use case |
+|----------|-----------------|------|----------|
+| Ollama | `"openai-compatible"` | None needed | Local inference, free |
+| vLLM | `"openai-compatible"` | Optional `apiKey` | Self-hosted GPU server |
+| OpenAI-compatible API | `"openai-compatible"` | `apiKey` or env var | Any compatible endpoint |
+| Anthropic (Claude) | `"anthropic"` | `ANTHROPIC_API_KEY` env var or `apiKey` field | Cloud API |
+
+**Default behavior:** When `toggle_llm(enabled: true)` is called with no existing LLM config, the system auto-creates a config targeting Ollama at `localhost:11434` with `qwen3-coder:14b-instruct`.
+
+### LLM config fields
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Whether the LLM pipeline runs |
+| `provider` | `"anthropic"` | Provider adapter to use |
+| `model` | `"claude-3-haiku-20240307"` | Model identifier |
+| `baseURL` | — | API endpoint (required for `openai-compatible`) |
+| `apiKey` | — | API key override (otherwise uses env vars) |
+| `maxTokensPerCall` | `1024` | Maximum tokens per LLM call |
+| `maxTokensPerMinute` | `40000` | Sliding-window rate limit |
+| `tokenBudget` | unlimited | Lifetime token cap; pipeline stops when reached |
 
 ## Technical Details
 
@@ -277,7 +373,7 @@ When `toggle_llm` is called with `enabled: true` and no existing config, default
 
 ## Available Tools
 
-The MCP server exposes 22 tools organized by category:
+The MCP server exposes 20 tools organized by category:
 
 ### Project Setup
 
@@ -366,12 +462,52 @@ The easiest way to get started is to enable this MCP in your AI client and let t
    ```
    get_llm_status()
    ```
+   Returns:
+   ```json
+   {
+     "enabled": true,
+     "running": true,
+     "budgetExhausted": false,
+     "lifetimeTokensUsed": 42350,
+     "tokenBudget": 1000000,
+     "maxTokensPerMinute": 40000
+   }
+   ```
 
 3. View auto-generated metadata for a file:
    ```
    get_file_importance(filepath: "/path/to/project/src/main.ts")
-   # Returns: importance, dependencies, dependents, summary, concepts, changeImpact, staleness fields
    ```
+
+**Sample response** (after LLM pipeline has processed the file):
+```json
+{
+  "path": "/path/to/project/src/main.ts",
+  "importance": 8,
+  "dependencies": ["./config.ts", "./router.ts", "./db.ts"],
+  "dependents": ["./test/main.test.ts"],
+  "packageDependencies": ["express", "dotenv"],
+  "summary": "Main entry point that initializes Express server, loads configuration, sets up routes, and starts listening on the configured port.",
+  "concepts": {
+    "functions": ["startServer", "gracefulShutdown"],
+    "classes": [],
+    "interfaces": ["ServerOptions"],
+    "exports": ["startServer", "app"],
+    "purpose": "Application entry point that wires together configuration, routing, and server lifecycle"
+  },
+  "changeImpact": {
+    "riskLevel": "high",
+    "affectedAreas": ["server startup", "route registration", "error handling"],
+    "breakingChanges": [],
+    "summary": "Central orchestration file — changes here affect all downstream request handling"
+  },
+  "summaryStale": null,
+  "conceptsStale": null,
+  "changeImpactStale": null
+}
+```
+
+When staleness fields are `null`, the metadata is current. A non-null value (epoch timestamp) means the file or a dependency changed and the LLM pipeline will regenerate that field.
 
 ### Configuring File Watching
 
@@ -401,6 +537,146 @@ The easiest way to get started is to enable this MCP in your AI client and let t
 npm test
 npm run coverage
 ```
+
+## Monitoring & Debugging
+
+### Log Files
+
+| File | When | Location |
+|------|------|----------|
+| `mcp-debug.log` | MCP server mode (disabled by default) | Working directory |
+| `.filescope-daemon.log` | Daemon mode (always on) | Project root |
+
+**MCP mode:** File logging is disabled by default. To enable it, edit `src/mcp-server.ts` line 43 and change `enableFileLogging(false, ...)` to `true`, then rebuild. MCP log messages also go to stderr, which Claude Code captures in its own logs.
+
+**Daemon mode:** File logging is always on. Logs auto-rotate at 10 MB (file is truncated and restarted). View logs in real time:
+```bash
+tail -f /path/to/project/.filescope-daemon.log
+```
+
+### Checking Status via MCP Tools
+
+From your AI assistant, you can query the system state at any time:
+
+```
+# Is the file watcher running? What events is it tracking?
+get_file_watching_status()
+
+# Is the LLM pipeline running? How many tokens have been used?
+get_llm_status()
+# Returns: { running, budgetExhausted, lifetimeTokensUsed, tokenBudget, maxTokensPerMinute }
+
+# How many files are tracked?
+debug_list_all_files()
+
+# Check if a specific file has stale metadata
+get_file_importance(filepath: "/path/to/file.ts")
+# Staleness fields: summaryStale, conceptsStale, changeImpactStale (epoch timestamps, null = not stale)
+```
+
+### Inspecting the Database Directly
+
+The SQLite database is a standard file you can query with any SQLite client:
+
+```bash
+sqlite3 /path/to/project/.filescope.db
+
+# How many files are tracked?
+SELECT COUNT(*) FROM files WHERE is_directory = 0;
+
+# Which files have LLM-generated summaries?
+SELECT path, LENGTH(summary) as summary_len FROM files WHERE summary IS NOT NULL AND is_directory = 0;
+
+# What LLM jobs are pending?
+SELECT * FROM llm_jobs WHERE status = 'pending' ORDER BY priority, created_at;
+
+# Check lifetime token usage
+SELECT * FROM llm_runtime_state;
+
+# Which files have stale metadata?
+SELECT path, summary_stale, concepts_stale, change_impact_stale FROM files WHERE summary_stale IS NOT NULL OR concepts_stale IS NOT NULL OR change_impact_stale IS NOT NULL;
+```
+
+### Daemon Process Management
+
+```bash
+# Check if a daemon is running for a project
+cat /path/to/project/.filescope.pid
+
+# Check if that PID is alive
+kill -0 $(cat /path/to/project/.filescope.pid) 2>/dev/null && echo "Running" || echo "Not running"
+
+# Graceful shutdown
+kill $(cat /path/to/project/.filescope.pid)
+
+# Start daemon
+node /path/to/FileScopeMCP/dist/mcp-server.js --daemon --base-dir=/path/to/project
+```
+
+## Troubleshooting
+
+### "Project path not set" error
+Every tool except `set_project_path` requires initialization first. Call `set_project_path(path: "/your/project")` or ensure you're using `--base-dir` when starting the server.
+
+### MCP server not appearing in Claude Code
+1. Run `claude mcp list` to check registration.
+2. If missing, run `./install-mcp-claude.sh` to register.
+3. Check `~/.claude.json` — it should have a `FileScopeMCP` entry under `mcpServers`.
+4. Restart Claude Code after registration.
+
+### `npm install` fails on native modules
+`better-sqlite3` and `tree-sitter` include native addons. If prebuilt binaries aren't available:
+- **Linux:** `sudo apt install build-essential python3`
+- **macOS:** `xcode-select --install`
+- **Windows:** Install Visual Studio Build Tools with C++ workload
+
+### LLM pipeline not generating metadata
+1. Check `get_llm_status()` — is `running` true?
+2. If `budgetExhausted` is true, the lifetime token budget has been reached. Increase `tokenBudget` in `config.json` or set to `0` for unlimited.
+3. If using Ollama, confirm it's running: `curl http://localhost:11434/v1/models`
+4. Check for errors in the log file (daemon mode) or stderr (MCP mode).
+
+### "FileScopeMCP daemon already running" error
+A PID file exists for this project. Either another daemon is running, or a previous one crashed without cleanup:
+```bash
+# Check if the PID is actually alive
+cat /path/to/project/.filescope.pid
+kill -0 <PID> 2>/dev/null && echo "Still running" || echo "Stale PID file"
+
+# If stale, remove it
+rm /path/to/project/.filescope.pid
+```
+
+### Database seems corrupted or out of date
+The SQLite database uses WAL mode for crash safety, but if something goes wrong:
+```bash
+# Delete the database — it will be rebuilt on next startup
+rm /path/to/project/.filescope.db
+rm -f /path/to/project/.filescope.db-wal
+rm -f /path/to/project/.filescope.db-shm
+```
+On the next `set_project_path` call, the system rescans the project and rebuilds the database from scratch. If legacy JSON tree files exist, they'll be auto-imported.
+
+### High token usage / runaway LLM costs
+1. Check `get_llm_status()` for `lifetimeTokensUsed`.
+2. Set a `tokenBudget` in `config.json` to cap total usage.
+3. Reduce `maxTokensPerMinute` to slow the pipeline down.
+4. The cascade engine's depth cap (10 levels) and body-only-change optimization already prevent most unnecessary calls.
+
+## Generated Files Reference
+
+Files created by FileScopeMCP in your project directory:
+
+| File | Purpose | Gitignore? |
+|------|---------|------------|
+| `.filescope.db` | SQLite database (all metadata, jobs, state) | Yes |
+| `.filescope.db-wal` | SQLite write-ahead log | Yes |
+| `.filescope.db-shm` | SQLite shared memory file | Yes |
+| `.filescope.pid` | Daemon PID lock file | Yes |
+| `.filescope-daemon.log` | Daemon log output | Yes |
+| `mcp-debug.log` | MCP server debug log (when enabled) | Yes |
+| `config.json` | Server configuration (exclude patterns, file watching, LLM settings) | Optional |
+| `FileScopeMCP-excludes.json` | Persistent exclude patterns (created by `exclude_and_remove`) | Optional |
 
 ## License
 
