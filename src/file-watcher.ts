@@ -1,7 +1,7 @@
 import * as chokidar from 'chokidar';
 import * as path from 'path';
 import { FileWatchingConfig } from './types.js';
-import { getConfig, getProjectRoot } from './global-state.js';
+import { getConfig, getProjectRoot, getFilescopeIgnore } from './global-state.js';
 import { normalizePath, globToRegExp } from './file-utils.js';
 import { error as logError, warn as logWarn, info as logInfo, debug as logDebug } from './logger.js';
 
@@ -52,7 +52,7 @@ export class FileWatcher {
     }
 
     const watchOptions: chokidar.WatchOptions = {
-      ignored: this.getIgnoredPatterns(),
+      ignored: this.buildIgnoredOption(),
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: {
@@ -227,6 +227,40 @@ export class FileWatcher {
   }
 
   /**
+   * Build the chokidar `ignored` option. Returns a function when .filescopeignore
+   * is active (to support gitignore negation semantics), otherwise returns the
+   * existing pattern array.
+   */
+  private buildIgnoredOption(): (string | RegExp)[] | ((testPath: string, stats?: import('fs').Stats) => boolean) {
+    const ig = getFilescopeIgnore();
+    const existingPatterns = this.getIgnoredPatterns();
+
+    if (!ig) {
+      return existingPatterns;
+    }
+
+    // When .filescopeignore is active, return a function that combines both checks
+    return (testPath: string, stats?: import('fs').Stats): boolean => {
+      const rel = path.relative(this.baseDir, testPath).replace(/\\/g, '/');
+      if (!rel || rel.startsWith('..')) return false;
+
+      // Check existing config patterns
+      const configMatch = existingPatterns.some(pattern => {
+        if (pattern instanceof RegExp) return pattern.test(rel);
+        return globToRegExp(String(pattern)).test(rel);
+      });
+      if (configMatch) return true;
+
+      // Check .filescopeignore
+      if (ig.ignores(rel)) return true;
+      // Directory disambiguation: stats available from chokidar for the ignored function
+      if (stats?.isDirectory?.() && ig.ignores(rel + '/')) return true;
+
+      return false;
+    };
+  }
+
+  /**
    * Handle a file event
    * @param filePath The path of the file that changed
    * @param eventType The type of event
@@ -240,15 +274,19 @@ export class FileWatcher {
     const ignoredPatterns = this.getIgnoredPatterns();
     logDebug(`FileWatcher: Ignored patterns:`, ignoredPatterns);
 
-    // Check if the file should be ignored
+    // Check if the file should be ignored by config patterns
     const shouldIgnore = ignoredPatterns.some(pattern => {
       if (pattern instanceof RegExp) return pattern.test(relativePath);
       return globToRegExp(pattern).test(relativePath);
     });
 
-    logDebug(`FileWatcher: Should ignore ${relativePath}? ${shouldIgnore ? 'YES' : 'NO'}`);
+    // Check .filescopeignore rules
+    const ig = getFilescopeIgnore();
+    const ignoredByFilescope = ig ? ig.ignores(relativePath.replace(/\\/g, '/')) : false;
 
-    if (shouldIgnore) {
+    logDebug(`FileWatcher: Should ignore ${relativePath}? config=${shouldIgnore}, filescopeignore=${ignoredByFilescope}`);
+
+    if (shouldIgnore || ignoredByFilescope) {
       logDebug(`FileWatcher: Ignoring event for ${relativePath}`);
       return;
     }
