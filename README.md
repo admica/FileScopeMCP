@@ -74,7 +74,7 @@ All of this information is exposed to your AI assistant through the Model Contex
   - Anthropic (Claude) via `@ai-sdk/anthropic` — uses `ANTHROPIC_API_KEY` environment variable.
   - OpenAI-compatible via `@ai-sdk/openai-compatible` — works with Ollama, vLLM, and any OpenAI-compatible API.
   - Configurable model, baseURL, and apiKey per-project in `config.json`.
-  - Local-first default: Ollama on `localhost:11434` with `qwen3-coder:14b-instruct`.
+  - Local-first default: Ollama on `localhost:11434` with `qwen2.5-coder:14b`.
   - Structured output with JSON repair fallback for local models that don't follow schemas perfectly.
 
 - **Daemon Mode**
@@ -325,7 +325,7 @@ FileScopeMCP uses `config.json` in the project root for all settings. This file 
   "llm": {
     "enabled": true,
     "provider": "openai-compatible",
-    "model": "qwen3-coder:14b-instruct",
+    "model": "qwen2.5-coder:14b",
     "baseURL": "http://localhost:11434/v1",
     "maxTokensPerMinute": 40000,
     "tokenBudget": 1000000
@@ -343,7 +343,7 @@ FileScopeMCP uses `config.json` in the project root for all settings. This file 
 | OpenAI-compatible API | `"openai-compatible"` | `apiKey` or env var | Any compatible endpoint |
 | Anthropic (Claude) | `"anthropic"` | `ANTHROPIC_API_KEY` env var or `apiKey` field | Cloud API |
 
-**Default behavior:** When `toggle_llm(enabled: true)` is called with no existing LLM config, the system auto-creates a config targeting Ollama at `localhost:11434` with `qwen3-coder:14b-instruct`.
+**Default behavior:** When `toggle_llm(enabled: true)` is called with no existing LLM config, the system auto-creates a config targeting Ollama at `localhost:11434` with `qwen2.5-coder:14b`.
 
 ### LLM config fields
 
@@ -399,7 +399,7 @@ The MCP server exposes 20 tools organized by category:
 
 ### LLM Pipeline
 
-- **toggle_llm**: Enable or disable background LLM processing. When enabled with no prior config, defaults to Ollama (`openai-compatible`, `qwen3-coder:14b-instruct`, `localhost:11434`)
+- **toggle_llm**: Enable or disable background LLM processing. When enabled with no prior config, defaults to Ollama (`openai-compatible`, `qwen2.5-coder:14b`, `localhost:11434`)
 - **get_llm_status**: Get pipeline status — running state, budget exhaustion flag, lifetime tokens used, token budget, and max tokens per minute
 
 ### File Watching

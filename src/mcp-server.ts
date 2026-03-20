@@ -669,11 +669,11 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       const config = getConfig();
       if (enabled && (!config?.llm)) {
         // Synthesize default local-first config BEFORE calling coordinator
-        // Per locked decision: openai-compatible (Ollama), qwen3-coder:14b-instruct, localhost:11434
+        // Per locked decision: openai-compatible (Ollama), qwen2.5-coder:14b, localhost:11434
         const defaultLlmConfig = {
           enabled: true,
           provider: 'openai-compatible' as const,
-          model: 'qwen3-coder:14b-instruct',
+          model: 'qwen2.5-coder:14b',
           baseURL: 'http://localhost:11434/v1',
         };
         if (config) {
