@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
 status: unknown
-stopped_at: Completed 12-02-PLAN.md
-last_updated: "2026-03-19T18:43:29.095Z"
-last_activity: 2026-03-19
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-03-20T02:40:01.939Z"
+last_activity: 2026-03-20
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 8
+  completed_plans: 7
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 12 — go-and-ruby-language-support
+**Current focus:** Phase 13 — streaming-directory-scan
 
 ## Current Position
 
-Phase: 12 (go-and-ruby-language-support) — EXECUTING
-Plan: 2 of 2
+Phase: 13 (streaming-directory-scan) — EXECUTING
+Plan: 1 of 2
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Plan: 2 of 2
 | Phase 11 P02 | 8 | 1 tasks | 2 files |
 | Phase 12 P01 | 15min | 1 tasks | 2 files |
 | Phase 12 P02 | 4min | 1 tasks | 2 files |
+| Phase 13-streaming-directory-scan P01 | 18min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,8 @@ Key v1.1 decisions:
 - [Phase 12]: Go imports resolve to directories (not individual .go files) since Go packages are directory-based
 - [Phase 12]: Ruby extension probing order ['', '.rb'] prevents doubling explicit .rb extensions
 - [Phase 12]: Gemfile importance uses explicit fileName check (+3) not significantNames array
+- [Phase 13-streaming-directory-scan]: scanDirectory yields metadata-only FileNodes — dependency extraction deferred to coordinator Pass 2 (Plan 02)
+- [Phase 13-streaming-directory-scan]: coordinator.ts given minimal collect-and-wrap shim until Plan 02 rewires it fully
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ None.
 
 ## Session Continuity
 
-Last activity: 2026-03-19
-Stopped at: Completed 12-02-PLAN.md
+Last activity: 2026-03-20
+Stopped at: Completed 13-01-PLAN.md
 Resume file: None

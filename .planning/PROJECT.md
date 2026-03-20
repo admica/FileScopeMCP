@@ -13,7 +13,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 ### Validated
 
 - ✓ Recursive directory scanning with file tree building — existing
-- ✓ Multi-language import/dependency parsing (JS/TS, Python, C/C++, Rust, Lua, Zig, PHP, C#, Java) — existing
+- ✓ Multi-language import/dependency parsing (JS/TS, Python, C/C++, Rust, Lua, Zig, PHP, C#, Java, Go, Ruby) — Phase 12
 - ✓ File importance scoring (0-10 scale based on dependents, type, location) — existing
 - ✓ Real-time file system watching with debounced change detection — existing
 - ✓ Atomic state mutations via async mutex — existing
@@ -50,8 +50,9 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - ✓ Fix watcher restart backoff reset — 60s stability timer — Phase 10
 - Replace polling integrity sweep with mtime-based lazy validation
 - Add cycle detection (Tarjan's SCC) and expose via tools
-- Add Go and Ruby language support, improve existing parsers
-- Large codebase performance (streaming scan, .filescopeignore, lazy file content)
+- ✓ Go and Ruby language support — go.mod resolution, require/require_relative parsing — Phase 12
+- ✓ .filescopeignore support — gitignore-syntax exclusion for scan-time and watch-time — Phase 11
+- Large codebase performance (streaming scan, lazy file content)
 - ✓ Code quality: consolidated fs imports, unified canonicalizePath, fixed firebase false positive, removed dead code — Phase 10
 
 ### Out of Scope
@@ -66,7 +67,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Context
 
-Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 184 tests passing. Phase 10 (code quality + bug fixes) complete.
+Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 201 tests passing. Phase 10 (code quality + bug fixes), Phase 11 (.filescopeignore support), and Phase 12 (Go and Ruby language support) complete.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -95,4 +96,4 @@ The system is a complete autonomous file intelligence platform: watches director
 | Vercel AI SDK for LLM abstraction | Unified interface across OpenAI-compatible and Anthropic providers | ✓ Good — structured output with JSON repair fallback |
 
 ---
-*Last updated: 2026-03-19 after Phase 10 completion*
+*Last updated: 2026-03-19 after Phase 12 completion*
