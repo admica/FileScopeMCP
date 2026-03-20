@@ -780,28 +780,20 @@ export function setFileImportance(fileTree: FileNode, filePath: string, importan
 
 async function createFileTree(baseDir: string): Promise<FileNode> {
   const normalizedBaseDir = path.normalize(baseDir);
-  const nodes = await scanDirectory(normalizedBaseDir);
-  
-  // The first node should be the root directory
-  if (nodes.isDirectory && nodes.path === normalizedBaseDir) {
-    return nodes;
+
+  // Collect flat list from generator, then build a synthetic root node
+  const fileNodes: FileNode[] = [];
+  for await (const node of scanDirectory(normalizedBaseDir)) {
+    fileNodes.push(node);
   }
-  
-  // If for some reason we didn't get a root node, create one
+
   const rootNode: FileNode = {
     path: normalizedBaseDir,
     name: path.basename(normalizedBaseDir),
     isDirectory: true,
-    children: []
+    children: fileNodes,
   };
-  
-  // Add all nodes that don't have a parent
-  for (const node of nodes.children || []) {
-    if (path.dirname(node.path) === normalizedBaseDir) {
-      rootNode.children?.push(node);
-    }
-  }
-  
+
   return rootNode;
 }
 
