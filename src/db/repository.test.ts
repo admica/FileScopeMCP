@@ -12,6 +12,7 @@ import {
   getDependents,
   setDependencies,
   getAllFiles,
+  getAllLocalImportEdges,
 } from './repository.js';
 import type { FileNode, PackageDependency } from '../types.js';
 
@@ -213,5 +214,54 @@ describe('getAllFiles', () => {
   it('returns empty array when no files exist', () => {
     const all = getAllFiles();
     expect(all).toHaveLength(0);
+  });
+});
+
+describe('getAllLocalImportEdges', () => {
+  it('returns only local_import edges, excluding package_import edges', () => {
+    // Insert file rows required by the dependency schema expectations
+    upsertFile(makeFile({ path: '/project/a.ts', name: 'a.ts' }));
+    upsertFile(makeFile({ path: '/project/b.ts', name: 'b.ts' }));
+    upsertFile(makeFile({ path: '/project/c.ts', name: 'c.ts' }));
+    upsertFile(makeFile({ path: '/project/d.ts', name: 'd.ts' }));
+
+    // Insert 3 local_import edges directly via setDependencies
+    setDependencies('/project/a.ts', ['/project/b.ts', '/project/c.ts'], []);
+    setDependencies('/project/b.ts', ['/project/d.ts'], []);
+
+    // Insert 1 package_import edge
+    const pkgDep = {
+      name: 'lodash',
+      version: '^4.0.0',
+      path: '/project/node_modules/lodash',
+      scope: undefined,
+      isDevDependency: false,
+    } as unknown as import('../types.js').PackageDependency;
+    setDependencies('/project/c.ts', [], [pkgDep]);
+
+    const edges = getAllLocalImportEdges();
+
+    // Should return exactly 3 local_import rows (not the package_import)
+    expect(edges).toHaveLength(3);
+
+    // All rows must have source_path and target_path string properties
+    for (const edge of edges) {
+      expect(typeof edge.source_path).toBe('string');
+      expect(typeof edge.target_path).toBe('string');
+    }
+
+    // The package_import edge must NOT appear in the result
+    const targetPaths = edges.map(e => e.target_path);
+    expect(targetPaths).not.toContain('/project/node_modules/lodash');
+
+    // All returned edges should be local_import edges we inserted
+    const sourcePaths = edges.map(e => e.source_path);
+    expect(sourcePaths).toContain('/project/a.ts');
+    expect(sourcePaths).toContain('/project/b.ts');
+  });
+
+  it('returns empty array when no local_import edges exist', () => {
+    const edges = getAllLocalImportEdges();
+    expect(edges).toEqual([]);
   });
 });

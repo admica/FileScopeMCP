@@ -198,6 +198,20 @@ export function getDependents(filePath: string): string[] {
 }
 
 /**
+ * Returns all local_import dependency edges in one batch query.
+ * Used by cycle detection to build the full dependency graph without N+1 queries.
+ * Package imports are excluded — they are not actionable for cycle detection.
+ */
+export function getAllLocalImportEdges(): Array<{ source_path: string; target_path: string }> {
+  const sqlite = getSqlite();
+  return sqlite
+    .prepare(
+      "SELECT source_path, target_path FROM file_dependencies WHERE dependency_type = 'local_import'"
+    )
+    .all() as Array<{ source_path: string; target_path: string }>;
+}
+
+/**
  * Replaces all dependency rows for the given source file.
  * Deletes existing source_path rows first, then inserts fresh.
  * Stores local deps as 'local_import' and package deps as 'package_import'
