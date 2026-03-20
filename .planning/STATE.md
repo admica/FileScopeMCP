@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
 status: unknown
-stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-03-20T02:40:01.939Z"
+stopped_at: Completed 13-02-PLAN.md
+last_updated: "2026-03-20T02:48:57.072Z"
 last_activity: 2026-03-20
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -49,6 +49,7 @@ Plan: 1 of 2
 | Phase 12 P01 | 15min | 1 tasks | 2 files |
 | Phase 12 P02 | 4min | 1 tasks | 2 files |
 | Phase 13-streaming-directory-scan P01 | 18min | 2 tasks | 3 files |
+| Phase 13 P02 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,9 @@ Key v1.1 decisions:
 - [Phase 12]: Gemfile importance uses explicit fileName check (+3) not significantNames array
 - [Phase 13-streaming-directory-scan]: scanDirectory yields metadata-only FileNodes — dependency extraction deferred to coordinator Pass 2 (Plan 02)
 - [Phase 13-streaming-directory-scan]: coordinator.ts given minimal collect-and-wrap shim until Plan 02 rewires it fully
+- [Phase 13-streaming-directory-scan]: buildFileTree two-pass replaces shim: Pass 1 batch-upserts FileNodes via sqlite.transaction, Pass 2 extracts deps per-file, Pass 2b calculates importance via reconstructTreeFromDb
+- [Phase 13-streaming-directory-scan]: extractSnapshot and isTreeSitterLanguage imported directly from change-detector/ast-parser.js in coordinator (not re-exported through file-utils)
+- [Phase 13-streaming-directory-scan]: Skipped dependency tests converted to direct resolveGoImports/resolveRubyImports calls — no scanDirectory wrapper needed in tests
 
 ### Pending Todos
 
@@ -98,5 +102,5 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-20
-Stopped at: Completed 13-01-PLAN.md
+Stopped at: Completed 13-02-PLAN.md
 Resume file: None

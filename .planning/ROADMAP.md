@@ -31,7 +31,7 @@ See: `.planning/milestones/v1.0-ROADMAP.md` for full phase details.
 - [x] **Phase 10: Code Quality and Bug Fixes** - Establish a clean, correct baseline by eliminating dead code, consolidating imports, fixing path normalization, correcting the firebase false positive, fixing transitive importance propagation, and fixing watcher restart backoff (completed 2026-03-19)
 - [x] **Phase 11: .filescopeignore Support** - Add gitignore-syntax project exclusion file that gates directory recursion at scan time (completed 2026-03-19)
 - [x] **Phase 12: Go and Ruby Language Support** - Add full dependency parsing for Go (import blocks + go.mod resolution) and Ruby (require/require_relative) (completed 2026-03-19)
-- [ ] **Phase 13: Streaming Directory Scan** - Replace eager full-tree memory build with async generator that yields one FileNode at a time
+- [x] **Phase 13: Streaming Directory Scan** - Replace eager full-tree memory build with async generator that yields one FileNode at a time (completed 2026-03-20)
 - [ ] **Phase 14: mtime-Based Lazy Validation** - Replace 30-second polling integrity sweep with mtime comparison on MCP tool access
 - [ ] **Phase 15: Cycle Detection** - Add Tarjan's SCC cycle detection and expose via detect_cycles and get_cycles_for_file MCP tools
 
@@ -86,7 +86,7 @@ Plans:
   1. Projects with 10,000+ files complete an initial scan without exhausting process memory, measured by peak RSS not growing proportionally with file count
   2. The streamed scan produces an identical file tree and dependency graph to the previous eager scan for the same project directory
   3. `.filescopeignore` exclusion remains a pre-recursion gate in the streaming scan — excluded directories are never entered by the async generator
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 13-01-PLAN.md — Convert scanDirectory to async generator with opendir, add collectStream test helper
 - [ ] 13-02-PLAN.md — Coordinator two-pass integration (stream-to-SQLite, dependency extraction, importance calculation)
@@ -128,6 +128,6 @@ Plans:
 | 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
 | 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
 | 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
-| 13. Streaming Directory Scan | 1/2 | In Progress|  | - |
+| 13. Streaming Directory Scan | 2/2 | Complete   | 2026-03-20 | - |
 | 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |
 | 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |
