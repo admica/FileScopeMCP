@@ -17,7 +17,7 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState, getDependencies, setDependencies } from './db/repository.js';
+import { getAllFiles, getFile, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState, getDependencies, setDependencies } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
@@ -50,7 +50,6 @@ const DEFAULT_FILE_WATCHING: FileWatchingConfig = {
 };
 
 const DEBOUNCE_DURATION_MS = 2000; // 2 seconds
-const INTEGRITY_SWEEP_INTERVAL_MS = 30_000; // 30 seconds
 
 /**
  * ServerCoordinator encapsulates all orchestration state and lifecycle for
@@ -62,7 +61,6 @@ export class ServerCoordinator {
   private fileWatcher: FileWatcher | null = null;
   private treeMutex = new AsyncMutex();
   private fileEventDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
-  private integritySweepInterval: NodeJS.Timeout | null = null;
   private _initialized = false;
   private _projectRoot: string | null = null;
   private changeDetector: ChangeDetector | null = null;
@@ -247,9 +245,9 @@ export class ServerCoordinator {
       log('Initializing file watcher for self-healing...');
       await this.initializeFileWatcher();
 
-      // Start periodic integrity sweep
-      log('Starting periodic integrity sweep...');
-      this.startIntegritySweep();
+      // Run one-time startup integrity sweep
+      log('Running startup integrity sweep...');
+      await this.runStartupIntegritySweep();
 
       this._initialized = true;
 
@@ -306,12 +304,6 @@ export class ServerCoordinator {
       clearTimeout(timer);
     }
     this.fileEventDebounceTimers.clear();
-
-    // Stop integrity sweep
-    if (this.integritySweepInterval) {
-      clearInterval(this.integritySweepInterval);
-      this.integritySweepInterval = null;
-    }
 
     // Stop file watcher
     if (this.fileWatcher) {
@@ -552,55 +544,68 @@ export class ServerCoordinator {
   }
 
   /**
-   * Start periodic integrity sweep for self-healing.
-   * Runs every INTEGRITY_SWEEP_INTERVAL_MS to detect stale, missing, or new files.
+   * Run a one-time integrity sweep at startup, blocking until complete.
+   * Detects files added/deleted/modified while server was down.
+   * No treeMutex needed — runs before _initialized = true, so no concurrent file events.
    */
-  private startIntegritySweep(): void {
-    if (this.integritySweepInterval) clearInterval(this.integritySweepInterval);
-    this.integritySweepInterval = setInterval(() => {
-      if (!this.currentConfig || !this._initialized) return;
-
-      const config = getConfig();
-      if (!config?.fileWatching?.autoRebuildTree) {
-        log('[Integrity Sweep] Skipping: autoRebuildTree is disabled.');
+  private async runStartupIntegritySweep(): Promise<void> {
+    if (!this._projectRoot) return;
+    try {
+      const dbFiles = getAllFiles();
+      const tempTree = this.reconstructTreeFromDb(dbFiles, this._projectRoot);
+      const result = await integrityCheck(tempTree, this._projectRoot);
+      const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
+      if (totalIssues === 0) {
+        log('[Startup Sweep] No issues found.');
         return;
       }
+      log(`[Startup Sweep] Found ${totalIssues} issues. Healing...`);
+      const healDbFiles = getAllFiles();
+      const healTree = this.reconstructTreeFromDb(healDbFiles, this._projectRoot);
+      for (const filePath of result.staleFiles) {
+        await updateFileNodeOnChange(filePath, healTree, this._projectRoot);
+      }
+      for (const filePath of result.missingFiles) {
+        await removeFileNode(filePath, healTree, this._projectRoot);
+      }
+      for (const filePath of result.newFiles) {
+        await addFileNode(filePath, healTree, this._projectRoot);
+      }
+      log(`[Startup Sweep] Healed: ${result.staleFiles.length} stale, ${result.missingFiles.length} removed, ${result.newFiles.length} added`);
+    } catch (error) {
+      log(`[Startup Sweep] Error: ${error}`);
+    }
+  }
 
-      this.treeMutex.run(async () => {
-        if (!this.currentConfig || !this._initialized || !this._projectRoot) return;
-        try {
-          // Bridge: reconstruct a temporary tree from DB for integrityCheck
-          const dbFiles = getAllFiles();
-          const tempTree = this.reconstructTreeFromDb(dbFiles, this._projectRoot);
+  /**
+   * Checks if a tracked file's mtime has changed since last recorded.
+   * If stale: updates mtime in DB synchronously, queues file for LLM re-analysis.
+   * Returns true if the file was stale (caller should include stale:true in response).
+   * Returns false if fresh or file not in DB.
+   */
+  checkFileFreshness(filePath: string): boolean {
+    try {
+      const stat = fsSync.statSync(filePath);
+      const node = getFile(filePath);
+      if (!node || node.mtime === undefined) return false;
+      if (Math.abs(stat.mtimeMs - node.mtime) <= 1) return false;
 
-          const result = await integrityCheck(tempTree, this._projectRoot);
-          const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
-          if (totalIssues === 0) return;
+      // File is stale — update mtime synchronously (prevents repeated triggers)
+      node.mtime = stat.mtimeMs;
+      upsertFile(node);
 
-          log(`[Integrity Sweep] Found ${totalIssues} issues: ${result.staleFiles.length} stale, ${result.missingFiles.length} missing, ${result.newFiles.length} new`);
-
-          // Re-fetch fresh temp tree for healing calls
-          const healDbFiles = getAllFiles();
-          const healTree = this.reconstructTreeFromDb(healDbFiles, this._projectRoot);
-
-          // Auto-heal stale files
-          for (const filePath of result.staleFiles) {
-            await updateFileNodeOnChange(filePath, healTree, this._projectRoot);
-          }
-          // Auto-remove missing files
-          for (const filePath of result.missingFiles) {
-            await removeFileNode(filePath, healTree, this._projectRoot);
-          }
-          // Auto-add new files
-          for (const filePath of result.newFiles) {
-            await addFileNode(filePath, healTree, this._projectRoot);
-          }
-          log(`[Integrity Sweep] Healed: ${result.staleFiles.length} stale, ${result.missingFiles.length} removed, ${result.newFiles.length} added`);
-        } catch (error) {
-          log(`[Integrity Sweep] Error: ${error}`);
-        }
+      // Queue LLM re-analysis for the stale file
+      markSelfStale(filePath, {
+        timestamp: Date.now(),
+        isExhausted: () => this.isLlmBudgetExhausted()
       });
-    }, INTEGRITY_SWEEP_INTERVAL_MS);
+
+      log(`[LazyMtime] Stale file detected: ${filePath}`);
+      return true;
+    } catch {
+      // File deleted or unreadable — return false, let other mechanisms handle
+      return false;
+    }
   }
 
   /**
