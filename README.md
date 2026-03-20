@@ -9,15 +9,16 @@
 
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/admica/FileScopeMCP)](https://archestra.ai/mcp-catalog/admica__filescopemcp)
 
-A TypeScript-based MCP server and standalone daemon that ranks files by importance, tracks bidirectional dependencies, autonomously maintains AI-generated summaries, concepts, and change impact assessments — and keeps all of that metadata fresh in the background as your codebase changes.
+A TypeScript-based MCP server and standalone daemon that ranks files by importance, tracks bidirectional dependencies, detects circular dependency chains, autonomously maintains AI-generated summaries, concepts, and change impact assessments — and keeps all of that metadata fresh in the background as your codebase changes.
 
 ## Overview
 
 FileScopeMCP is a fully autonomous file intelligence platform. Once pointed at a project it:
 
-1. Scans the codebase and builds a dependency graph with 0–10 importance scores for every file.
+1. Scans the codebase via a streaming async directory walker and builds a dependency graph with 0–10 importance scores for every file.
 2. Watches the filesystem. When files change, it incrementally updates dependency lists and importance scores, then detects semantic changes via tree-sitter AST diffing (TS/JS) or LLM-powered diff analysis (all other languages), and propagates staleness through the dependency graph via the cascade engine.
 3. A background LLM pipeline auto-generates summaries, key concepts, and change impact assessments for stale files — keeping structured metadata current without any manual work.
+4. On-demand mtime-based freshness checks detect files that changed while the server was down, so metadata is never silently stale.
 
 All of this information is exposed to your AI assistant through the Model Context Protocol so it always has accurate, up-to-date context about your codebase structure.
 
@@ -31,12 +32,18 @@ All of this information is exposed to your AI assistant through the Model Contex
 - **Dependency Tracking**
   - Bidirectional dependency relationships: which files import a given file (dependents) and which files it imports (dependencies).
   - Distinguishes local file dependencies from package dependencies.
-  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig, PHP, C#, Java.
+  - Multi-language support: Python, JavaScript, TypeScript, C/C++, Rust, Lua, Zig, PHP, C#, Java, Go, Ruby.
+
+- **Circular Dependency Detection**
+  - Detects all strongly connected components (circular dependency groups) using iterative Tarjan's SCC algorithm.
+  - Project-wide scan via `detect_cycles` or per-file query via `get_cycles_for_file`.
+  - Identifies exactly which files participate in each cycle, helping untangle tight coupling.
 
 - **Autonomous Background Updates**
   - Filesystem watcher detects `add`, `change`, and `unlink` events in real time.
   - Incremental updates: re-parses only the affected file, diffs old vs. new dependency lists, patches the reverse-dependency map, and recalculates importance — no full rescan.
-  - Periodic integrity sweep auto-heals stale, missing, or newly discovered files.
+  - Startup integrity sweep detects files added, deleted, or modified while the server was offline and heals the database before accepting requests.
+  - Per-file mtime-based lazy validation on read — see [Freshness Validation](#freshness-validation).
   - All mutations are serialized through an async mutex to prevent concurrent corruption.
   - Per-event-type enable/disable and `autoRebuildTree` master switch.
   - Semantic change detection classifies what changed before triggering cascade — avoids unnecessary LLM calls.
@@ -54,7 +61,7 @@ All of this information is exposed to your AI assistant through the Model Contex
 - **Semantic Change Detection**
   - tree-sitter AST diffing for TypeScript and JavaScript files — fast, accurate, and token-free.
   - Classifies changes as: `body-only` (function internals only), `exports-changed` (public API changed), `types-changed` (type signatures changed), or `unknown`.
-  - LLM-powered diff fallback for all other languages (Python, Rust, C/C++, etc.).
+  - LLM-powered diff fallback for all other languages (Python, Rust, C/C++, Go, Ruby, etc.).
   - Change classification drives the cascade engine — body-only changes skip dependent propagation entirely.
 
 - **Cascade Engine**
@@ -76,6 +83,11 @@ All of this information is exposed to your AI assistant through the Model Contex
   - Configurable model, baseURL, and apiKey per-project in `config.json`.
   - Local-first default: Ollama on `localhost:11434` with `qwen2.5-coder:14b`.
   - Structured output with JSON repair fallback for local models that don't follow schemas perfectly.
+
+- **Custom Exclusion Patterns**
+  - `.filescopeignore` file in the project root — uses gitignore syntax (via the `ignore` package) to exclude files from scanning and watching.
+  - `exclude_and_remove` MCP tool — adds glob patterns at runtime; patterns are persisted to `config.json` so they survive restarts.
+  - Default exclusions for `node_modules`, `.git`, `dist`, `build`, `coverage`, and `.filescope.*` runtime artifacts.
 
 - **Daemon Mode**
   - Runs as a standalone daemon (`--daemon --base-dir=<path>`) for 24/7 operation without an MCP client connected.
@@ -113,6 +125,26 @@ All of this information is exposed to your AI assistant through the Model Contex
    - Generate `mcp.json` for Cursor AI
    - Register the server with Claude Code (`~/.claude.json`)
 
+### Setting Up Local LLM (Optional)
+
+FileScopeMCP includes an automated setup script for Ollama:
+
+```bash
+./setup-llm.sh
+```
+
+This script will:
+- Install Ollama if not present (supports Linux, macOS, WSL)
+- Detect GPU hardware (NVIDIA, AMD, Metal) and configure acceleration
+- Pull the default model (`qwen2.5-coder:14b`)
+- Verify the installation
+
+To check status or use a different model:
+```bash
+./setup-llm.sh --status           # Check Ollama and model status
+./setup-llm.sh --model codellama  # Pull a different model
+```
+
 ### Claude Code
 
 The build script registers FileScopeMCP automatically. To register (or re-register) without rebuilding:
@@ -121,7 +153,7 @@ The build script registers FileScopeMCP automatically. To register (or re-regist
 ./install-mcp-claude.sh
 ```
 
-The server is registered globally — no `--base-dir` is needed. When you start a session, tell Claude to run `set_project_path` pointing at your project. This builds the initial file tree, starts the file watcher, and starts the integrity sweep:
+The server is registered globally — no `--base-dir` is needed. When you start a session, tell Claude to run `set_project_path` pointing at your project. This builds the initial file tree, starts the file watcher, and runs the startup integrity sweep:
 
 ```
 set_project_path(path: "/path/to/your/project")
@@ -189,7 +221,7 @@ To run FileScopeMCP as a standalone background process (no MCP client required):
 node dist/mcp-server.js --daemon --base-dir=/path/to/project
 ```
 
-The daemon watches the project, runs the integrity sweep, and keeps the LLM pipeline active 24/7. Logs are written to `.filescope-daemon.log` in the project root.
+The daemon watches the project, runs the startup integrity sweep, and keeps the LLM pipeline active 24/7. Logs are written to `.filescope-daemon.log` in the project root.
 
 ## Quick Start Checklist
 
@@ -254,6 +286,8 @@ The tool scans source code for import statements and other language-specific pat
 - PHP: `require`, `require_once`, `include`, `include_once`, and `use` statements
 - C#: `using` directives
 - Java: `import` statements
+- Go: `import` statements with `go.mod` module resolution
+- Ruby: `require` and `require_relative` statements with `.rb` extension probing
 
 ### Importance Calculation
 
@@ -272,13 +306,27 @@ The formula is evaluated from scratch on every calculation, so calling `recalcul
 When a file event fires, the update pipeline is:
 
 1. **Debounce** — events are coalesced per `filePath:eventType` key (default 2 s) to avoid thrashing on rapid saves.
-2. **Acquire mutex** — all tree mutations are serialized through `AsyncMutex` so the watcher and the integrity sweep can never corrupt the database simultaneously.
+2. **Acquire mutex** — all tree mutations are serialized through `AsyncMutex` so the watcher and the startup sweep can never corrupt the database simultaneously.
 3. **Semantic change detection** — tree-sitter AST diffing for TS/JS files classifies the change (body-only, exports-changed, types-changed, unknown). LLM-powered diff analysis handles all other languages.
 4. **Incremental update** — re-parses the file, diffs old vs. new dependency lists, patches `dependents[]` on affected nodes, and recalculates importance.
 5. **Cascade engine** — if exports or types changed, BFS propagates staleness to all transitive dependents; if body-only, only the changed file is marked stale.
 6. **LLM pipeline** — picks up stale files and regenerates summaries, concepts, and change impact assessments in priority order.
 
-The integrity sweep runs every 30 seconds inside the same mutex and respects the `autoRebuildTree` flag.
+### Freshness Validation
+
+FileScopeMCP uses two complementary strategies to keep metadata current:
+
+- **Startup sweep** — runs once when the server initializes. Compares every tracked file against the filesystem to detect adds, deletes, and modifications that occurred while the server was offline. Heals the database before accepting any MCP requests.
+- **Per-file mtime check** — when you query a file through MCP tools (`get_file_importance`, `get_file_summary`, `read_file_content`), the system compares the file's current mtime against the last recorded value. If the file changed, it's immediately flagged stale and queued for LLM re-analysis. This catches changes missed by the watcher without the overhead of periodic full-tree scans.
+
+### Cycle Detection
+
+Circular dependencies are detected using an iterative implementation of Tarjan's strongly connected components algorithm:
+
+1. Loads all local import edges from SQLite in a single batch query.
+2. Runs Tarjan's SCC on the directed dependency graph.
+3. Filters out trivial SCCs (single files with no self-loop) to return only actual cycles.
+4. Each cycle group lists the participating files, making it easy to identify and break circular imports.
 
 ### Path Normalization
 
@@ -295,7 +343,7 @@ All file tree data is stored in `.filescope.db` (SQLite, WAL mode) in the projec
 - **Schema** — drizzle-orm manages: `files` (metadata, staleness, concepts, change_impact), `file_dependencies` (bidirectional relationships), `llm_jobs` (background job queue), `schema_version` (migration versioning), `llm_runtime_state` (token budget persistence).
 - **Auto-migration** — on first run, any legacy JSON tree files are automatically detected and imported into SQLite. The original JSON files are left in place but are no longer used.
 
-**Persistent exclusions:** When you call `exclude_and_remove`, the pattern is written to `FileScopeMCP-excludes.json` in the project root. This file is loaded automatically on every server start, so exclusions survive restarts without needing to be re-applied.
+**Persistent exclusions:** When you call `exclude_and_remove`, the pattern is saved to the `excludePatterns` array in `config.json`. Patterns take effect immediately and persist across server restarts.
 
 ## Configuration
 
@@ -334,6 +382,25 @@ FileScopeMCP uses `config.json` in the project root for all settings. This file 
 }
 ```
 
+### .filescopeignore
+
+Create a `.filescopeignore` file in your project root to exclude files from scanning and watching. Uses gitignore syntax:
+
+```gitignore
+# Ignore generated documentation
+docs/api/
+
+# Ignore large data files
+*.csv
+*.parquet
+
+# Ignore specific directories
+tmp/
+vendor/
+```
+
+This file is loaded once at startup and applied alongside the `excludePatterns` from `config.json`. Changes to `.filescopeignore` require a server restart (or re-calling `set_project_path`) to take effect. Both systems work together — use `config.json` for programmatic patterns (set via MCP tools) and `.filescopeignore` for patterns you want to commit to your repo.
+
 ### LLM provider options
 
 | Provider | `provider` value | Auth | Use case |
@@ -369,19 +436,19 @@ FileScopeMCP uses `config.json` in the project root for all settings. This file 
 - **tree-sitter** — AST parsing for semantic change detection (loaded via `createRequire`)
 - **Vercel AI SDK** (`ai`, `@ai-sdk/anthropic`, `@ai-sdk/openai-compatible`) — multi-provider LLM abstraction
 - **zod** — runtime validation and structured output schemas
-- **AsyncMutex** — serializes concurrent tree mutations from the watcher and integrity sweep
+- **AsyncMutex** — serializes concurrent tree mutations from the watcher and startup sweep
 
 ## Available Tools
 
-The MCP server exposes 20 tools organized by category:
+The MCP server exposes 22 tools organized by category:
 
 ### Project Setup
 
 - **set_project_path**: Point the server at a project directory and initialize or reload its file tree
-- **create_file_tree**: Create a new file tree configuration for a specific directory
-- **select_file_tree**: Select an existing file tree to work with
-- **list_saved_trees**: List all saved file trees
-- **delete_file_tree**: Delete a file tree configuration
+- **create_file_tree**: Re-scan a directory and rebuild the file tree in SQLite
+- **select_file_tree**: Get the current active file tree configuration
+- **list_saved_trees**: Show the current SQLite database status (file count, dependency count)
+- **delete_file_tree**: Clear all data from the SQLite database (requires `confirm: true` safety guard)
 
 ### File Analysis
 
@@ -397,6 +464,11 @@ The MCP server exposes 20 tools organized by category:
 - **get_file_summary**: Get the stored summary of a specific file — includes concepts, changeImpact, and staleness fields
 - **set_file_summary**: Set or update the summary of a specific file
 
+### Dependency Analysis
+
+- **detect_cycles**: Detect all circular dependency groups in the project using Tarjan's SCC algorithm
+- **get_cycles_for_file**: Get circular dependency groups that include a specific file
+
 ### LLM Pipeline
 
 - **toggle_llm**: Enable or disable background LLM processing. When enabled with no prior config, defaults to Ollama (`openai-compatible`, `qwen2.5-coder:14b`, `localhost:11434`)
@@ -410,7 +482,7 @@ The MCP server exposes 20 tools organized by category:
 
 ### Utilities
 
-- **exclude_and_remove**: Exclude a file or glob pattern from the tree and remove matching nodes
+- **exclude_and_remove**: Exclude a file or glob pattern from the tree and remove matching nodes. Patterns are saved to `config.json` and persist across restarts
 - **debug_list_all_files**: List every file path currently tracked in the active tree (useful for debugging)
 
 ## Usage Examples
@@ -419,7 +491,7 @@ The easiest way to get started is to enable this MCP in your AI client and let t
 
 ### Analyzing a Project
 
-1. Point the server at your project (builds the tree, starts file watching and the integrity sweep):
+1. Point the server at your project (builds the tree, starts file watching and the startup sweep):
    ```
    set_project_path(path: "/path/to/project")
    ```
@@ -509,6 +581,19 @@ The easiest way to get started is to enable this MCP in your AI client and let t
 
 When staleness fields are `null`, the metadata is current. A non-null value (epoch timestamp) means the file or a dependency changed and the LLM pipeline will regenerate that field.
 
+### Finding Circular Dependencies
+
+1. Detect all cycles in the project:
+   ```
+   detect_cycles()
+   ```
+   Returns groups of files that form circular import chains.
+
+2. Check if a specific file is part of a cycle:
+   ```
+   get_cycles_for_file(filepath: "/path/to/project/src/moduleA.ts")
+   ```
+
 ### Configuring File Watching
 
 1. Check the current file watching status:
@@ -547,7 +632,7 @@ npm run coverage
 | `mcp-debug.log` | MCP server mode (disabled by default) | Working directory |
 | `.filescope-daemon.log` | Daemon mode (always on) | Project root |
 
-**MCP mode:** File logging is disabled by default. To enable it, edit `src/mcp-server.ts` line 43 and change `enableFileLogging(false, ...)` to `true`, then rebuild. MCP log messages also go to stderr, which Claude Code captures in its own logs.
+**MCP mode:** File logging is disabled by default. To enable it, edit `src/mcp-server.ts` and change `enableFileLogging(false, ...)` to `true`, then rebuild. MCP log messages also go to stderr, which Claude Code captures in its own logs.
 
 **Daemon mode:** File logging is always on. Logs auto-rotate at 10 MB (file is truncated and restarted). View logs in real time:
 ```bash
@@ -572,6 +657,9 @@ debug_list_all_files()
 # Check if a specific file has stale metadata
 get_file_importance(filepath: "/path/to/file.ts")
 # Staleness fields: summaryStale, conceptsStale, changeImpactStale (epoch timestamps, null = not stale)
+
+# Are there any circular dependency chains?
+detect_cycles()
 ```
 
 ### Inspecting the Database Directly
@@ -635,6 +723,7 @@ Every tool except `set_project_path` requires initialization first. Call `set_pr
 2. If `budgetExhausted` is true, the lifetime token budget has been reached. Increase `tokenBudget` in `config.json` or set to `0` for unlimited.
 3. If using Ollama, confirm it's running: `curl http://localhost:11434/v1/models`
 4. Check for errors in the log file (daemon mode) or stderr (MCP mode).
+5. Run `./setup-llm.sh --status` to verify Ollama and model installation.
 
 ### "FileScopeMCP daemon already running" error
 A PID file exists for this project. Either another daemon is running, or a previous one crashed without cleanup:
@@ -676,7 +765,6 @@ Files created by FileScopeMCP in your project directory:
 | `.filescope-daemon.log` | Daemon log output | Yes |
 | `mcp-debug.log` | MCP server debug log (when enabled) | Yes |
 | `config.json` | Server configuration (exclude patterns, file watching, LLM settings) | Optional |
-| `FileScopeMCP-excludes.json` | Persistent exclude patterns (created by `exclude_and_remove`) | Optional |
 
 ## License
 

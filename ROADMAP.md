@@ -4,146 +4,98 @@ This document tracks known bugs, architectural gaps, and planned features. Items
 
 ---
 
-## Bug Fixes & Correctness
+## Completed (v1.0+)
 
-### ~~Concurrency: no mutex on tree mutations~~ Fixed
-Added `AsyncMutex` in `mcp-server.ts`. Both `handleFileEvent` (debounce callback) and `startIntegritySweep` now call `treeMutex.run(async () => { … })`, serializing all `updateFileNodeOnChange` / `addFileNode` / `removeFileNode` + `saveFileTree` calls.
+Items below have been implemented and are listed here for historical context.
 
----
+### Bug Fixes
+- **Concurrency: no mutex on tree mutations** — Added `AsyncMutex` serializing all watcher and sweep mutations.
+- **`calculateImportance` non-idempotent** — Formula now always recalculates from base; canonical and idempotent.
+- **`@modelcontextprotocol/sdk` hardcoded importance bonus** — Flattened to equal weight for all package imports.
+- **`debounceMs` config field stored but never applied** — Field removed; effective debounce is 2 s constant + chokidar 300 ms stability threshold.
+- **Dead `.blade.php`/`.phtml` code** — Removed unreachable patterns and unused `SUPPORTED_EXTENSIONS`.
+- **Integrity sweep ignores `autoRebuildTree`** — Now respects the config flag.
+- **Dead modules: `grouping-rules.ts` and `layout-engine.ts`** — Deleted.
+- **Integrity sweep and watcher can double-save** — Serialized via mutex.
+- **Watcher restart resets `restartAttempts` too eagerly** — Now requires 60 s stability before resetting backoff counter.
+- **Importance propagation shallow (depth 1 only)** — `recalculateImportanceForAffected` now propagates transitively through dependents with visited-set cycle protection.
+- **`normalizePath` consolidation** — Unified into `canonicalizePath` with cosmetic and resolution modes.
 
-### ~~`calculateImportance` non-idempotent / two divergent importance formulas~~ Fixed
-`calculateImportance` started from the node's existing importance value instead of recalculating from base, so calling `recalculate_importance` multiple times produced different (ever-increasing) results. Separately, `calculateImportance` (initial scan + tool) and `calculateNodeImportance` (incremental updates) had divergent logic. Both fixed: `calculateImportance` now delegates entirely to `calculateNodeImportance`, which always recalculates from `calculateInitialImportance`. The formula is now canonical and idempotent.
+### Architecture
+- **Replace polling integrity sweep with mtime-based lazy validation** — One-time startup sweep replaces the 30 s polling loop. Per-file mtime checks on MCP tool access catch changes missed by the watcher. No more periodic full-tree scans.
+- **SQLite storage** — Replaced JSON file persistence with SQLite + WAL mode. drizzle-orm typed schema. Auto-migration from legacy JSON trees.
+- **Test coverage** — 250 tests covering change detection, cascade engine, LLM pipeline, SQLite migration, MCP server integration, repository layer, coordinator lifecycle, cycle detection, streaming scan, and `.filescopeignore`.
 
----
-
-### ~~`@modelcontextprotocol/sdk` hardcoded importance bonus~~ Fixed
-The formula gave +2 for files importing `@modelcontextprotocol/sdk` but only +1 for all other packages. Flattened to `Math.min(pkgDeps.length, 1)` for all package imports equally.
-
----
-
-### ~~`debounceMs` config field stored but never applied~~ Fixed
-`FileWatchingConfig.debounceMs` was exposed via `update_file_watching_config`, saved to disk, and returned by `get_file_watching_status`, but the actual debounce in `handleFileEvent` used a hardcoded `DEBOUNCE_DURATION_MS = 2000` constant and `FileWatcher.start()` hardcoded `awaitWriteFinish.stabilityThreshold: 300`. The config field has been removed entirely. The effective debounce is 2 s (module-level constant) plus chokidar's 300 ms write-finish stability threshold.
-
----
-
-### ~~Dead `.blade.php`/`.phtml` code~~ Fixed
-`.blade.php` in `IMPORT_PATTERNS` was unreachable (`path.extname('file.blade.php')` returns `.php`, not `.blade.php`). `.blade.php` and `.phtml` were listed in the `SUPPORTED_EXTENSIONS` constant, which itself was declared but never referenced anywhere. All removed. Laravel-specific directory importance bonuses (`app/Http/Controllers`, `app/Models`, `app/Providers`) also removed — too framework-specific for a generic tool.
-
----
-
-### ~~`SUPPORTED_EXTENSIONS` constant declared but never used~~ Fixed
-Removed entirely.
-
----
-
-### Importance propagation is shallow (depth 1 only)
-`recalculateImportanceForAffected` only updates the changed file and its direct dependencies. In a chain `A → B → C`, adding a new dependent to `A` never updates `C`'s score. There is even a `// Potential future enhancement` comment acknowledging this at `file-utils.ts:1346`.
-
-**Fix:** After each node's importance changes, enqueue its dependents for recalculation. Use a visited-set to prevent infinite loops on cycles.
+### Features
+- **Summary auto-generation** — Full background LLM pipeline with multi-provider support (Anthropic, Ollama, OpenAI-compatible).
+- **Cycle detection** — Iterative Tarjan's SCC algorithm detects all circular dependency groups. Exposed via `detect_cycles` and `get_cycles_for_file` MCP tools.
+- **Go language support** — `import` statement parsing with `go.mod` module resolution.
+- **Ruby language support** — `require` and `require_relative` parsing with `.rb` extension probing.
+- **Streaming directory scan** — `scanDirectory` converted to async generator using `fs.promises.opendir`. Eliminates full-tree memory buildup.
+- **`.filescopeignore` support** — Gitignore-syntax exclusion file loaded at startup, applied alongside `config.json` exclude patterns.
+- **Exclusion pattern persistence** — `exclude_and_remove` saves patterns to `config.json` (replaced legacy `FileScopeMCP-excludes.json`).
+- **Daemon mode** — Standalone `--daemon` operation with PID guard, graceful shutdown, and file-only logging.
+- **Coordinator config reload** — `init()` reloads `config.json` from disk each time, so runtime edits take effect without server restart.
+- **Ghost record purge** — `purgeRecordsOutsideRoot()` cleans database records from wrong project paths.
 
 ---
 
-### ~~Integrity sweep ignores `autoRebuildTree`~~ Fixed
-`startIntegritySweep` now checks `config.fileWatching.autoRebuildTree` before entering the mutex and healing the tree, consistent with the guard already in `handleFileEvent`.
+## Open Items
+
+### Bug Fixes & Correctness
+
+#### `PackageDependency` false positives
+`PackageDependency.fromPath()` in `types.ts` has a hardcoded fallback list (`react`, `axios`, `uuid`, `yup`, `express`, `firebase`, `date-fns`) used when a path doesn't contain `node_modules`. Any resolved path containing these strings gets misclassified.
+
+**Fix:** Remove the hardcoded list and only classify packages whose path contains `node_modules/`, or require the import string to start with the bare package name.
 
 ---
 
-### Watcher restart resets `restartAttempts` too eagerly
-In `FileWatcher.restart()`, `restartAttempts` is reset to `0` immediately when `start()` succeeds (`file-watcher.ts:149`). If the watcher fails again quickly, the exponential backoff resets and the watcher hammers restarts with no real ceiling.
+### Architecture
 
-**Fix:** Only reset `restartAttempts` after the watcher has been stable for a minimum period (e.g., 60 seconds) rather than on the first successful start.
-
----
-
-### ~~Dead modules: `grouping-rules.ts` and `layout-engine.ts`~~ Fixed
-Both files were deleted when diagram/visualization code was stripped from the codebase.
+#### Eliminate `reconstructTreeFromDb` bridge
+The coordinator reconstructs a `FileNode` tree from SQLite for tools that expect the legacy tree shape. This adds overhead and complexity. Refactoring tools to query SQLite directly would simplify the data path.
 
 ---
 
-### ~~Integrity sweep and watcher can double-save~~ Fixed (via mutex)
-The `treeMutex` serializes both paths so `saveFileTree` is never called from two concurrent mutations. A dirty-flag + debounced save would be a further optimization but is not required for correctness.
+#### Separate in-memory model from persistence (further)
+SQLite + WAL solved the partial-write corruption concern, but the coordinator still rebuilds the full `FileNode` tree for several operations. Working directly against the SQLite model would improve both clarity and memory usage on large projects.
 
 ---
 
-## Architecture
+### Features
 
-### Replace polling integrity sweep with mtime-based lazy validation
-The integrity sweep runs on a fixed interval regardless of activity. On large repos this is wasteful. Instead, validate a node's mtime lazily when it is first accessed (e.g., on `get_file_importance`) and only run a full sweep on explicit user request or on `create_file_tree`.
-
----
-
-### ~~Separate in-memory model from persistence~~ Partially addressed in v1.0
-The original concern was partial-write corruption from in-memory state being serialized to JSON. v1.0 replaced JSON storage with SQLite + WAL mode, which provides atomic writes natively — a partial crash cannot leave the database in an inconsistent state. The coordinator still uses a `reconstructTreeFromDb` bridge pattern to serve the legacy `FileNode` tree interface. A deeper refactor to eliminate the bridge and work directly against the SQLite model would improve clarity, but is no longer a correctness concern.
-
----
-
-### ~~Test coverage~~ Substantially addressed in v1.0
-v1.0 added 180 tests covering:
-- Change detection (tree-sitter AST diffing, LLM fallback, export snapshot diffing)
-- Cascade engine (BFS propagation, circular dependency protection, per-field staleness)
-- LLM pipeline (job queue, priority ordering, token budget, orphan recovery)
-- SQLite migration (JSON-to-SQLite auto-migration)
-- MCP server integration (tool invocations, coordinator lifecycle)
-- Repository layer (all CRUD operations)
-
-Remaining gaps: full watcher debounce integration tests and large-codebase performance benchmarks.
-
----
-
-## Features
-
-### Cycle detection
-The dependency parser doesn't detect circular imports. v1.0's cascade engine has circular dependency protection (visited set in BFS) that prevents infinite staleness propagation, but does not perform full SCC detection or expose cycle membership via tools.
-
-**Still to implement:**
-- Detect cycles during `scanDirectory` using DFS with gray/black node coloring (Tarjan's SCC gives you the full component, not just a boolean)
-- Store cycle membership on each `FileNode` (e.g. `cycleGroup?: string`)
-- Expose cycle information via `get_file_importance` and `find_important_files`
-- Cap importance propagation when a cycle is detected to prevent infinite recalculation
-
----
-
-### Git integration
+#### Git integration
 Surface version-control context alongside dependency data:
 - Mark files changed in the current working tree (unstaged/staged)
 - Show last-commit date per file as a proxy for "recently active"
 - Optional: weight importance by recency so stale files rank lower
 
-Note: per PROJECT.md, git integration is explicitly out of scope for the current milestone. Listed here for future consideration.
+Note: explicitly out of scope for the current milestone. Listed here for future consideration.
 
 ---
 
-### ~~Summary auto-generation~~ Done in v1.0
-v1.0 added a full background LLM pipeline that auto-generates summaries, concepts, and change impact assessments for all files. The `toggle_llm` MCP tool enables/disables the pipeline at runtime. This is now a first-class feature, not a hint — no separate `generate_summaries` tool is needed.
+#### File watching: per-directory granularity
+Currently file watching is a global toggle. Per-directory enable/disable would allow ignoring noisy directories while watching the rest.
 
 ---
 
-### Richer language support
-Current import parsers are regex-based and miss common patterns:
-- **TypeScript/JavaScript:** dynamic `import()`, `require()` with variables, barrel re-exports (`export * from`)
+#### Richer language support
+Current import parsers are regex-based and miss some patterns:
+- **TypeScript/JavaScript:** dynamic `import()` with variables, barrel re-exports (`export * from`)
 - **Python:** relative imports (`from . import`), `importlib`
 - **Rust:** `mod` declarations resolving to `mod.rs` or same-name files
-- **Go:** not supported at all
-- **Ruby:** not supported at all
 
 ---
 
-### File watching: per-tree enable/disable
-Currently file watching is a global toggle. This is less relevant now that the system runs one instance per project, but per-directory granularity remains a useful enhancement.
-
----
-
-### Performance: large codebase handling
-- Stream `scanDirectory` results instead of building the full tree in memory before returning
-- Add an optional `.filescopeignore` file (gitignore syntax) as an alternative to the `excludePatterns` config
+#### Performance: large codebase handling
 - Lazy-load file content in `read_file_content` — don't buffer entire files for large binaries
+- Benchmark and optimize for repos with 10k+ files
 
 ---
 
-## Code Quality
+### Code Quality
 
-- **Double `fs` import in `file-utils.ts`** — both `import * as fs from 'fs'` and `import * as fsPromises from 'fs/promises'` and `import * as fsSync from 'fs'` are present. Consolidate to a single `fs/promises` import with sync operations imported separately where needed.
-- **`normalizePath` consolidation** — `normalizePath` is defined in `file-utils.ts` but re-exported and used inconsistently alongside `normalizeAndResolvePath` from `storage-utils.ts`; consolidate to one canonical function
+- **Double `fs` import in `file-utils.ts`** — Both `import * as fs from 'fs'` and `import * as fsPromises from 'fs/promises'` are present. Consolidate to a single pattern.
 - **`console.error` routing** — `console.error` is used in `logger.ts` itself (two occurrences) but the rest of the codebase routes through `log()`. Ensure all error logging is consistent.
-- **`firebase` false positive** — `PackageDependency.fromPath()` in `types.ts` has a hardcoded fallback list `['react', 'axios', 'uuid', 'yup', 'express', 'firebase', 'date-fns']` used when a path doesn't contain `node_modules`. Any resolved path containing these strings gets misclassified. Fix: remove the hardcoded list and only classify packages whose path contains `node_modules/`, or require the import string to start with the bare package name (no path separator).
-- **`createFileTree` dead code** — exported from `file-utils.ts` but never imported anywhere; remove or internalize.
+- **`createFileTree` dead code** — Exported from `file-utils.ts` but never imported anywhere; remove or internalize.
