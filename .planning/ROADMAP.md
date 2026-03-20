@@ -32,7 +32,7 @@ See: `.planning/milestones/v1.0-ROADMAP.md` for full phase details.
 - [x] **Phase 11: .filescopeignore Support** - Add gitignore-syntax project exclusion file that gates directory recursion at scan time (completed 2026-03-19)
 - [x] **Phase 12: Go and Ruby Language Support** - Add full dependency parsing for Go (import blocks + go.mod resolution) and Ruby (require/require_relative) (completed 2026-03-19)
 - [x] **Phase 13: Streaming Directory Scan** - Replace eager full-tree memory build with async generator that yields one FileNode at a time (completed 2026-03-20)
-- [ ] **Phase 14: mtime-Based Lazy Validation** - Replace 30-second polling integrity sweep with mtime comparison on MCP tool access
+- [x] **Phase 14: mtime-Based Lazy Validation** - Replace 30-second polling integrity sweep with mtime comparison on MCP tool access (completed 2026-03-20)
 - [ ] **Phase 15: Cycle Detection** - Add Tarjan's SCC cycle detection and expose via detect_cycles and get_cycles_for_file MCP tools
 
 ## Phase Details
@@ -99,7 +99,7 @@ Plans:
   1. No `setInterval` integrity sweep timer runs after startup — file freshness is checked only at startup (full sweep) and on MCP tool access (per-file mtime comparison)
   2. When an MCP tool accesses a file whose mtime differs from the stored value, the response includes a `stale: true` indicator and the file is queued for re-analysis
   3. Disk I/O on large projects (1,000+ tracked files) drops measurably after startup — no background stat-polling of all files every 30 seconds
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
 - [ ] 14-01-PLAN.md — Remove polling sweep, add startup sweep + per-file checkFileFreshness, wire into MCP handlers
 
@@ -131,5 +131,5 @@ Plans:
 | 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
 | 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
 | 13. Streaming Directory Scan | 2/2 | Complete    | 2026-03-20 | - |
-| 14. mtime-Based Lazy Validation | v1.1 | 0/1 | Not started | - |
+| 14. mtime-Based Lazy Validation | 1/1 | Complete   | 2026-03-20 | - |
 | 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |

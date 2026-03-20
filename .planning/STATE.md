@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
-status: unknown
-stopped_at: Phase 14 context gathered
-last_updated: "2026-03-20T03:01:31.195Z"
+status: phase-complete
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-03-20T03:37:00.000Z"
 last_activity: 2026-03-20
 progress:
   total_phases: 6
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
+  completed_phases: 5
+  total_plans: 9
+  completed_plans: 9
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 13 — streaming-directory-scan
+**Current focus:** Phase 14 — mtime-based-lazy-validation
 
 ## Current Position
 
-Phase: 13 (streaming-directory-scan) — EXECUTING
-Plan: 1 of 2
+Phase: 14 (mtime-based-lazy-validation) — COMPLETE
+Plan: 1 of 1 (all complete)
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Plan: 1 of 2
 | Phase 12 P02 | 4min | 1 tasks | 2 files |
 | Phase 13-streaming-directory-scan P01 | 18min | 2 tasks | 3 files |
 | Phase 13 P02 | 6min | 2 tasks | 3 files |
+| Phase 14-mtime-based-lazy-validation P01 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,9 @@ Key v1.1 decisions:
 - [Phase 13-streaming-directory-scan]: buildFileTree two-pass replaces shim: Pass 1 batch-upserts FileNodes via sqlite.transaction, Pass 2 extracts deps per-file, Pass 2b calculates importance via reconstructTreeFromDb
 - [Phase 13-streaming-directory-scan]: extractSnapshot and isTreeSitterLanguage imported directly from change-detector/ast-parser.js in coordinator (not re-exported through file-utils)
 - [Phase 13-streaming-directory-scan]: Skipped dependency tests converted to direct resolveGoImports/resolveRubyImports calls — no scanDirectory wrapper needed in tests
+- [Phase 14-mtime-based-lazy-validation]: checkFileFreshness uses markSelfStale (not cascadeStale) — lazy check does not know if API surface changed
+- [Phase 14-mtime-based-lazy-validation]: stale field is absent (not false) when fresh — conditional spread pattern matches existing summaryStale convention
+- [Phase 14-mtime-based-lazy-validation]: read_file_content wraps response in object only when stale — preserves backward compatibility for non-stale responses
 
 ### Pending Todos
 
@@ -102,5 +106,5 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-20
-Stopped at: Phase 14 context gathered
-Resume file: .planning/phases/14-mtime-based-lazy-validation/14-CONTEXT.md
+Stopped at: Completed 14-01-PLAN.md
+Resume file: .planning/phases/14-mtime-based-lazy-validation/14-01-SUMMARY.md
