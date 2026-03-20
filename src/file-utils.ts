@@ -443,6 +443,13 @@ export function isExcluded(filePath: string, baseDir: string, isDir?: boolean): 
     return true;
   }
   
+  // Add a failsafe check for .filescope runtime artifacts (DB, WAL, PID)
+  const baseName = path.basename(filePath);
+  if (baseName.startsWith('.filescope')) {
+    log(`🔴 SPECIAL CASE: .filescope runtime artifact detected: ${filePath}`);
+    return true;
+  }
+
   // Add a failsafe check for test_excluded files
   if (filePath.includes('test_excluded') || path.basename(filePath).startsWith('test_excluded')) {
     log(`🔴 SPECIAL CASE: test_excluded file detected: ${filePath}`);

@@ -18,7 +18,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - ✓ Real-time file system watching with debounced change detection — existing
 - ✓ Atomic state mutations via async mutex — existing
 - ✓ Incremental tree updates on file change — existing
-- ✓ Self-healing integrity sweep (periodic disk validation) — existing
+- ✓ Self-healing integrity sweep (startup sweep + lazy mtime validation) — existing, refined Phase 14
 - ✓ Persistent JSON tree caching with freshness validation — existing
 - ✓ MCP tool interface (20+ tools for querying and managing file metadata) — existing
 - ✓ Manual summary get/set via MCP tools — existing
@@ -48,8 +48,8 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 **Target:**
 - ✓ Fix shallow importance propagation — BFS transitive propagation with cycle safety — Phase 10
 - ✓ Fix watcher restart backoff reset — 60s stability timer — Phase 10
-- Replace polling integrity sweep with mtime-based lazy validation
-- Add cycle detection (Tarjan's SCC) and expose via tools
+- ✓ Replace polling integrity sweep with mtime-based lazy validation — startup sweep + per-file checkFileFreshness — Phase 14
+- ✓ Add cycle detection (Tarjan's SCC) and expose via tools — Phase 15
 - ✓ Go and Ruby language support — go.mod resolution, require/require_relative parsing — Phase 12
 - ✓ .filescopeignore support — gitignore-syntax exclusion for scan-time and watch-time — Phase 11
 - ✓ Streaming directory scan — async generator with two-pass SQLite integration — Phase 13
@@ -68,7 +68,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Context
 
-Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 227 tests passing. Phase 10 (code quality + bug fixes), Phase 11 (.filescopeignore support), Phase 12 (Go and Ruby language support), and Phase 13 (streaming directory scan) complete.
+Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 250 tests passing. Phase 10 (code quality + bug fixes), Phase 11 (.filescopeignore support), Phase 12 (Go and Ruby language support), Phase 13 (streaming directory scan), Phase 14 (mtime-based lazy validation), and Phase 15 (cycle detection) complete.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -97,4 +97,4 @@ The system is a complete autonomous file intelligence platform: watches director
 | Vercel AI SDK for LLM abstraction | Unified interface across OpenAI-compatible and Anthropic providers | ✓ Good — structured output with JSON repair fallback |
 
 ---
-*Last updated: 2026-03-19 after Phase 12 completion*
+*Last updated: 2026-03-20 after Phase 15 completion*

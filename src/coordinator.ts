@@ -17,7 +17,7 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, getFile, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState, getDependencies, setDependencies } from './db/repository.js';
+import { getAllFiles, getFile, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState, getDependencies, setDependencies, purgeRecordsOutsideRoot } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
@@ -211,12 +211,10 @@ export class ServerCoordinator {
     // Acquire PID file guard — prevents concurrent daemons from corrupting the DB
     await this.acquirePidFile(projectRoot);
 
-    // Update the base directory in the global config
-    let config = getConfig();
-    if (config) {
-      config.baseDirectory = projectRoot;
-      setConfig(config);
-    }
+    // Reload config from disk so runtime edits (e.g. adding llm block) take effect
+    const freshConfig = await loadConfig();
+    freshConfig.baseDirectory = projectRoot;
+    setConfig(freshConfig);
 
     // Define the configuration for the new file tree
     const newConfig: FileTreeConfig = {
@@ -230,6 +228,13 @@ export class ServerCoordinator {
     const dbPath = path.join(projectRoot, '.filescope.db');
     openDatabase(dbPath);
     log(`Opened SQLite database at: ${dbPath}`);
+
+    // Purge any records left from a different project root (e.g. DB copied from
+    // another machine or directory). Must run before migration and tree build.
+    const purged = purgeRecordsOutsideRoot(projectRoot);
+    if (purged.files > 0 || purged.deps > 0) {
+      log(`Purged ${purged.files} stale file records and ${purged.deps} stale dependency edges outside ${projectRoot}`);
+    }
 
     // Run JSON-to-SQLite migration if needed — receives the already-open DB handle
     try {
@@ -379,15 +384,19 @@ export class ServerCoordinator {
       const existing = fsSync.readFileSync(pidPath, 'utf-8');
       const existingPid = parseInt(existing.trim(), 10);
       if (!isNaN(existingPid)) {
-        try {
-          process.kill(existingPid, 0); // throws ESRCH if not running
-          throw new Error(
-            `FileScopeMCP daemon already running (PID ${existingPid}). ` +
-            `Stop it first or delete ${pidPath}.`
-          );
-        } catch (e: any) {
-          if (e.code !== 'ESRCH') throw e;
-          log(`Stale PID file found (PID ${existingPid} not running). Overwriting.`);
+        if (existingPid === process.pid) {
+          log(`PID file belongs to current process (${existingPid}). Re-initializing.`);
+        } else {
+          try {
+            process.kill(existingPid, 0); // throws ESRCH if not running
+            throw new Error(
+              `FileScopeMCP daemon already running (PID ${existingPid}). ` +
+              `Stop it first or delete ${pidPath}.`
+            );
+          } catch (e: any) {
+            if (e.code !== 'ESRCH') throw e;
+            log(`Stale PID file found (PID ${existingPid} not running). Overwriting.`);
+          }
         }
       }
     } catch (e: any) {

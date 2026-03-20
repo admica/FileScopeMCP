@@ -1,4 +1,5 @@
 {
+  "baseDirectory": "/home/autopcap/FileScopeMCP",
   "excludePatterns": [
     "**/node_modules",
     "**/.git",
@@ -17,6 +18,7 @@
     "**/Thumbs.db",
     "**/.cursorrules",
     "**/.cursor",
+    "**/.claude",
     "**/package-lock.json",
     "**/.env*",
     "**/*.gradle",
@@ -74,11 +76,12 @@
     "**/.rustup",
     "**/.swp",
     "**/.local",
-    "**/*.gradle"
+    "**/*.gradle",
+    "test.delete.me",
+    "**/test-file-to-remove.txt"
   ],
   "fileWatching": {
     "enabled": true,
-    "debounceMs": 100,
     "ignoreDotFiles": true,
     "autoRebuildTree": true,
     "maxWatchedDirectories": 500,
@@ -86,6 +89,11 @@
     "watchForDeleted": true,
     "watchForChanged": true
   },
-  "baseDirectory": "/home/user/festive",
-  "version": "2.6.0"
+  "version": "2.6.0",
+  "llm": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "model": "qwen2.5-coder:14b",
+    "baseURL": "http://localhost:11434/v1"
+  }
 }

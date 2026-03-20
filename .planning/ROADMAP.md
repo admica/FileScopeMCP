@@ -135,4 +135,4 @@ Plans:
 | 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
 | 13. Streaming Directory Scan | 2/2 | Complete    | 2026-03-20 | - |
 | 14. mtime-Based Lazy Validation | 1/1 | Complete    | 2026-03-20 | - |
-| 15. Cycle Detection | 2/2 | Complete   | 2026-03-20 | - |
+| 15. Cycle Detection | 2/2 | Complete    | 2026-03-20 | - |

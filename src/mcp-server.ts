@@ -9,18 +9,9 @@ import {
   FileNode,
   ToolResponse,
   FileTreeConfig,
-  FileTreeStorage,
   FileWatchingConfig
 } from "./types.js";
 import { normalizePath, canonicalizePath, buildDependentMap, calculateImportance, excludeAndRemoveFile } from "./file-utils.js";
-import {
-  createFileTreeConfig,
-  saveFileTree,
-  loadFileTree,
-  listSavedFileTrees,
-  updateFileNode,
-  clearTreeCache
-} from "./storage-utils.js";
 import * as fsSync from "fs";
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, saveConfig } from './config-utils.js';
@@ -198,94 +189,72 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
 
   server.tool("list_saved_trees", "List all saved file trees", async () => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const trees = await listSavedFileTrees();
-    return createMcpResponse(trees);
+    const config = coordinator.getCurrentConfig();
+    const fileCount = getAllFiles().length;
+    return createMcpResponse({
+      message: "SQLite is the single source of truth — one tree per project.",
+      projectRoot: coordinator.getProjectRoot(),
+      filename: config?.filename ?? null,
+      baseDirectory: config?.baseDirectory ?? null,
+      lastUpdated: config?.lastUpdated ?? null,
+      totalFiles: fileCount
+    });
   });
 
-  server.tool("delete_file_tree", "Delete a file tree configuration", {
-    filename: z.string().describe("Name of the JSON file to delete")
-  }, async (params: { filename: string }) => {
+  server.tool("delete_file_tree", "Delete the current file tree data from SQLite", {
+    confirm: z.boolean().describe("Must be true to confirm deletion")
+  }, async (params: { confirm: boolean }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
+    if (!params.confirm) {
+      return createMcpResponse("Pass confirm: true to delete all file tree data from SQLite.", true);
+    }
     try {
-      const normalizedPath = canonicalizePath(params.filename, getProjectRoot());
-      await fs.unlink(normalizedPath);
-
-      // Update coordinator config if it was the current tree
-      if (coordinator.getCurrentConfig()?.filename === normalizedPath) {
-        coordinator.setConfig(null as any);
-      }
-
-      return createMcpResponse(`Successfully deleted ${normalizedPath}`);
+      const sqlite = getSqlite();
+      const fileCount = sqlite.prepare('SELECT COUNT(*) as c FROM files').get() as any;
+      sqlite.exec('DELETE FROM file_dependencies');
+      sqlite.exec('DELETE FROM files');
+      coordinator.setConfig(null as any);
+      return createMcpResponse(`Cleared SQLite: removed ${fileCount.c} file records and all dependency edges. Call set_project_path to rebuild.`);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return createMcpResponse(`File tree ${params.filename} does not exist`);
-      }
-      return createMcpResponse(`Failed to delete ${params.filename}: ` + error, true);
+      return createMcpResponse(`Failed to clear SQLite: ` + error, true);
     }
   });
 
-  server.tool("create_file_tree", "Create or load a file tree configuration", {
-    filename: z.string().describe("Name of the JSON file to store the file tree"),
-    baseDirectory: z.string().describe("Base directory to scan for files")
-  }, async (params: { filename: string, baseDirectory: string }) => {
+  server.tool("create_file_tree", "Re-scan a directory and rebuild the file tree in SQLite", {
+    baseDirectory: z.string().describe("Base directory to scan for files (absolute path or '.' for project root)")
+  }, async (params: { baseDirectory: string }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
-    log('Create file tree called with params: ' + JSON.stringify(params));
-    log('Current working directory: ' + process.cwd());
 
     try {
-      // Ensure we're using paths relative to the current directory
-      const relativeFilename = path.isAbsolute(params.filename)
-        ? path.relative(process.cwd(), params.filename)
-        : params.filename;
-      log('Relative filename: ' + relativeFilename);
-
-      // Handle special case for current directory
       let baseDir = params.baseDirectory;
       if (baseDir === '.' || baseDir === './') {
         baseDir = coordinator.getProjectRoot()!;
-        log('Resolved "." to project root: ' + baseDir);
-      }
-
-      // Normalize the base directory relative to project root if not absolute
-      if (!path.isAbsolute(baseDir)) {
+      } else if (!path.isAbsolute(baseDir)) {
         baseDir = path.join(coordinator.getProjectRoot()!, baseDir);
-        log('Resolved relative base directory: ' + baseDir);
       }
 
-      const config = await createFileTreeConfig(relativeFilename, baseDir);
-      log('Created config: ' + JSON.stringify(config));
-
-      // Re-init with the new config — coordinator handles scanning + save
-      await coordinator.init(baseDir);
-      // Update coordinator's config to use the custom config
-      coordinator.setConfig(config);
-
-      return createMcpResponse({
-        message: `File tree created and stored in SQLite`,
-        config
-      });
+      const result = await coordinator.init(baseDir);
+      return result;
     } catch (error) {
       log('Error in create_file_tree: ' + error);
       return createMcpResponse(`Failed to create file tree: ` + error, true);
     }
   });
 
-  server.tool("select_file_tree", "Select an existing file tree to work with", {
-    filename: z.string().describe("Name of the JSON file containing the file tree")
-  }, async (params: { filename: string }) => {
+  server.tool("select_file_tree", "Get the current active file tree configuration", {}, async () => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
-    // With SQLite, we load directly from the DB
-    try {
-      const storage = await loadFileTree(params.filename);
-      coordinator.setConfig(storage.config);
-
-      return createMcpResponse({
-        message: `File tree loaded from SQLite`,
-        config: storage.config
-      });
-    } catch (error) {
-      return createMcpResponse(`File tree not found: ${params.filename}`, true);
+    const config = coordinator.getCurrentConfig();
+    if (!config) {
+      return createMcpResponse("No active file tree. Call set_project_path to initialize.", true);
     }
+    const fileCount = getAllFiles().length;
+    return createMcpResponse({
+      message: "Current active file tree (SQLite — one tree per project)",
+      projectRoot: coordinator.getProjectRoot(),
+      baseDirectory: config.baseDirectory,
+      lastUpdated: config.lastUpdated,
+      totalFiles: fileCount
+    });
   });
 
   server.tool("list_files", "List all files in the project with their importance rankings", async () => {

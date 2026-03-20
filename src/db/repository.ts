@@ -272,6 +272,25 @@ export function getAllFiles(): FileNode[] {
     .map((r: FileRow) => rowToFileNode(r, false));
 }
 
+// ─── Purge stale records ─────────────────────────────────────────────────────
+
+/**
+ * Deletes all file and dependency records whose paths are NOT under the given
+ * project root. Called during init() to clean up ghost records left from a
+ * previous project root (e.g. different machine or moved directory).
+ */
+export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; deps: number } {
+  const sqlite = getSqlite();
+  const pattern = projectRoot + '%';
+  const depResult = sqlite.prepare(
+    'DELETE FROM file_dependencies WHERE source_path NOT LIKE ? OR target_path NOT LIKE ?'
+  ).run(pattern, pattern);
+  const fileResult = sqlite.prepare(
+    'DELETE FROM files WHERE path NOT LIKE ?'
+  ).run(pattern);
+  return { files: fileResult.changes, deps: depResult.changes };
+}
+
 // ─── Exports snapshot ─────────────────────────────────────────────────────────
 
 /**
