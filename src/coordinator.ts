@@ -5,17 +5,19 @@ import {
   FileNode,
   ToolResponse,
   FileTreeConfig,
-  FileWatchingConfig
+  FileWatchingConfig,
+  PackageDependency
 } from './types.js';
-import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck } from './file-utils.js';
-import { saveFileTree, canonicalizePath } from './storage-utils.js';
+import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, resolveGoImports, resolveRubyImports, resolveImportPath, isUnresolvedTemplateLiteral, extractPackageVersion, readGoModuleName, IMPORT_PATTERNS, extractImportPath, getAllFileNodes } from './file-utils.js';
+import { canonicalizePath } from './storage-utils.js';
+import { extractSnapshot, isTreeSitterLanguage } from './change-detector/ast-parser.js';
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState } from './db/repository.js';
+import { getAllFiles, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState, getDependencies, setDependencies } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
@@ -673,42 +675,195 @@ export class ServerCoordinator {
       setConfig(freshConfig);
     }
 
-    // Collect generator output into a synthetic root FileNode (Plan 02 will stream to SQLite directly)
-    const scannedFiles: FileNode[] = [];
+    // Pass 1: Stream file metadata into SQLite
+    log('Pass 1: Streaming file metadata into SQLite...');
+    const sqlite = getSqlite();
+    const batchUpsert = sqlite.transaction((nodes: FileNode[]) => {
+      for (const node of nodes) {
+        upsertFile(node);
+      }
+    });
+
+    let batch: FileNode[] = [];
+    const BATCH_SIZE = 100;
+    let fileCount = 0;
+
     for await (const node of scanDirectory(config.baseDirectory)) {
-      scannedFiles.push(node);
+      batch.push(node);
+      fileCount++;
+      if (batch.length >= BATCH_SIZE) {
+        batchUpsert(batch);
+        batch = [];
+      }
     }
-    const scannedTree: FileNode = {
-      path: path.normalize(config.baseDirectory),
-      name: path.basename(config.baseDirectory),
-      isDirectory: true,
-      children: scannedFiles,
-    };
+    if (batch.length > 0) {
+      batchUpsert(batch);
+    }
 
-    if (!scannedTree.children || scannedTree.children.length === 0) {
-      log('Failed to scan directory - no children found');
+    if (fileCount === 0) {
+      log('Failed to scan directory - no files found');
       throw new Error('Failed to scan directory');
-    } else {
-      log(`Successfully scanned directory, found ${scannedTree.children.length} top-level entries`);
     }
+    log(`Pass 1 complete: streamed ${fileCount} files into SQLite`);
 
-    log('Building dependency map...');
-    buildDependentMap(scannedTree);
-    log('Calculating importance values...');
-    calculateImportance(scannedTree);
+    // Pass 2: Extract dependencies for each file
+    log('Pass 2: Extracting dependencies...');
+    const allFiles = getAllFiles();
+    const allPaths = allFiles.filter(f => !f.isDirectory).map(f => f.path);
 
-    // Persist to SQLite — bulk upsert all nodes
-    log('Saving file tree to SQLite...');
-    try {
-      await saveFileTree(config, scannedTree);
-      log('Successfully saved file tree to SQLite');
-      this.currentConfig = config;
-    } catch (error) {
-      log('Failed to save file tree to SQLite: ' + error);
-      throw error;
+    // Cache goModuleName once for the entire pass (avoid re-reading go.mod per file)
+    let goModuleName: string | null | undefined = undefined;
+
+    for (const filePath of allPaths) {
+      const ext = path.extname(filePath);
+      const dependencies: string[] = [];
+      const packageDependencies: PackageDependency[] = [];
+
+      // Check mtime — skip unchanged files that already have dependencies
+      try {
+        const stat = fsSync.statSync(filePath);
+        const dbNode = allFiles.find(f => f.path === filePath);
+        if (dbNode?.mtime !== undefined && Math.abs(stat.mtimeMs - dbNode.mtime) <= 1) {
+          const existingDeps = getDependencies(filePath);
+          if (existingDeps.length > 0) {
+            continue; // File unchanged and has deps — skip
+          }
+        }
+      } catch {
+        continue; // File no longer on disk — skip
+      }
+
+      try {
+        // AST-based extraction for TS/JS
+        if (isTreeSitterLanguage(ext)) {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const snapshot = extractSnapshot(filePath, content);
+          if (snapshot) {
+            for (const importPath of snapshot.imports) {
+              if (isUnresolvedTemplateLiteral(importPath)) continue;
+              try {
+                const resolvedPath = resolveImportPath(importPath, filePath, config.baseDirectory);
+                if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+                  const pkgDep = PackageDependency.fromPath(resolvedPath);
+                  if (!pkgDep.name) {
+                    if (importPath.startsWith('@')) {
+                      const parts = importPath.split('/');
+                      if (parts.length >= 2) { pkgDep.scope = parts[0]; pkgDep.name = `${parts[0]}/${parts[1]}`; }
+                    } else if (importPath.includes('/')) {
+                      pkgDep.name = importPath.split('/')[0];
+                    } else {
+                      pkgDep.name = importPath;
+                    }
+                  }
+                  if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
+                  if (pkgDep.name) {
+                    const version = await extractPackageVersion(pkgDep.name, config.baseDirectory);
+                    if (version) pkgDep.version = version;
+                  }
+                  packageDependencies.push(pkgDep);
+                  continue;
+                }
+                const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
+                for (const extension of possibleExtensions) {
+                  const pathToCheck = resolvedPath + extension;
+                  try {
+                    await fs.access(pathToCheck);
+                    dependencies.push(pathToCheck);
+                    break;
+                  } catch { /* try next extension */ }
+                }
+              } catch (error) {
+                log(`Failed to resolve path for ${importPath}: ${error}`);
+              }
+            }
+          }
+        } else if (ext === '.go') {
+          const content = await fs.readFile(filePath, 'utf-8');
+          if (goModuleName === undefined) {
+            goModuleName = await readGoModuleName(config.baseDirectory);
+          }
+          const goResult = await resolveGoImports(content, filePath, config.baseDirectory, goModuleName);
+          dependencies.push(...goResult.dependencies);
+          packageDependencies.push(...goResult.packageDependencies);
+        } else if (ext === '.rb') {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const rbResult = await resolveRubyImports(content, filePath, config.baseDirectory);
+          dependencies.push(...rbResult.dependencies);
+          packageDependencies.push(...rbResult.packageDependencies);
+        } else if (IMPORT_PATTERNS[ext]) {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const matches = content.match(IMPORT_PATTERNS[ext]);
+          if (matches) {
+            for (const match of matches) {
+              const importPath = extractImportPath(match);
+              if (importPath && !isUnresolvedTemplateLiteral(importPath)) {
+                try {
+                  const resolvedPath = path.resolve(path.dirname(filePath), importPath);
+                  if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+                    const pkgDep = PackageDependency.fromPath(resolvedPath);
+                    if (!pkgDep.name) {
+                      if (importPath.startsWith('@')) {
+                        const parts = importPath.split('/');
+                        if (parts.length >= 2) { pkgDep.scope = parts[0]; pkgDep.name = `${parts[0]}/${parts[1]}`; }
+                      } else if (importPath.includes('/')) {
+                        pkgDep.name = importPath.split('/')[0];
+                      } else {
+                        pkgDep.name = importPath;
+                      }
+                    }
+                    if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
+                    if (pkgDep.name) {
+                      const version = await extractPackageVersion(pkgDep.name, config.baseDirectory);
+                      if (version) pkgDep.version = version;
+                    }
+                    packageDependencies.push(pkgDep);
+                    continue;
+                  }
+                  const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
+                  for (const extension of possibleExtensions) {
+                    const pathToCheck = resolvedPath + extension;
+                    try {
+                      await fs.access(pathToCheck);
+                      dependencies.push(pathToCheck);
+                      break;
+                    } catch { /* try next */ }
+                  }
+                } catch (error) {
+                  log(`Failed to resolve regex import ${importPath}: ${error}`);
+                }
+              }
+            }
+          }
+        }
+
+        // Store dependencies in SQLite
+        if (dependencies.length > 0 || packageDependencies.length > 0) {
+          setDependencies(filePath, dependencies, packageDependencies);
+        }
+      } catch (error) {
+        log(`Failed to extract dependencies for ${filePath}: ${error}`);
+      }
     }
+    log('Pass 2 complete: dependencies extracted');
 
-    log('BUILD FILE TREE COMPLETED (built from scratch)');
+    // Pass 2b: Calculate importance using existing tree-based functions
+    log('Pass 2b: Calculating importance...');
+    const freshDbFiles = getAllFiles();
+    const tempTree = this.reconstructTreeFromDb(freshDbFiles, config.baseDirectory);
+    buildDependentMap(tempTree);
+    calculateImportance(tempTree);
+
+    // Persist updated importance values back to SQLite
+    const updatedNodes = getAllFileNodes(tempTree);
+    const importanceBatch = sqlite.transaction((nodes: FileNode[]) => {
+      for (const node of nodes) {
+        upsertFile(node);
+      }
+    });
+    importanceBatch(updatedNodes);
+
+    this.currentConfig = config;
+    log('BUILD FILE TREE COMPLETED (streaming two-pass scan)');
     log('==========================================\n');
   }
 

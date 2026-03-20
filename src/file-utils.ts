@@ -79,7 +79,7 @@ const RUBY_IMPORT_RE = /(require_relative|require)\s*\(?\s*['"]([^'"]+)['"]\s*\)
 // Note: .ts, .tsx, .js, .jsx entries removed — those file types now use AST-based
 // import extraction via extractSnapshot() from change-detector/ast-parser.ts (CHNG-04).
 // All other languages continue to use the regex patterns below.
-const IMPORT_PATTERNS: { [key: string]: RegExp } = {
+export const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.py': /(?:import\s+[\w.]+|from\s+[\w.]+\s+import\s+[\w*]+)/g,
   '.c': /#include\s+["<][^">]+[">]/g,
   '.cpp': /#include\s+["<][^">]+[">]/g,
@@ -118,7 +118,7 @@ export async function readGoModuleName(projectRoot: string): Promise<string | nu
  * Go imports reference packages (directories), not individual files.
  * Intra-project imports are identified by matching the go.mod module name prefix.
  */
-async function resolveGoImports(
+export async function resolveGoImports(
   content: string,
   currentFile: string,
   projectRoot: string,
@@ -172,7 +172,7 @@ async function resolveGoImports(
   return { dependencies, packageDependencies };
 }
 
-function isUnresolvedTemplateLiteral(str: string): boolean {
+export function isUnresolvedTemplateLiteral(str: string): boolean {
   // Check for ${...} pattern which indicates an unresolved template literal
   return typeof str === 'string' &&
          str.includes('${') &&
@@ -190,7 +190,7 @@ function isRubyInterpolation(str: string): boolean {
  * require_relative and require with ./ or ../ prefix resolve relative to the calling file.
  * Bare require (no relative prefix) is classified as a gem/stdlib package dependency.
  */
-async function resolveRubyImports(
+export async function resolveRubyImports(
   content: string,
   currentFile: string,
   projectRoot: string
@@ -252,7 +252,7 @@ async function resolveRubyImports(
 }
 
 // Helper to resolve TypeScript/JavaScript import paths
-function resolveImportPath(importPath: string, currentFilePath: string, baseDir: string): string {
+export function resolveImportPath(importPath: string, currentFilePath: string, baseDir: string): string {
   log(`Resolving import path: ${importPath} from file: ${currentFilePath}`);
   
   // Check if the importPath is an unresolved template literal
@@ -364,7 +364,7 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
 }
 
 // Helper to extract import path from different import styles
-function extractImportPath(importStatement: string): string | null {
+export function extractImportPath(importStatement: string): string | null {
   // Try to match dynamic imports first
   const dynamicMatch = importStatement.match(/import\s*\(["']([^"']+)["']\)/);
   if (dynamicMatch) {
@@ -393,7 +393,7 @@ function extractImportPath(importStatement: string): string | null {
 }
 
 // Helper to extract package version from package.json if available
-async function extractPackageVersion(packageName: string, baseDir: string): Promise<string | undefined> {
+export async function extractPackageVersion(packageName: string, baseDir: string): Promise<string | undefined> {
   try {
     // Handle scoped packages by getting the basic package name
     let basicPackageName = packageName;
@@ -665,7 +665,7 @@ export async function* scanDirectory(baseDir: string, currentDir: string = baseD
 }
 
 // Find all file nodes in the tree
-function getAllFileNodes(root: FileNode): FileNode[] {
+export function getAllFileNodes(root: FileNode): FileNode[] {
   const results: FileNode[] = [];
   
   function traverse(node: FileNode) {
