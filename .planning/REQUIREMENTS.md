@@ -32,7 +32,7 @@ Requirements for v1.1 Hardening release. Each maps to roadmap phases.
 
 ### Cycle Detection
 
-- [ ] **CYCL-01**: Tarjan's SCC algorithm detects circular dependency groups in the file graph using an iterative (non-recursive) implementation
+- [x] **CYCL-01**: Tarjan's SCC algorithm detects circular dependency groups in the file graph using an iterative (non-recursive) implementation
 - [ ] **CYCL-02**: Cycle information is exposed via MCP tools — users can detect all cycles in the project and query which cycle group a specific file belongs to
 
 ## Future Requirements
@@ -81,7 +81,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERF-03 | Phase 14 | Complete |
 | LANG-01 | Phase 12 | Complete |
 | LANG-02 | Phase 12 | Complete |
-| CYCL-01 | Phase 15 | Pending |
+| CYCL-01 | Phase 15 | Complete |
 | CYCL-02 | Phase 15 | Pending |
 
 **Coverage:**

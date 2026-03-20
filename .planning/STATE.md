@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Hardening
-status: phase-complete
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-03-20T03:37:00.000Z"
+status: unknown
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-03-20T06:57:45.376Z"
 last_activity: 2026-03-20
 progress:
   total_phases: 6
   completed_phases: 5
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 11
+  completed_plans: 10
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 14 — mtime-based-lazy-validation
+**Current focus:** Phase 15 — cycle-detection
 
 ## Current Position
 
-Phase: 14 (mtime-based-lazy-validation) — COMPLETE
-Plan: 1 of 1 (all complete)
+Phase: 15 (cycle-detection) — EXECUTING
+Plan: 1 of 2
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Plan: 1 of 1 (all complete)
 | Phase 13-streaming-directory-scan P01 | 18min | 2 tasks | 3 files |
 | Phase 13 P02 | 6min | 2 tasks | 3 files |
 | Phase 14-mtime-based-lazy-validation P01 | 4min | 2 tasks | 3 files |
+| Phase 15-cycle-detection P01 | 3min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,8 @@ Key v1.1 decisions:
 - [Phase 14-mtime-based-lazy-validation]: checkFileFreshness uses markSelfStale (not cascadeStale) — lazy check does not know if API surface changed
 - [Phase 14-mtime-based-lazy-validation]: stale field is absent (not false) when fresh — conditional spread pattern matches existing summaryStale convention
 - [Phase 14-mtime-based-lazy-validation]: read_file_content wraps response in object only when stale — preserves backward compatibility for non-stale responses
+- [Phase 15-cycle-detection]: iterativeTarjanSCC uses explicit workStack array of {node, neighborIdx} frames — avoids recursion for large graphs
+- [Phase 15-cycle-detection]: getAllLocalImportEdges placed in repository.ts after getDependents() for batch edge loading without N+1 queries
 
 ### Pending Todos
 
@@ -106,5 +109,5 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-20
-Stopped at: Completed 14-01-PLAN.md
-Resume file: .planning/phases/14-mtime-based-lazy-validation/14-01-SUMMARY.md
+Stopped at: Completed 15-01-PLAN.md
+Resume file: None
