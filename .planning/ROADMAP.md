@@ -99,7 +99,9 @@ Plans:
   1. No `setInterval` integrity sweep timer runs after startup — file freshness is checked only at startup (full sweep) and on MCP tool access (per-file mtime comparison)
   2. When an MCP tool accesses a file whose mtime differs from the stored value, the response includes a `stale: true` indicator and the file is queued for re-analysis
   3. Disk I/O on large projects (1,000+ tracked files) drops measurably after startup — no background stat-polling of all files every 30 seconds
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 14-01-PLAN.md — Remove polling sweep, add startup sweep + per-file checkFileFreshness, wire into MCP handlers
 
 ### Phase 15: Cycle Detection
 **Goal**: Users can detect circular dependency groups in their project and query which cycle group any file belongs to, via two new MCP tools backed by an iterative Tarjan's SCC implementation
@@ -129,5 +131,5 @@ Plans:
 | 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
 | 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
 | 13. Streaming Directory Scan | 2/2 | Complete    | 2026-03-20 | - |
-| 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |
+| 14. mtime-Based Lazy Validation | v1.1 | 0/1 | Not started | - |
 | 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |
