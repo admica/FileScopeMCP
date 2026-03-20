@@ -112,7 +112,10 @@ Plans:
   2. `get_cycles_for_file` MCP tool returns the cycle group a specific file belongs to, or indicates the file is not part of any cycle
   3. Cycle detection runs on-demand only (not on every file change) and completes in under 2 seconds on a project with 10,000+ dependency edges
   4. A project with no circular dependencies returns an empty cycle list from `detect_cycles`
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 15-01-PLAN.md — Iterative Tarjan's SCC algorithm + batch edge loader (TDD)
+- [ ] 15-02-PLAN.md — Wire detect_cycles and get_cycles_for_file MCP tools
 
 ## Progress
 
@@ -131,5 +134,5 @@ Plans:
 | 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
 | 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
 | 13. Streaming Directory Scan | 2/2 | Complete    | 2026-03-20 | - |
-| 14. mtime-Based Lazy Validation | 1/1 | Complete   | 2026-03-20 | - |
-| 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |
+| 14. mtime-Based Lazy Validation | 1/1 | Complete    | 2026-03-20 | - |
+| 15. Cycle Detection | v1.1 | 0/2 | Not started | - |
