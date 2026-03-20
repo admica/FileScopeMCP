@@ -87,22 +87,18 @@ export function getFilescopeIgnore(): Ignore | null {
 }
 
 export function addExclusionPattern(pattern: string): void {
-  const customExcludesPath = path.join(_projectRoot, 'FileScopeMCP-excludes.json');
-  let customExcludes: string[] = [];
+  // 1. Add to in-memory config so scanDirectory excludes it immediately
+  if (_config && _config.excludePatterns && !_config.excludePatterns.includes(pattern)) {
+    _config.excludePatterns.push(pattern);
+    logInfo(`Added exclusion pattern to in-memory config: ${pattern}`);
 
-  try {
-    if (fs.existsSync(customExcludesPath)) {
-      customExcludes = JSON.parse(fs.readFileSync(customExcludesPath, 'utf-8'));
+    // 2. Persist to config.json so it survives restarts
+    try {
+      const configPath = path.join(_projectRoot, 'config.json');
+      fs.writeFileSync(configPath, JSON.stringify(_config, null, 2), 'utf-8');
+      logInfo(`Persisted exclusion pattern to config.json: ${pattern}`);
+    } catch (err) {
+      logError('Error persisting exclusion pattern to config.json:', err);
     }
-
-    if (!customExcludes.includes(pattern)) {
-      customExcludes.push(pattern);
-      fs.writeFileSync(customExcludesPath, JSON.stringify(customExcludes, null, 2), 'utf-8');
-      logInfo(`Added exclusion pattern to FileScopeMCP-excludes.json: ${pattern}`);
-    } else {
-      logDebug(`Pattern already exists in FileScopeMCP-excludes.json: ${pattern}`);
-    }
-  } catch (err) {
-    logError('Error updating FileScopeMCP-excludes.json:', err);
   }
 }

@@ -76,9 +76,7 @@
     "**/.rustup",
     "**/.swp",
     "**/.local",
-    "**/*.gradle",
-    "test.delete.me",
-    "**/test-file-to-remove.txt"
+    "**/*.gradle"
   ],
   "fileWatching": {
     "enabled": true,
