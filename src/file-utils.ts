@@ -584,7 +584,7 @@ export function globToRegExp(pattern: string): RegExp {
   return regex;
 }
 
-export async function scanDirectory(baseDir: string, currentDir: string = baseDir): Promise<FileNode> {
+export async function* scanDirectory(baseDir: string, currentDir: string = baseDir): AsyncGenerator<FileNode> {
   log(`\n📁 SCAN DIRECTORY: ${currentDir}`);
   log(`  - Base dir: ${baseDir}`);
 
@@ -592,38 +592,9 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
   const normalizedBaseDir = path.normalize(baseDir);
   const normalizedDirPath = path.normalize(currentDir);
 
-  // Cache go.mod module name — read once per top-level scan
-  let goModuleName: string | null | undefined = undefined;
-  
   log(`  - Normalized base dir: ${normalizedBaseDir}`);
   log(`  - Normalized current dir: ${normalizedDirPath}`);
 
-  // Create root node for this directory
-  const rootNode: FileNode = {
-    path: normalizedDirPath,
-    name: path.basename(normalizedDirPath),
-    isDirectory: true,
-    children: []
-  };
-
-  // Read directory entries
-  let entries: fs.Dirent[];
-  try {
-    entries = await fsPromises.readdir(normalizedDirPath, { withFileTypes: true });
-    log(`  - Read ${entries.length} entries in directory`);
-  } catch (error) {
-    log(`  - ❌ Error reading directory ${normalizedDirPath}:`, error);
-    return rootNode;
-  }
-
-  // Process each entry
-  let excluded = 0;
-  let included = 0;
-  let dirProcessed = 0;
-  let fileProcessed = 0;
-  
-  log(`\n  Processing ${entries.length} entries in ${normalizedDirPath}...`);
-  
   // ==================== CRITICAL CODE ====================
   // Log the global config status before processing entries
   log(`\n🔍 BEFORE PROCESSING: Is config loaded? ${getConfig() !== null ? 'YES ✅' : 'NO ❌'}`);
@@ -635,251 +606,62 @@ export async function scanDirectory(baseDir: string, currentDir: string = baseDi
     }
   }
   // ======================================================
-  
-  for (const entry of entries) {
+
+  // Open directory for streaming iteration — no buffering of full listing
+  let dir: fs.Dir;
+  try {
+    dir = await fsPromises.opendir(normalizedDirPath);
+  } catch (error) {
+    log(`  - ❌ Error opening directory ${normalizedDirPath}:`, error);
+    return;
+  }
+
+  for await (const entry of dir) {
     const fullPath = path.join(normalizedDirPath, entry.name);
     const normalizedFullPath = path.normalize(fullPath);
-    
+
     log(`\n  Entry: ${entry.name} (${entry.isDirectory() ? 'directory' : 'file'})`);
     log(`  - Full path: ${normalizedFullPath}`);
 
-    // Here's the critical exclusion check
+    // Pre-recursion exclusion gate — excluded directories are never entered
     log(`  🔍 Checking if path should be excluded: ${normalizedFullPath}`);
     const shouldExclude = isExcluded(normalizedFullPath, normalizedBaseDir, entry.isDirectory());
     log(`  🔍 Exclusion check result: ${shouldExclude ? 'EXCLUDE ✅' : 'INCLUDE ❌'}`);
-    
+
     if (shouldExclude) {
       log(`  - ✅ Skipping excluded path: ${normalizedFullPath}`);
-      excluded++;
       continue;
     }
-    
+
     log(`  - ✅ Including path: ${normalizedFullPath}`);
-    included++;
 
     if (entry.isDirectory()) {
       log(`  - Processing directory: ${normalizedFullPath}`);
-      const childNode = await scanDirectory(normalizedBaseDir, fullPath);
-      rootNode.children?.push(childNode);
-      dirProcessed++;
+      yield* scanDirectory(normalizedBaseDir, fullPath);
     } else {
       log(`  - Processing file: ${normalizedFullPath}`);
-      fileProcessed++;
-      const ext = path.extname(entry.name);
-      const importPattern = IMPORT_PATTERNS[ext];
-      const dependencies: string[] = [];
-      const packageDependencies: PackageDependency[] = [];
-
-      // AST-based import extraction for TS/JS (CHNG-04 — replaces regex for these types)
-      if (isTreeSitterLanguage(ext)) {
-        try {
-          const content = await fsPromises.readFile(fullPath, 'utf-8');
-          const snapshot = extractSnapshot(normalizedFullPath, content);
-          if (snapshot) {
-            log(`[AST] Found ${snapshot.imports.length} imports in ${normalizedFullPath}`);
-            for (const importPath of snapshot.imports) {
-              if (isUnresolvedTemplateLiteral(importPath)) {
-                log(`Skipping unresolved template literal: ${importPath}`);
-                continue;
-              }
-              try {
-                const resolvedPath = resolveImportPath(importPath, normalizedFullPath, normalizedBaseDir);
-                log(`Resolved path: ${resolvedPath}`);
-                if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
-                  const pkgDep = PackageDependency.fromPath(resolvedPath);
-                  if (!pkgDep.name) {
-                    if (importPath.startsWith('@')) {
-                      const parts = importPath.split('/');
-                      if (parts.length >= 2) { pkgDep.scope = parts[0]; pkgDep.name = `${parts[0]}/${parts[1]}`; }
-                    } else if (importPath.includes('/')) {
-                      pkgDep.name = importPath.split('/')[0];
-                    } else {
-                      pkgDep.name = importPath;
-                    }
-                  }
-                  if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
-                  if (pkgDep.name) {
-                    const version = await extractPackageVersion(pkgDep.name, normalizedBaseDir);
-                    if (version) pkgDep.version = version;
-                  }
-                  packageDependencies.push(pkgDep);
-                  continue;
-                }
-                const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
-                for (const extension of possibleExtensions) {
-                  const pathToCheck = resolvedPath + extension;
-                  try {
-                    await fsPromises.access(pathToCheck);
-                    log(`Found existing path: ${pathToCheck}`);
-                    dependencies.push(pathToCheck);
-                    break;
-                  } catch { /* try next extension */ }
-                }
-              } catch (error) {
-                log(`Failed to resolve path for ${importPath}:`, error);
-              }
-            }
-          }
-        } catch (error) {
-          log(`Failed to read or process file ${fullPath} (AST path):`, error);
-        }
-      } else if (ext === '.go') {
-        try {
-          const content = await fsPromises.readFile(fullPath, 'utf-8');
-          if (goModuleName === undefined) {
-            goModuleName = await readGoModuleName(normalizedBaseDir);
-          }
-          const goResult = await resolveGoImports(content, normalizedFullPath, normalizedBaseDir, goModuleName);
-          dependencies.push(...goResult.dependencies);
-          packageDependencies.push(...goResult.packageDependencies);
-        } catch (error) {
-          log(`Failed to read or process Go file ${fullPath}:`, error);
-        }
-      } else if (ext === '.rb') {
-        try {
-          const content = await fsPromises.readFile(fullPath, 'utf-8');
-          const rbResult = await resolveRubyImports(content, normalizedFullPath, normalizedBaseDir);
-          dependencies.push(...rbResult.dependencies);
-          packageDependencies.push(...rbResult.packageDependencies);
-        } catch (error) {
-          log(`Failed to read or process Ruby file ${fullPath}:`, error);
-        }
-      } else if (importPattern) {
-        try {
-          const content = await fsPromises.readFile(fullPath, 'utf-8');
-          const matches = content.match(importPattern);
-          log(`Found ${matches?.length || 0} potential imports in ${normalizedFullPath}`);
-
-          if (matches) {
-            for (const match of matches) {
-              const importPath = extractImportPath(match);
-              if (importPath) {
-                // Skip if the importPath looks like an unresolved template literal
-                if (isUnresolvedTemplateLiteral(importPath)) {
-                  log(`Skipping unresolved template literal: ${importPath}`);
-                  continue;
-                }
-
-                try {
-                  const resolvedPath = path.resolve(path.dirname(fullPath), importPath);
-                  log(`Resolved path: ${resolvedPath}`);
-                  
-                  // Handle package imports
-                  if (resolvedPath.includes('node_modules') || importPath.startsWith('@') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
-                    // Create a package dependency object with more information
-                    const pkgDep = PackageDependency.fromPath(resolvedPath);
-                    
-                    // Set the package name directly from the import path if it's empty
-                    if (!pkgDep.name) {
-                      // Skip if the importPath looks like an unresolved template literal
-                      if (isUnresolvedTemplateLiteral(importPath)) {
-                        log(`Skipping package dependency with template literal name: ${importPath}`);
-                        continue;
-                      }
-                      
-                      // For imports like '@scope/package'
-                      if (importPath.startsWith('@')) {
-                        const parts = importPath.split('/');
-                        if (parts.length >= 2) {
-                          pkgDep.scope = parts[0];
-                          pkgDep.name = `${parts[0]}/${parts[1]}`;
-                        }
-                      } 
-                      // For imports like 'package'
-                      else if (importPath.includes('/')) {
-                        pkgDep.name = importPath.split('/')[0];
-                      } else {
-                        pkgDep.name = importPath;
-                      }
-                    }
-                    
-                    // Skip if the resolved package name is a template literal
-                    if (isUnresolvedTemplateLiteral(pkgDep.name)) {
-                      log(`Skipping package with template literal name: ${pkgDep.name}`);
-                      continue;
-                    }
-                    
-                    // Try to extract version information
-                    if (pkgDep.name) {
-                      const version = await extractPackageVersion(pkgDep.name, normalizedBaseDir);
-                      if (version) {
-                        pkgDep.version = version;
-                      }
-                      
-                      // Check if it's a dev dependency
-                      try {
-                        const packageJsonPath = path.join(normalizedBaseDir, 'package.json');
-                        const content = await fsPromises.readFile(packageJsonPath, 'utf-8');
-                        const packageData = JSON.parse(content);
-                        
-                        if (packageData.devDependencies && packageData.devDependencies[pkgDep.name]) {
-                          pkgDep.isDevDependency = true;
-                        }
-                      } catch (error) {
-                        // Ignore package.json errors
-                      }
-                    }
-                    
-                    packageDependencies.push(pkgDep);
-                    continue;
-                  }
-                  
-                  // Try with different extensions for TypeScript/JavaScript files
-                  const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
-                  for (const extension of possibleExtensions) {
-                    const pathToCheck = resolvedPath + extension;
-                    try {
-                      await fsPromises.access(pathToCheck);
-                      log(`Found existing path: ${pathToCheck}`);
-                      dependencies.push(pathToCheck);
-                      break;
-                    } catch {
-                      // File doesn't exist with this extension, try next one
-                    }
-                  }
-                } catch (error) {
-                  log(`Failed to resolve path for ${importPath}:`, error);
-                }
-              }
-            }
-          }
-        } catch (error) {
-          log(`Failed to read or process file ${fullPath}:`, error);
-        }
-      }
 
       // Capture file modification time for freshness tracking
       let fileMtime: number | undefined;
       try {
-        const stat = fs.statSync(normalizedFullPath);
+        const stat = await fsPromises.stat(normalizedFullPath);
         fileMtime = stat.mtimeMs;
       } catch { /* ignore stat errors */ }
 
-      const fileNode: FileNode = {
+      // Yield metadata-only FileNode — dependency extraction deferred to coordinator Pass 2
+      yield {
         path: normalizedFullPath,
         name: entry.name,
         isDirectory: false,
         importance: calculateInitialImportance(normalizedFullPath, normalizedBaseDir),
-        dependencies: dependencies,
-        packageDependencies: packageDependencies,
-        dependents: [],
-        summary: undefined,
-        mtime: fileMtime
-      };
-      rootNode.children?.push(fileNode);
+        mtime: fileMtime,
+        // dependencies, packageDependencies, dependents are NOT set here
+        // They are populated in Pass 2 by the coordinator
+      } as FileNode;
     }
   }
-  
-  // Log summary for this directory
-  log(`\n  📊 DIRECTORY SCAN SUMMARY for ${normalizedDirPath}:`);
-  log(`    - Total entries: ${entries.length}`);
-  log(`    - Excluded: ${excluded}`);
-  log(`    - Included: ${included}`);
-  log(`    - Directories processed: ${dirProcessed}`);
-  log(`    - Files processed: ${fileProcessed}`);
+
   log(`  📁 END SCAN DIRECTORY: ${currentDir}\n`);
-  
-  return rootNode;
 }
 
 // Find all file nodes in the tree

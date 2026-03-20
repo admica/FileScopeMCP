@@ -673,7 +673,17 @@ export class ServerCoordinator {
       setConfig(freshConfig);
     }
 
-    const scannedTree = await scanDirectory(config.baseDirectory);
+    // Collect generator output into a synthetic root FileNode (Plan 02 will stream to SQLite directly)
+    const scannedFiles: FileNode[] = [];
+    for await (const node of scanDirectory(config.baseDirectory)) {
+      scannedFiles.push(node);
+    }
+    const scannedTree: FileNode = {
+      path: path.normalize(config.baseDirectory),
+      name: path.basename(config.baseDirectory),
+      isDirectory: true,
+      children: scannedFiles,
+    };
 
     if (!scannedTree.children || scannedTree.children.length === 0) {
       log('Failed to scan directory - no children found');
