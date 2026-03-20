@@ -289,3 +289,99 @@ describe('ServerCoordinator', () => {
     }
   });
 });
+
+// ─── checkFileFreshness tests ──────────────────────────────────────────────
+
+describe('checkFileFreshness', () => {
+  let coordinator: ServerCoordinator;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    coordinator = new ServerCoordinator();
+  });
+
+  afterEach(async () => {
+    if (coordinator.isInitialized()) {
+      await coordinator.shutdown();
+    } else {
+      try { closeDatabase(); } catch { /* ignore */ }
+    }
+    if (tmpDir) {
+      removeTmpDir(tmpDir);
+    }
+  });
+
+  it('returns false for a file whose mtime matches stored value (fresh)', async () => {
+    tmpDir = makeTmpProject();
+    await coordinator.init(tmpDir);
+
+    const filePath = path.join(tmpDir, 'src', 'index.ts');
+    const result = coordinator.checkFileFreshness(filePath);
+    expect(result).toBe(false);
+  });
+
+  it('returns true for a file whose mtime differs (stale), and updates mtime in DB', async () => {
+    tmpDir = makeTmpProject();
+    await coordinator.init(tmpDir);
+
+    const filePath = path.join(tmpDir, 'src', 'index.ts');
+
+    // Modify the file to change its mtime
+    // First wait a tiny bit to ensure mtime differs
+    const before = getFile(filePath);
+    expect(before).not.toBeNull();
+    const oldMtime = before!.mtime;
+
+    // Write new content to change mtime
+    fs.writeFileSync(filePath, 'export const hello = "changed";\n', 'utf-8');
+
+    const result = coordinator.checkFileFreshness(filePath);
+    expect(result).toBe(true);
+
+    // Verify mtime was updated in DB
+    const after = getFile(filePath);
+    expect(after).not.toBeNull();
+    const diskStat = fs.statSync(filePath);
+    expect(Math.abs(diskStat.mtimeMs - after!.mtime!)).toBeLessThanOrEqual(1);
+  });
+
+  it('returns false for a file not tracked in DB', async () => {
+    tmpDir = makeTmpProject();
+    await coordinator.init(tmpDir);
+
+    const unknownPath = path.join(tmpDir, 'src', 'nonexistent.ts');
+    const result = coordinator.checkFileFreshness(unknownPath);
+    expect(result).toBe(false);
+  });
+
+  it('no integritySweepInterval property exists after init', async () => {
+    tmpDir = makeTmpProject();
+    await coordinator.init(tmpDir);
+
+    expect((coordinator as any).integritySweepInterval).toBeUndefined();
+  });
+
+  it('startup sweep detects new files added while server was down', async () => {
+    tmpDir = makeTmpProject();
+
+    // First init — scan the project
+    await coordinator.init(tmpDir);
+    const initialFiles = getAllFiles().map(f => f.path);
+    await coordinator.shutdown();
+
+    // Add a new file while the server is down
+    const newFilePath = path.join(tmpDir, 'src', 'new-file.ts');
+    fs.writeFileSync(newFilePath, 'export const newThing = 42;\n', 'utf-8');
+
+    // Re-init — startup sweep should detect the new file
+    const coordinator2 = new ServerCoordinator();
+    await coordinator2.init(tmpDir);
+
+    const afterFiles = getAllFiles().map(f => f.path);
+    expect(afterFiles).toContain(newFilePath);
+
+    await coordinator2.shutdown();
+    // Prevent double-shutdown in afterEach
+    coordinator = new ServerCoordinator();
+  });
+});
