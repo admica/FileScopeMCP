@@ -128,6 +128,6 @@ Plans:
 | 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
 | 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
 | 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
-| 13. Streaming Directory Scan | 2/2 | Complete   | 2026-03-20 | - |
+| 13. Streaming Directory Scan | 2/2 | Complete    | 2026-03-20 | - |
 | 14. mtime-Based Lazy Validation | v1.1 | 0/TBD | Not started | - |
 | 15. Cycle Detection | v1.1 | 0/TBD | Not started | - |

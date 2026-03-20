@@ -52,7 +52,8 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - Add cycle detection (Tarjan's SCC) and expose via tools
 - ✓ Go and Ruby language support — go.mod resolution, require/require_relative parsing — Phase 12
 - ✓ .filescopeignore support — gitignore-syntax exclusion for scan-time and watch-time — Phase 11
-- Large codebase performance (streaming scan, lazy file content)
+- ✓ Streaming directory scan — async generator with two-pass SQLite integration — Phase 13
+- Lazy file content for large codebases
 - ✓ Code quality: consolidated fs imports, unified canonicalizePath, fixed firebase false positive, removed dead code — Phase 10
 
 ### Out of Scope
@@ -67,7 +68,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Context
 
-Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 201 tests passing. Phase 10 (code quality + bug fixes), Phase 11 (.filescopeignore support), and Phase 12 (Go and Ruby language support) complete.
+Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 227 tests passing. Phase 10 (code quality + bug fixes), Phase 11 (.filescopeignore support), Phase 12 (Go and Ruby language support), and Phase 13 (streaming directory scan) complete.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
