@@ -882,30 +882,37 @@ export class ServerCoordinator {
       });
     }
 
-    // Find the root: node whose path equals baseDirectory (or shortest path)
-    let root = nodeMap.get(baseDirectory) ?? nodeMap.get(normalizePath(baseDirectory));
+    // Find the root: node whose path equals baseDirectory, or synthesize one
+    const normalizedBase = normalizePath(baseDirectory);
+    let root = nodeMap.get(baseDirectory) ?? nodeMap.get(normalizedBase);
     if (!root) {
-      // Fall back to shortest path as root
-      let shortest: FileNode | null = null;
-      for (const node of nodeMap.values()) {
-        if (!shortest || node.path.length < shortest.path.length) {
-          shortest = node;
-        }
-      }
-      root = shortest ?? {
-        path: baseDirectory,
-        name: path.basename(baseDirectory),
+      // Streaming generator yields only files, not directories — synthesize root
+      root = {
+        path: normalizedBase,
+        name: path.basename(normalizedBase),
         isDirectory: true,
         children: []
       };
+      nodeMap.set(normalizedBase, root);
     }
+
+    // Ensure intermediate directories exist in the map (generator yields only files)
+    const ensureDir = (dirPath: string): FileNode => {
+      let dir = nodeMap.get(dirPath);
+      if (!dir) {
+        dir = { path: dirPath, name: path.basename(dirPath), isDirectory: true, children: [] };
+        nodeMap.set(dirPath, dir);
+      }
+      return dir;
+    };
 
     // Assign children to their parents
     for (const node of nodeMap.values()) {
       if (node.path === root.path) continue;
       const parentPath = node.path.substring(0, node.path.lastIndexOf('/'));
-      const parent = nodeMap.get(parentPath);
-      if (parent && parent.isDirectory && parent.children) {
+      if (parentPath.length < root.path.length) continue;
+      const parent = ensureDir(parentPath);
+      if (parent.children) {
         parent.children.push(node);
       }
     }
