@@ -550,62 +550,52 @@ describe('Go import parsing', () => {
     expect(result).toBeNull();
   });
 
-  it.skip('resolveGoImports extracts single-line import as package dependency', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports extracts single-line import as package dependency', async () => {
     const goContent = 'package main\n\nimport "fmt"\n\nfunc main() {}\n';
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
-    expect(mainNode!.packageDependencies).toBeDefined();
-    expect(mainNode!.packageDependencies!.some(p => p.name === 'fmt')).toBe(true);
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
+    expect(result.packageDependencies.some(p => p.name === 'fmt')).toBe(true);
   });
 
-  it.skip('resolveGoImports extracts aliased import path, not alias', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports extracts aliased import path, not alias', async () => {
     const goContent = 'package main\n\nimport f "fmt"\n\nfunc main() {}\n';
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
-    expect(mainNode!.packageDependencies!.some(p => p.name === 'fmt')).toBe(true);
-    expect(mainNode!.packageDependencies!.some(p => p.name === 'f')).toBe(false);
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
+    expect(result.packageDependencies.some(p => p.name === 'fmt')).toBe(true);
+    expect(result.packageDependencies.some(p => p.name === 'f')).toBe(false);
   });
 
-  it.skip('resolveGoImports extracts blank import (_ alias)', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports extracts blank import (_ alias)', async () => {
     const goContent = 'package main\n\nimport _ "database/sql"\n\nfunc main() {}\n';
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
-    expect(mainNode!.packageDependencies!.some(p => p.name === 'database/sql')).toBe(true);
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
+    expect(result.packageDependencies.some(p => p.name === 'database/sql')).toBe(true);
   });
 
-  it.skip('resolveGoImports extracts dot import (. alias)', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports extracts dot import (. alias)', async () => {
     const goContent = 'package main\n\nimport . "testing"\n\nfunc main() {}\n';
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
-    expect(mainNode!.packageDependencies!.some(p => p.name === 'testing')).toBe(true);
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
+    expect(result.packageDependencies.some(p => p.name === 'testing')).toBe(true);
   });
 
-  it.skip('resolveGoImports extracts grouped import block with multiple packages', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports extracts grouped import block with multiple packages', async () => {
     const goContent = `package main
 
 import (
@@ -619,18 +609,16 @@ func main() {}
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
-    const pkgNames = mainNode!.packageDependencies!.map(p => p.name);
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
+    const pkgNames = result.packageDependencies.map(p => p.name);
     expect(pkgNames).toContain('fmt');
     expect(pkgNames).toContain('os');
     expect(pkgNames).toContain('net/http');
   });
 
-  it.skip('resolveGoImports resolves intra-project import when go.mod module matches', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports resolves intra-project import when go.mod module matches', async () => {
     // Create go.mod
     fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module github.com/myorg/myrepo\n\ngo 1.21\n');
     // Create intra-project directory
@@ -647,19 +635,17 @@ func main() {}
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
     // Intra-project import should resolve to a dependency path, not a package dependency
-    expect(mainNode!.dependencies!.length).toBeGreaterThan(0);
-    const depPath = mainNode!.dependencies![0];
+    expect(result.dependencies.length).toBeGreaterThan(0);
+    const depPath = result.dependencies[0];
     expect(depPath).toContain('internal');
     expect(depPath).toContain('util');
   });
 
-  it.skip('resolveGoImports treats all imports as package deps when moduleName is null (no go.mod)', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports treats all imports as package deps when moduleName is null (no go.mod)', async () => {
     // No go.mod file
     const goContent = `package main
 
@@ -670,17 +656,15 @@ func main() {}
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
+    const { resolveGoImports } = await import('./file-utils.js');
+    // Pass null explicitly — no go.mod
+    const result = await resolveGoImports(goContent, goFile, tempDir, null);
     // Without go.mod, all imports become package dependencies
-    expect(mainNode!.packageDependencies!.some(p => p.name === 'github.com/myorg/myrepo/internal/util')).toBe(true);
-    expect(mainNode!.dependencies!.length).toBe(0);
+    expect(result.packageDependencies.some(p => p.name === 'github.com/myorg/myrepo/internal/util')).toBe(true);
+    expect(result.dependencies.length).toBe(0);
   });
 
-  it.skip('resolveGoImports probes for directory existence for intra-project imports', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveGoImports probes for directory existence for intra-project imports', async () => {
     fs.writeFileSync(path.join(tempDir, 'go.mod'), 'module github.com/myorg/myrepo\n\ngo 1.21\n');
     // Do NOT create the internal/nonexistent directory
 
@@ -693,12 +677,11 @@ func main() {}
     const goFile = path.join(tempDir, 'main.go');
     fs.writeFileSync(goFile, goContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const mainNode = nodes.find(n => n.name === 'main.go');
-    expect(mainNode).toBeDefined();
+    const { resolveGoImports, readGoModuleName } = await import('./file-utils.js');
+    const goModuleName = await readGoModuleName(tempDir);
+    const result = await resolveGoImports(goContent, goFile, tempDir, goModuleName);
     // Non-existent directory should NOT appear in dependencies
-    expect(mainNode!.dependencies!.length).toBe(0);
+    expect(result.dependencies.length).toBe(0);
   });
 
   it('calculateInitialImportance returns >= 2 for .go files', async () => {
@@ -736,8 +719,7 @@ describe('Ruby import parsing', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it.skip('resolveRubyImports extracts require_relative and resolves relative to calling file with .rb probing', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports extracts require_relative and resolves relative to calling file with .rb probing', async () => {
     // Create lib/helper.rb
     const libDir = path.join(tempDir, 'lib');
     fs.mkdirSync(libDir, { recursive: true });
@@ -748,16 +730,13 @@ describe('Ruby import parsing', () => {
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
-    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
-    expect(appNode!.dependencies![0]).toContain('helper.rb');
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    expect(result.dependencies.length).toBeGreaterThan(0);
+    expect(result.dependencies[0]).toContain('helper.rb');
   });
 
-  it.skip('resolveRubyImports extracts require with ./ prefix and resolves with .rb probing', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports extracts require with ./ prefix and resolves with .rb probing', async () => {
     const modelsDir = path.join(tempDir, 'models');
     fs.mkdirSync(modelsDir, { recursive: true });
     fs.writeFileSync(path.join(modelsDir, 'user.rb'), '# user model');
@@ -766,16 +745,13 @@ describe('Ruby import parsing', () => {
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
-    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
-    expect(appNode!.dependencies![0]).toContain('user.rb');
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    expect(result.dependencies.length).toBeGreaterThan(0);
+    expect(result.dependencies[0]).toContain('user.rb');
   });
 
-  it.skip('resolveRubyImports extracts require with ../ prefix and resolves with .rb probing', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports extracts require with ../ prefix and resolves with .rb probing', async () => {
     const sharedDir = path.join(tempDir, 'shared');
     fs.mkdirSync(sharedDir, { recursive: true });
     fs.writeFileSync(path.join(sharedDir, 'utils.rb'), '# utils');
@@ -786,90 +762,72 @@ describe('Ruby import parsing', () => {
     const appFile = path.join(subDir, 'worker.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    // Generator yields flat list — find worker.rb directly
-    const workerNode = nodes.find(n => n.name === 'worker.rb');
-    expect(workerNode).toBeDefined();
-    expect(workerNode!.dependencies!.length).toBeGreaterThan(0);
-    expect(workerNode!.dependencies![0]).toContain('utils.rb');
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    expect(result.dependencies.length).toBeGreaterThan(0);
+    expect(result.dependencies[0]).toContain('utils.rb');
   });
 
-  it.skip('resolveRubyImports classifies bare require as package dependency', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports classifies bare require as package dependency', async () => {
     const appContent = "require 'json'\nrequire 'active_record'\n";
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
-    const pkgNames = appNode!.packageDependencies!.map(p => p.name);
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    const pkgNames = result.packageDependencies.map(p => p.name);
     expect(pkgNames).toContain('json');
     expect(pkgNames).toContain('active_record');
   });
 
-  it.skip('resolveRubyImports skips paths containing Ruby interpolation #{}', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports skips paths containing Ruby interpolation #{}', async () => {
     const appContent = `require "#{ENV['HOME']}/config"\nrequire 'json'\n`;
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
     // Should have json as package dep but NOT the interpolated path
-    expect(appNode!.packageDependencies!.some(p => p.name === 'json')).toBe(true);
-    expect(appNode!.dependencies!.length).toBe(0);
+    expect(result.packageDependencies.some(p => p.name === 'json')).toBe(true);
+    expect(result.dependencies.length).toBe(0);
     // The interpolated string should not appear anywhere
-    expect(appNode!.packageDependencies!.some(p => p.name?.includes('ENV'))).toBe(false);
+    expect(result.packageDependencies.some(p => p.name?.includes('ENV'))).toBe(false);
   });
 
-  it.skip('resolveRubyImports handles parenthesized require form', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports handles parenthesized require form', async () => {
     const appContent = "require('net/http')\n";
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
-    expect(appNode!.packageDependencies!.some(p => p.name === 'net')).toBe(true);
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    expect(result.packageDependencies.some(p => p.name === 'net')).toBe(true);
   });
 
-  it.skip('resolveRubyImports handles parenthesized require_relative form', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports handles parenthesized require_relative form', async () => {
     fs.writeFileSync(path.join(tempDir, 'foo.rb'), '# foo');
     const appContent = "require_relative('foo')\n";
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
-    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
-    expect(appNode!.dependencies![0]).toContain('foo.rb');
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    expect(result.dependencies.length).toBeGreaterThan(0);
+    expect(result.dependencies[0]).toContain('foo.rb');
   });
 
-  it.skip('resolveRubyImports resolves path with explicit .rb extension without doubling', async () => {
-    // TODO: re-enable after Plan 02 wires dependency extraction in coordinator Pass 2
+  it('resolveRubyImports resolves path with explicit .rb extension without doubling', async () => {
     fs.writeFileSync(path.join(tempDir, 'foo.rb'), '# foo');
     const appContent = "require_relative 'foo.rb'\n";
     const appFile = path.join(tempDir, 'app.rb');
     fs.writeFileSync(appFile, appContent);
 
-    const { scanDirectory } = await import('./file-utils.js');
-    const nodes = await collectStream(scanDirectory(tempDir));
-    const appNode = nodes.find(n => n.name === 'app.rb');
-    expect(appNode).toBeDefined();
-    expect(appNode!.dependencies!.length).toBeGreaterThan(0);
+    const { resolveRubyImports } = await import('./file-utils.js');
+    const result = await resolveRubyImports(appContent, appFile, tempDir);
+    expect(result.dependencies.length).toBeGreaterThan(0);
     // Should resolve to foo.rb, NOT foo.rb.rb
-    expect(appNode!.dependencies![0]).toContain('foo.rb');
-    expect(appNode!.dependencies![0]).not.toContain('foo.rb.rb');
+    expect(result.dependencies[0]).toContain('foo.rb');
+    expect(result.dependencies[0]).not.toContain('foo.rb.rb');
   });
 
   it('calculateInitialImportance returns >= 2 for .rb files', async () => {
@@ -948,5 +906,45 @@ describe('scanDirectory streaming', () => {
     expect(nodes.length).toBeGreaterThan(0);
     expect(typeof nodes[0].mtime).toBe('number');
     expect(nodes[0].mtime).toBeGreaterThan(0);
+  });
+});
+
+describe('Two-pass pipeline integration', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescopemcp-pipeline-'));
+    setProjectRoot(tempDir);
+    setConfig({ excludePatterns: [] } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('scan + upsert + extract deps produces correct dependency data', async () => {
+    // Create fileB.rb first (the dependency target)
+    const fileBPath = path.join(tempDir, 'fileB.rb');
+    fs.writeFileSync(fileBPath, '# fileB');
+
+    // Create fileA.rb that requires fileB
+    const fileAPath = path.join(tempDir, 'fileA.rb');
+    fs.writeFileSync(fileAPath, "require_relative 'fileB'\n");
+
+    const { resolveRubyImports, scanDirectory } = await import('./file-utils.js');
+
+    // Simulate Pass 1: collect FileNodes from generator
+    const nodes = await collectStream(scanDirectory(tempDir));
+    expect(nodes.some(n => n.name === 'fileA.rb')).toBe(true);
+    expect(nodes.some(n => n.name === 'fileB.rb')).toBe(true);
+
+    // Simulate Pass 2: extract dependencies for fileA.rb directly
+    const fileAContent = fs.readFileSync(fileAPath, 'utf-8');
+    const result = await resolveRubyImports(fileAContent, fileAPath, tempDir);
+
+    // fileA should depend on fileB
+    expect(result.dependencies.length).toBeGreaterThan(0);
+    expect(result.dependencies[0]).toContain('fileB.rb');
+    expect(result.packageDependencies.length).toBe(0);
   });
 });
