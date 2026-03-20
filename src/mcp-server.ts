@@ -315,12 +315,14 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
         return createMcpResponse(`File not found: ${params.filepath}`, true);
       }
 
+      const isStale = coordinator.checkFileFreshness(normalizedPath);
       const importanceStale = getStaleness(normalizedPath);
       const llmDataImportance = getSqlite()
         .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
         .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
       return createMcpResponse({
         path: node.path,
+        ...(isStale && { stale: true }),
         importance: node.importance || 0,
         dependencies: node.dependencies || [],
         dependents: node.dependents || [],
@@ -388,6 +390,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       return createMcpResponse(`No summary available for ${params.filepath}`);
     }
 
+    const isStale = coordinator.checkFileFreshness(normalizedPath);
     const summaryStale = getStaleness(normalizedPath);
     const sqlite = getSqlite();
     const llmData = sqlite
@@ -395,6 +398,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
     return createMcpResponse({
       path: node.path,
+      ...(isStale && { stale: true }),
       summary: node.summary,
       ...(summaryStale.summaryStale !== null && { summaryStale: summaryStale.summaryStale }),
       ...(summaryStale.conceptsStale !== null && { conceptsStale: summaryStale.conceptsStale }),
@@ -434,6 +438,14 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     if (!coordinator.isInitialized()) return projectPathNotSetError;
     try {
       const content = await readFileContent(params.filepath);
+      const normalizedPath = normalizePath(params.filepath);
+      const isStale = coordinator.checkFileFreshness(normalizedPath);
+      if (isStale) {
+        return createMcpResponse({
+          content,
+          stale: true
+        });
+      }
       return createMcpResponse(content);
     } catch (error) {
       return createMcpResponse(`Failed to read file: ${params.filepath} - ` + error, true);
