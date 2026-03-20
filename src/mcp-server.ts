@@ -33,8 +33,10 @@ import {
   setDependencies,
   getDependencies,
   getDependents,
-  getStaleness
+  getStaleness,
+  getAllLocalImportEdges
 } from './db/repository.js';
+import { detectCycles } from './cycle-detection.js';
 import { getSqlite } from './db/db.js';
 import { ServerCoordinator } from './coordinator.js';
 
@@ -734,6 +736,43 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       log('Error in exclude_and_remove: ' + error);
       return createMcpResponse(`Failed to exclude and remove file or pattern: ` + error, true);
     }
+  });
+
+  server.tool("detect_cycles", "Detect all circular dependency groups in the project's file graph", {}, async () => {
+    if (!coordinator.isInitialized()) return projectPathNotSetError;
+
+    const edges = getAllLocalImportEdges();
+    const cycles = detectCycles(edges);
+    const totalFilesInCycles = cycles.reduce((sum, group) => sum + group.length, 0);
+
+    return createMcpResponse({
+      cycles,
+      totalCycles: cycles.length,
+      totalFilesInCycles,
+    });
+  });
+
+  server.tool("get_cycles_for_file", "Get cycle groups containing a specific file", {
+    filepath: z.string().describe("Absolute path to the file"),
+  }, async (params: { filepath: string }) => {
+    if (!coordinator.isInitialized()) return projectPathNotSetError;
+
+    const normalizedPath = normalizePath(params.filepath);
+    const node = getFile(normalizedPath);
+    if (!node) {
+      return createMcpResponse(`File not found: ${params.filepath}`, true);
+    }
+
+    const edges = getAllLocalImportEdges();
+    const allCycles = detectCycles(edges);
+    const filtered = allCycles.filter(group => group.includes(normalizedPath));
+    const totalFilesInCycles = filtered.reduce((sum, group) => sum + group.length, 0);
+
+    return createMcpResponse({
+      cycles: filtered,
+      totalCycles: filtered.length,
+      totalFilesInCycles,
+    });
   });
 }
 
