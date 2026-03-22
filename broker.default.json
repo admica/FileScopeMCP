@@ -1,0 +1,10 @@
+{
+  "llm": {
+    "provider": "openai-compatible",
+    "model": "qwen2.5-coder:14b",
+    "baseURL": "http://localhost:11434/v1",
+    "maxTokensPerCall": 1024
+  },
+  "jobTimeoutMs": 120000,
+  "maxQueueSize": 1000
+}
