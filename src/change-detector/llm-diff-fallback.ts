@@ -2,7 +2,9 @@
 // LLM job queuing for unsupported languages (CHNG-03).
 // When a file change cannot be classified via tree-sitter AST, this module
 // queues an async LLM job so Phase 5's LLM pipeline can classify it later.
-import { insertLlmJobIfNotPending } from '../db/repository.js';
+import { readFileSync } from 'node:fs';
+import { getFile } from '../db/repository.js';
+import { submitJob } from '../broker/client.js';
 import { log } from '../logger.js';
 import type { SemanticChangeSummary } from './types.js';
 
@@ -29,11 +31,11 @@ export function queueLlmDiffJob(filePath: string, diff: string): SemanticChangeS
       : diff;
 
   try {
-    insertLlmJobIfNotPending(filePath, 'change_impact', 2, truncatedDiff);
+    const fileContent = readFileSync(filePath, 'utf-8');
+    const importance = getFile(filePath)?.importance ?? 0;
+    submitJob(filePath, 'change_impact', importance, fileContent, truncatedDiff);
   } catch (err) {
-    // Non-fatal: if DB is unavailable, log a warning and continue.
-    // The function still returns the conservative summary — the coordinator
-    // won't crash just because the LLM job couldn't be queued.
+    // Non-fatal: if file is unreadable or submit fails, log and continue
     log(`[llm-diff-fallback] Failed to queue LLM job for ${filePath}: ${err}`);
   }
 

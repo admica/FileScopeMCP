@@ -4,7 +4,8 @@
 // ensures staleness propagates to all transitive dependents so Phase 5
 // can regenerate their summaries and concepts.
 import { readFileSync } from 'node:fs';
-import { getDependents, markStale, insertLlmJobIfNotPending } from '../db/repository.js';
+import { getDependents, markStale, getFile } from '../db/repository.js';
+import { submitJob } from '../broker/client.js';
 import { getSqlite } from '../db/db.js';
 import { log } from '../logger.js';
 
@@ -93,14 +94,22 @@ export function cascadeStale(
       }
     }
 
-    // Mark this file stale — always applies even when budget is exhausted
+    // Mark this file stale — always applies
     // summary and concepts jobs never get payload — only change_impact does
     markStale([filePath], timestamp);
-    if (!isExhausted?.()) {
-      insertLlmJobIfNotPending(filePath, 'summary', 2);
-      insertLlmJobIfNotPending(filePath, 'concepts', 2);
-      insertLlmJobIfNotPending(filePath, 'change_impact', 2, changeImpactPayload);
+    // Read file content and importance for broker submission
+    let fileContent: string;
+    try {
+      fileContent = readFileSync(filePath, 'utf-8');
+    } catch {
+      // File deleted or unreadable — staleness already set, skip job submission
+      totalVisited++;
+      continue;
     }
+    const importance = getFile(filePath)?.importance ?? 0;
+    submitJob(filePath, 'summary', importance, fileContent);
+    submitJob(filePath, 'concepts', importance, fileContent);
+    submitJob(filePath, 'change_impact', importance, fileContent, changeImpactPayload);
     totalVisited++;
 
     // Stop BFS expansion if at depth cap
@@ -136,9 +145,14 @@ export function markSelfStale(filePath: string, opts: { timestamp: number; isExh
     )
     .run(timestamp, timestamp, filePath);
 
-  if (!isExhausted?.()) {
-    insertLlmJobIfNotPending(filePath, 'summary', 2);
-    insertLlmJobIfNotPending(filePath, 'concepts', 2);
+  // Read file content and importance for broker submission
+  try {
+    const fileContent = readFileSync(filePath, 'utf-8');
+    const importance = getFile(filePath)?.importance ?? 0;
+    submitJob(filePath, 'summary', importance, fileContent);
+    submitJob(filePath, 'concepts', importance, fileContent);
+  } catch {
+    // File deleted or unreadable — staleness already set, skip job submission
   }
 
   log(`[CascadeEngine] markSelfStale: ${filePath} → summary and concepts marked stale`);
