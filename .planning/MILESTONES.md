@@ -14,5 +14,20 @@
 
 **Stats:** 9,515 LOC TypeScript | 115 files modified | 180 tests passing | 17 days (Mar 2-19, 2026)
 
+## v1.1 Hardening (Shipped: 2026-03-20)
+
+**Phases completed:** 6 phases (10-15), 11 plans
+
+**Key accomplishments:**
+- BFS transitive importance propagation with cycle safety
+- .filescopeignore support with full gitignore semantics
+- Go and Ruby language support (go.mod resolution, require/require_relative parsing)
+- Streaming async directory scan with two-pass SQLite integration
+- mtime-based lazy validation replacing polling integrity sweep
+- Cycle detection via iterative Tarjan's SCC exposed through MCP tools
+- Code quality consolidation (fs imports, canonicalizePath, dead code removal)
+
+**Stats:** 6 phases | 11 plans | 2 days (Mar 19-20, 2026)
+
 ---
 

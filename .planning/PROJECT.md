@@ -8,18 +8,34 @@ A fully autonomous file intelligence system that watches project directories and
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
+## Current Milestone: v1.2 LLM Broker
+
+**Goal:** Standalone broker process that coordinates LLM access across multiple FileScopeMCP instances through importance-based priority ordering.
+
+**Target features:**
+- Standalone broker process with in-memory priority queue
+- Unix domain socket communication between instances and broker
+- Cross-repo importance-based job prioritization
+- Instance-side broker client with auto-discovery and reconnection
+- No broker = no LLM (single code path, no dual-mode fallback)
+- Job dedup, timeout, and stale socket/PID recovery
+- Broker status reporting via MCP tools
+- Remove legacy local job queue infrastructure
+
 ## Requirements
 
 ### Validated
 
+<!-- Shipped and confirmed valuable. -->
+
 - ✓ Recursive directory scanning with file tree building — existing
-- ✓ Multi-language import/dependency parsing (JS/TS, Python, C/C++, Rust, Lua, Zig, PHP, C#, Java, Go, Ruby) — Phase 12
+- ✓ Multi-language import/dependency parsing (JS/TS, Python, C/C++, Rust, Lua, Zig, PHP, C#, Java, Go, Ruby) — v1.1
 - ✓ File importance scoring (0-10 scale based on dependents, type, location) — existing
 - ✓ Real-time file system watching with debounced change detection — existing
 - ✓ Atomic state mutations via async mutex — existing
 - ✓ Incremental tree updates on file change — existing
-- ✓ Self-healing integrity sweep (startup sweep + lazy mtime validation) — existing, refined Phase 14
-- ✓ Persistent JSON tree caching with freshness validation — existing
+- ✓ Self-healing integrity sweep (startup sweep + lazy mtime validation) — v1.1
+- ✓ Persistent SQLite storage with WAL mode — v1.0
 - ✓ MCP tool interface (20+ tools for querying and managing file metadata) — existing
 - ✓ Manual summary get/set via MCP tools — existing
 - ✓ File content reading via MCP — existing
@@ -38,25 +54,36 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - ✓ Priority-ordered job queuing (interactive > cascade > background) — v1.0
 - ✓ Circular dependency protection in cascade — v1.0
 - ✓ Full backward compatibility with existing MCP tools — v1.0
+- ✓ BFS transitive importance propagation with cycle safety — v1.1
+- ✓ Watcher restart backoff reset (60s stability timer) — v1.1
+- ✓ .filescopeignore support with gitignore semantics — v1.1
+- ✓ Go and Ruby language support — v1.1
+- ✓ Streaming async directory scan with two-pass SQLite integration — v1.1
+- ✓ mtime-based lazy validation replacing polling integrity sweep — v1.1
+- ✓ Cycle detection (Tarjan's SCC) via MCP tools — v1.1
+- ✓ Code quality consolidation (fs imports, canonicalizePath, dead code removal) — v1.1
 
 ### Active
 
-**Current Milestone: v1.1 Hardening**
+<!-- Current scope. Building toward these. -->
 
-**Goal:** Fix open bugs, improve code quality, add cycle detection and richer language support, and harden performance for large codebases.
-
-**Target:**
-- ✓ Fix shallow importance propagation — BFS transitive propagation with cycle safety — Phase 10
-- ✓ Fix watcher restart backoff reset — 60s stability timer — Phase 10
-- ✓ Replace polling integrity sweep with mtime-based lazy validation — startup sweep + per-file checkFileFreshness — Phase 14
-- ✓ Add cycle detection (Tarjan's SCC) and expose via tools — Phase 15
-- ✓ Go and Ruby language support — go.mod resolution, require/require_relative parsing — Phase 12
-- ✓ .filescopeignore support — gitignore-syntax exclusion for scan-time and watch-time — Phase 11
-- ✓ Streaming directory scan — async generator with two-pass SQLite integration — Phase 13
-- Lazy file content for large codebases
-- ✓ Code quality: consolidated fs imports, unified canonicalizePath, fixed firebase false positive, removed dead code — Phase 10
+- [ ] Standalone broker process with in-memory priority queue and Ollama processing
+- [ ] Unix domain socket IPC at ~/.filescope/broker.sock
+- [ ] Broker builds prompts and handles structured output fallback
+- [ ] Cross-repo importance-based job prioritization (importance DESC, created_at ASC)
+- [x] Instance-side broker client with auto-discovery and reconnection — v1.2 Phase 17
+- [ ] Job dedup (one pending job per file+type per repo, latest content wins)
+- [ ] Job timeout (120s) for hung Ollama calls
+- [ ] Stale socket/PID cleanup on broker startup
+- [x] Startup resubmission batching (stale files by importance on reconnect) — v1.2 Phase 17
+- [x] Config migration: LLM model config moved to broker, instance has enabled-only — v1.2 Phase 17
+- [ ] Broker status reporting via MCP get_llm_status tool
+- [ ] Remove llm_jobs and llm_runtime_state tables from local DBs
+- [ ] Remove TokenBudgetGuard budget gating (Phase 18 cleanup)
 
 ### Out of Scope
+
+<!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
 
 - Multi-project in a single instance — one instance per project, simpler isolation
 - Real-time streaming of changes to MCP clients — query-based, not push-based
@@ -65,36 +92,45 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - UI/dashboard — headless, MCP and daemon only
 - Vector embedding search — structured metadata serves LLM needs better
 - Full AST caching in storage — ASTs too large and go stale immediately
+- Lazy file content for large codebases — deferred to future milestone
+- Multi-GPU / concurrent broker workers — design supports it, implement when needed
+- Broker hot-reload of config/model — restart broker to change config
+- Formal version handshake between broker and instances — defer to future milestone
 
 ## Context
 
-Shipped v1.0 with 9,515 LOC TypeScript across 9 phases. 250 tests passing. Phase 10 (code quality + bug fixes), Phase 11 (.filescopeignore support), Phase 12 (Go and Ruby language support), Phase 13 (streaming directory scan), Phase 14 (mtime-based lazy validation), and Phase 15 (cycle detection) complete.
+Shipped v1.0 (9 phases, 9,515 LOC) and v1.1 (6 phases, hardening + language support). 250+ tests passing. The system is a complete autonomous file intelligence platform.
+
+v1.2 progress: Phase 16 built the standalone broker (socket server, priority queue, worker, PID guard). Phase 17 wired instances to use the broker client — all LLM job submission now goes through `submitJob()` over Unix socket, coordinator lifecycle uses `connectBroker()`/`disconnectBroker()`, and LLMConfig simplified to `enabled` boolean. Phases 18-19 remain for cleanup and observability.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
-
-The system is a complete autonomous file intelligence platform: watches directories, detects semantic changes via AST diffing, propagates staleness through the dependency graph, and uses a background LLM to maintain summaries, concepts, and change impact assessments — all queryable via 20+ MCP tools.
 
 ## Constraints
 
 - **Runtime**: Node.js 22 — must stay compatible, no native modules that limit portability
 - **MCP compatibility**: Must maintain backward compatibility with existing MCP tool interface
 - **One instance per project**: Simplifies state management and isolation
-- **LLM costs**: Background LLM calls must be rate-limited and smart-cascaded to avoid runaway token usage
+- **Single GPU**: Broker must serialize LLM calls — one at a time
+- **Zero-config for single repo**: Broker is optional — single-repo users must not need it
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Hybrid AST + LLM change analysis | AST is fast/free for supported languages, LLM covers the rest | ✓ Good — tree-sitter for TS/JS, LLM fallback for others |
-| SQLite over JSON for storage | Richer queries, relationship lookups, scales better with metadata growth | ✓ Good — transparent migration, WAL mode, drizzle-orm |
-| Multi-provider LLM adapter | User may run local (vLLM/Ollama) or cloud (Anthropic/OpenAI) — flexibility is key | ✓ Good — Vercel AI SDK abstracts providers cleanly |
-| Smart cascade over full cascade | Analyzing what actually changed prevents unnecessary LLM calls on dependents | ✓ Good — body-only changes skip dependents entirely |
-| Dual-mode (daemon + MCP server) | Daemon keeps metadata fresh 24/7; MCP mode for lighter use cases | ✓ Good — both modes share coordinator logic |
-| One instance per project | Simpler isolation, avoids cross-project state complexity | ✓ Good — clean separation |
-| Background LLM is opt-in | Can toggle on/off via config or MCP call; system works without it | ✓ Good — structural metadata always available |
-| better-sqlite3 via createRequire | Native ESM project needs CJS addon loading | ✓ Good — works reliably with esbuild |
-| tree-sitter via createRequire | Same CJS-from-ESM pattern as better-sqlite3 | ✓ Good — consistent native addon strategy |
-| Vercel AI SDK for LLM abstraction | Unified interface across OpenAI-compatible and Anthropic providers | ✓ Good — structured output with JSON repair fallback |
+| Hybrid AST + LLM change analysis | AST is fast/free for supported languages, LLM covers the rest | ✓ Good |
+| SQLite over JSON for storage | Richer queries, scales better with metadata growth | ✓ Good |
+| Multi-provider LLM adapter | Flexibility across local and cloud providers | ✓ Good |
+| Smart cascade over full cascade | Prevents unnecessary LLM calls on dependents | ✓ Good |
+| Dual-mode (daemon + MCP server) | Daemon keeps metadata fresh 24/7; MCP mode for lighter use | ✓ Good |
+| One instance per project | Clean isolation, no cross-project state complexity | ✓ Good |
+| Background LLM is opt-in | System works without it; toggle via config or MCP | ✓ Good |
+| better-sqlite3 via createRequire | Native ESM project needs CJS addon loading | ✓ Good |
+| Vercel AI SDK for LLM abstraction | Unified interface across providers | ✓ Good |
+| Standalone broker over leader election | Predictable, no failover complexity, clean separation | ✓ Good |
+| In-memory queue over shared SQLite | Broker is a service not a database; jobs are transient | ✓ Good |
+| Unix domain socket over TCP/HTTP | Local-only, no port conflicts, fast IPC | ✓ Good |
+| Broker builds prompts | Avoids Zod schema serialization; centralizes LLM interaction | ✓ Good |
+| No dual-mode fallback | Broker or no LLM — single code path, no complexity | ✓ Good |
 
 ---
-*Last updated: 2026-03-20 after Phase 15 completion*
+*Last updated: 2026-03-22 after Phase 17 complete*
