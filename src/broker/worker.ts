@@ -6,13 +6,43 @@
 
 import { generateText, Output } from 'ai';
 import type { LanguageModel } from 'ai';
-import { createLLMModel } from '../llm/adapter.js';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { buildSummaryPrompt, buildConceptsPrompt, buildChangeImpactPrompt } from '../llm/prompts.js';
 import { ConceptsSchema, ChangeImpactSchema } from '../llm/types.js';
 import { log } from '../logger.js';
 import type { QueueJob, JobResult } from './types.js';
 import type { PriorityQueue } from './queue.js';
 import type { BrokerConfig } from './config.js';
+
+// ─── LLM model factory ────────────────────────────────────────────────────────
+
+/**
+ * Returns a LanguageModel configured for the provider specified in `config`.
+ * Inlined from the deleted llm/adapter.ts — broker/worker.ts is the sole user.
+ */
+function createLLMModel(config: BrokerConfig['llm']): LanguageModel {
+  switch (config.provider) {
+    case 'anthropic': {
+      const provider = createAnthropic({
+        apiKey: config.apiKey ?? process.env.ANTHROPIC_API_KEY,
+      });
+      return provider(config.model);
+    }
+    case 'openai-compatible': {
+      const provider = createOpenAICompatible({
+        name: 'custom',
+        baseURL: config.baseURL!,
+        apiKey: config.apiKey ?? 'ollama',
+      });
+      return provider(config.model);
+    }
+    default: {
+      const exhaustiveCheck: never = config.provider;
+      throw new Error(`Unknown LLM provider: ${exhaustiveCheck}`);
+    }
+  }
+}
 
 // ─── BrokerWorker ─────────────────────────────────────────────────────────────
 
@@ -33,10 +63,7 @@ export class BrokerWorker {
     onJobComplete: (job: QueueJob, result: JobResult) => void,
     onJobError: (job: QueueJob, code: string, message: string) => void,
   ) {
-    // Cast config.llm to LLMConfig shape for createLLMModel.
-    // BrokerConfig.llm has provider, model, baseURL, apiKey, maxTokensPerCall.
-    // LLMConfig additionally has enabled, maxTokensPerMinute, tokenBudget -- not needed by createLLMModel.
-    this.model = createLLMModel(config.llm as any);
+    this.model = createLLMModel(config.llm);
     this.config = config;
     this.queue = queue;
     this.onJobComplete = onJobComplete;

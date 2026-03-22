@@ -1,14 +1,24 @@
 // src/cascade/cascade-engine.test.ts
-// Tests for CascadeEngine BFS walk and repository functions markStale/insertLlmJobIfNotPending.
+// Tests for CascadeEngine BFS walk and repository functions markStale.
 // Uses temp SQLite DB matching the established test pattern in the codebase.
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { writeFileSync } from 'fs';
 import { openDatabase, closeDatabase, getSqlite } from '../db/db.js';
+
+vi.mock('../broker/client.js', () => ({
+  submitJob: vi.fn(),
+}));
 
 let tmpDir: string;
 let dbPath: string;
+
+// Helper: get a path under tmpDir for test files (they must exist on disk for cascade-engine)
+function p(name: string): string {
+  return path.join(tmpDir, name);
+}
 
 beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cascade-engine-test-'));
@@ -38,19 +48,6 @@ beforeAll(async () => {
       package_version TEXT,
       is_dev_dependency INTEGER
     );
-    CREATE TABLE IF NOT EXISTS llm_jobs (
-      job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      file_path TEXT NOT NULL,
-      job_type TEXT NOT NULL,
-      priority_tier INTEGER NOT NULL DEFAULT 2,
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at INTEGER NOT NULL,
-      started_at INTEGER,
-      completed_at INTEGER,
-      error_message TEXT,
-      retry_count INTEGER NOT NULL DEFAULT 0,
-      payload TEXT
-    );
   `);
 });
 
@@ -59,13 +56,14 @@ afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-// Helper: insert a file row into the DB
-function insertFile(filePath: string): void {
+// Helper: insert a file row into the DB and create the file on disk
+function insertFile(filePath: string, content = 'export const x = 1;'): void {
   const sqlite = getSqlite();
-  const name = filePath.split('/').pop() ?? filePath;
+  const name = path.basename(filePath);
   sqlite
     .prepare('INSERT OR IGNORE INTO files (path, name, is_directory) VALUES (?, ?, 0)')
     .run(filePath, name);
+  writeFileSync(filePath, content);
 }
 
 // Helper: insert a local_import dependency
@@ -81,25 +79,28 @@ function insertDep(sourcePath: string, targetPath: string): void {
 // Helper: clear all tables between test groups
 function clearTables(): void {
   const sqlite = getSqlite();
-  sqlite.exec('DELETE FROM files; DELETE FROM file_dependencies; DELETE FROM llm_jobs;');
+  sqlite.exec('DELETE FROM files; DELETE FROM file_dependencies;');
 }
 
 // ─── Repository function tests ────────────────────────────────────────────────
 
-import { markStale, insertLlmJobIfNotPending, upsertFile } from '../db/repository.js';
+import { markStale, upsertFile } from '../db/repository.js';
+import { submitJob } from '../broker/client.js';
 import type { FileNode } from '../types.js';
 
 describe('markStale', () => {
   it('sets all 3 staleness columns to the given timestamp for all specified files', () => {
     clearTables();
-    insertFile('/a.ts');
-    insertFile('/b.ts');
+    const aPath = p('markstale-a.ts');
+    const bPath = p('markstale-b.ts');
+    insertFile(aPath);
+    insertFile(bPath);
 
-    markStale(['/a.ts', '/b.ts'], 1000);
+    markStale([aPath, bPath], 1000);
 
     const sqlite = getSqlite();
-    const a = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get('/a.ts') as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
-    const b = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get('/b.ts') as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
+    const a = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(aPath) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
+    const b = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(bPath) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
 
     expect(a.summary_stale_since).toBe(1000);
     expect(a.concepts_stale_since).toBe(1000);
@@ -111,60 +112,19 @@ describe('markStale', () => {
 
   it('does not throw when called on a non-existent path (UPDATE matches 0 rows)', () => {
     clearTables();
-    expect(() => markStale(['/nonexistent.ts'], 999)).not.toThrow();
-  });
-});
-
-describe('insertLlmJobIfNotPending', () => {
-  it('inserts a pending job row for the given file+type', () => {
-    clearTables();
-    insertFile('/a.ts');
-
-    insertLlmJobIfNotPending('/a.ts', 'summary', 2);
-
-    const sqlite = getSqlite();
-    const row = sqlite.prepare("SELECT * FROM llm_jobs WHERE file_path = ? AND job_type = 'summary'").get('/a.ts') as { job_type: string; priority_tier: number; status: string } | undefined;
-    expect(row).toBeDefined();
-    expect(row!.job_type).toBe('summary');
-    expect(row!.priority_tier).toBe(2);
-    expect(row!.status).toBe('pending');
-  });
-
-  it('is a no-op on second call with same file+type (dedup by pending status)', () => {
-    clearTables();
-    insertFile('/a.ts');
-
-    insertLlmJobIfNotPending('/a.ts', 'summary', 2);
-    insertLlmJobIfNotPending('/a.ts', 'summary', 2);
-
-    const sqlite = getSqlite();
-    const rows = sqlite.prepare("SELECT * FROM llm_jobs WHERE file_path = ? AND job_type = 'summary'").all('/a.ts') as { job_type: string }[];
-    expect(rows).toHaveLength(1);
-  });
-
-  it('inserts a different job_type for the same file (not a duplicate)', () => {
-    clearTables();
-    insertFile('/a.ts');
-
-    insertLlmJobIfNotPending('/a.ts', 'summary', 2);
-    insertLlmJobIfNotPending('/a.ts', 'concepts', 2);
-
-    const sqlite = getSqlite();
-    const rows = sqlite.prepare("SELECT * FROM llm_jobs WHERE file_path = ?").all('/a.ts') as { job_type: string }[];
-    expect(rows).toHaveLength(2);
-    const types = rows.map(r => r.job_type);
-    expect(types).toContain('summary');
-    expect(types).toContain('concepts');
+    expect(() => markStale([p('nonexistent.ts')], 999)).not.toThrow();
   });
 });
 
 describe('upsertFile staleness preservation', () => {
   it('does not clobber staleness columns when upsertFile is called after markStale', () => {
     clearTables();
+    const filePath = p('stale-test.ts');
+    writeFileSync(filePath, 'export const x = 1;');
 
     // Insert a file via upsertFile first
     const node: FileNode = {
-      path: '/stale-test.ts',
+      path: filePath,
       name: 'stale-test.ts',
       isDirectory: false,
       importance: 0,
@@ -172,18 +132,18 @@ describe('upsertFile staleness preservation', () => {
     upsertFile(node);
 
     // Set staleness directly via markStale
-    markStale(['/stale-test.ts'], 5000);
+    markStale([filePath], 5000);
 
     // Verify staleness was set
     const sqlite = getSqlite();
-    const before = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get('/stale-test.ts') as { summary_stale_since: number };
+    const before = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(filePath) as { summary_stale_since: number };
     expect(before.summary_stale_since).toBe(5000);
 
     // Now call upsertFile again (e.g., on file change)
     upsertFile({ ...node, summary: 'Updated summary' });
 
     // Staleness columns must NOT have been reset to null
-    const after = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get('/stale-test.ts') as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null };
+    const after = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(filePath) as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null };
     expect(after.summary_stale_since).toBe(5000);
     expect(after.concepts_stale_since).toBe(5000);
     expect(after.change_impact_stale_since).toBe(5000);
@@ -195,24 +155,31 @@ describe('upsertFile staleness preservation', () => {
 import { cascadeStale, markSelfStale } from './cascade-engine.js';
 
 describe('cascadeStale', () => {
-  it('marks A, B, C all stale and queues 9 LLM jobs when A has dependents B->C chain', () => {
+  beforeEach(() => {
     clearTables();
-    // A is the changed file. B depends on A. C depends on B.
-    insertFile('/A.ts');
-    insertFile('/B.ts');
-    insertFile('/C.ts');
-    insertDep('/B.ts', '/A.ts'); // B imports from A
-    insertDep('/C.ts', '/B.ts'); // C imports from B
+    (submitJob as ReturnType<typeof vi.fn>).mockClear();
+  });
 
-    cascadeStale('/A.ts', { timestamp: 2000 });
+  it('marks A, B, C all stale and queues 9 LLM jobs when A has dependents B->C chain', () => {
+    // A is the changed file. B depends on A. C depends on B.
+    const aPath = p('cascade-A.ts');
+    const bPath = p('cascade-B.ts');
+    const cPath = p('cascade-C.ts');
+    insertFile(aPath);
+    insertFile(bPath);
+    insertFile(cPath);
+    insertDep(bPath, aPath); // B imports from A
+    insertDep(cPath, bPath); // C imports from B
+
+    cascadeStale(aPath, { timestamp: 2000 });
 
     const sqlite = getSqlite();
-    const checkStale = (p: string) =>
-      sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(p) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number } | undefined;
+    const checkStale = (fp: string) =>
+      sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(fp) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number } | undefined;
 
-    const aRow = checkStale('/A.ts');
-    const bRow = checkStale('/B.ts');
-    const cRow = checkStale('/C.ts');
+    const aRow = checkStale(aPath);
+    const bRow = checkStale(bPath);
+    const cRow = checkStale(cPath);
 
     expect(aRow?.summary_stale_since).toBe(2000);
     expect(aRow?.concepts_stale_since).toBe(2000);
@@ -220,309 +187,231 @@ describe('cascadeStale', () => {
     expect(bRow?.summary_stale_since).toBe(2000);
     expect(cRow?.summary_stale_since).toBe(2000);
 
-    // 9 LLM jobs total: 3 per file (summary, concepts, change_impact) × 3 files
-    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string; job_type: string }[];
-    expect(jobs).toHaveLength(9);
+    // 9 submitJob calls: 3 per file (summary, concepts, change_impact) x 3 files
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    expect(mockSubmitJob).toHaveBeenCalledTimes(9);
   });
 
   it('terminates with circular deps (A->B->A), visits each file once', () => {
-    clearTables();
-    insertFile('/circ-A.ts');
-    insertFile('/circ-B.ts');
-    insertDep('/circ-B.ts', '/circ-A.ts'); // B depends on A
-    insertDep('/circ-A.ts', '/circ-B.ts'); // A depends on B (circular)
+    const circAPath = p('circ-A.ts');
+    const circBPath = p('circ-B.ts');
+    insertFile(circAPath);
+    insertFile(circBPath);
+    insertDep(circBPath, circAPath); // B depends on A
+    insertDep(circAPath, circBPath); // A depends on B (circular)
 
     // Should not throw or hang
-    expect(() => cascadeStale('/circ-A.ts', { timestamp: 3000 })).not.toThrow();
+    expect(() => cascadeStale(circAPath, { timestamp: 3000 })).not.toThrow();
 
-    const sqlite = getSqlite();
     // Both files should be stale, but each visited only once
-    const jobs = sqlite.prepare("SELECT file_path FROM llm_jobs").all() as { file_path: string }[];
-    const uniqueFiles = new Set(jobs.map(j => j.file_path));
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    const calledFiles = mockSubmitJob.mock.calls.map((c: unknown[]) => c[0]);
+    const uniqueFiles = new Set(calledFiles);
     // Only 2 unique files, not infinite
     expect(uniqueFiles.size).toBeLessThanOrEqual(2);
   });
 
   it('stops at depth cap (depth >= 10 is not visited)', () => {
-    clearTables();
     // Create a linear chain of 13 files: root <- d1 <- d2 <- ... <- d12
-    // d[n] depends on d[n-1], starting from root
-    const files = ['/root.ts'];
+    const fileList: string[] = [p('depth-root.ts')];
     for (let i = 1; i <= 12; i++) {
-      files.push(`/dep-${i}.ts`);
+      fileList.push(p(`depth-dep-${i}.ts`));
     }
-    for (const f of files) insertFile(f);
+    for (const f of fileList) insertFile(f);
     // dep-1 depends on root, dep-2 depends on dep-1, etc.
     for (let i = 1; i <= 12; i++) {
-      insertDep(files[i], files[i - 1]);
+      insertDep(fileList[i], fileList[i - 1]);
     }
 
-    cascadeStale('/root.ts', { timestamp: 4000 });
+    cascadeStale(fileList[0], { timestamp: 4000 });
 
     const sqlite = getSqlite();
-    // root (depth 0) + deps 1..10 (depths 1..10) = 11 files max
-    // dep-11 and dep-12 are at depth 11 and 12 — should NOT be stale
-    const dep11 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get('/dep-11.ts') as { summary_stale_since: number | null } | undefined;
-    const dep12 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get('/dep-12.ts') as { summary_stale_since: number | null } | undefined;
+    // dep-11 and dep-12 should NOT be stale
+    const dep11 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(fileList[11]) as { summary_stale_since: number | null } | undefined;
+    const dep12 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(fileList[12]) as { summary_stale_since: number | null } | undefined;
     expect(dep11?.summary_stale_since).toBeNull();
     expect(dep12?.summary_stale_since).toBeNull();
 
-    // But dep-10 (depth 10) — check if at boundary: depth >= 10 means skip
-    // dep-1 is at depth 1, dep-10 is at depth 10
-    // The BFS adds to queue with depth+1. We skip if depth >= 10.
-    // root=0, d1=1, d2=2, ..., d10=10 — d10 should be marked stale (added when depth was 9 < 10)
-    // d11=11 — should NOT be marked (depth 10 >= 10, so skip)
-    const dep10 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get('/dep-10.ts') as { summary_stale_since: number | null } | undefined;
+    // dep-10 (depth 10) should be marked stale
+    const dep10 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(fileList[10]) as { summary_stale_since: number | null } | undefined;
     expect(dep10?.summary_stale_since).toBe(4000);
   });
 
   it('marks only the changed file when it has zero dependents', () => {
-    clearTables();
-    insertFile('/isolated.ts');
+    const isolatedPath = p('isolated.ts');
+    insertFile(isolatedPath);
 
-    cascadeStale('/isolated.ts', { timestamp: 5000 });
+    cascadeStale(isolatedPath, { timestamp: 5000 });
 
     const sqlite = getSqlite();
-    const row = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get('/isolated.ts') as { summary_stale_since: number } | undefined;
+    const row = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(isolatedPath) as { summary_stale_since: number } | undefined;
     expect(row?.summary_stale_since).toBe(5000);
 
-    // Only 3 jobs for the 1 file
-    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all();
-    expect(jobs).toHaveLength(3);
+    // Only 3 submitJob calls for the 1 file
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    expect(mockSubmitJob).toHaveBeenCalledTimes(3);
   });
 });
 
 describe('cascadeStale with changeContext', () => {
-  it('passes directPayload to change_impact job for the root changed file', () => {
+  beforeEach(() => {
     clearTables();
-    insertFile('/root-with-ctx.ts');
+    (submitJob as ReturnType<typeof vi.fn>).mockClear();
+  });
 
-    cascadeStale('/root-with-ctx.ts', {
+  it('passes directPayload to change_impact job for the root changed file', () => {
+    const rootPath = p('root-with-ctx.ts');
+    insertFile(rootPath);
+
+    cascadeStale(rootPath, {
       timestamp: 7000,
       changeContext: {
         directPayload: 'diff content for root file',
         changeType: 'exports-changed',
-        changedFilePath: '/root-with-ctx.ts',
+        changedFilePath: rootPath,
       },
     });
 
-    const sqlite = getSqlite();
-    const job = sqlite
-      .prepare(
-        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
-      )
-      .get('/root-with-ctx.ts') as { payload: string | null } | undefined;
-
-    expect(job).toBeDefined();
-    expect(job!.payload).toBe('diff content for root file');
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    // Find the change_impact call for the root file
+    const changeImpactCall = mockSubmitJob.mock.calls.find(
+      (c: unknown[]) => c[0] === rootPath && c[1] === 'change_impact'
+    );
+    expect(changeImpactCall).toBeDefined();
+    expect(changeImpactCall![4]).toBe('diff content for root file');
   });
 
   it('builds dependent payload for cascade dependents containing upstream change info', async () => {
-    clearTables();
-    // Create actual dependent file on disk so readFileSync can read it
-    const depPath = path.join(tmpDir, 'dep-file.ts');
+    const depPath = p('dep-file.ts');
+    const changedRootPath = p('changed-root.ts');
     await fs.writeFile(depPath, 'export function depFn() {}');
+    insertFile(changedRootPath);
+    // insertFile calls writeFileSync, so depPath is already written above
+    const sqlite = getSqlite();
+    const depName = path.basename(depPath);
+    sqlite.prepare('INSERT OR IGNORE INTO files (path, name, is_directory) VALUES (?, ?, 0)').run(depPath, depName);
+    insertDep(depPath, changedRootPath); // depPath depends on changedRootPath
 
-    insertFile('/changed-root.ts');
-    insertFile(depPath);
-    insertDep(depPath, '/changed-root.ts'); // depPath depends on /changed-root.ts
-
-    cascadeStale('/changed-root.ts', {
+    cascadeStale(changedRootPath, {
       timestamp: 7100,
       changeContext: {
         directPayload: 'root diff',
         changeType: 'exports-changed',
-        changedFilePath: '/changed-root.ts',
+        changedFilePath: changedRootPath,
       },
     });
 
-    const sqlite = getSqlite();
-    const depJob = sqlite
-      .prepare(
-        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
-      )
-      .get(depPath) as { payload: string | null } | undefined;
-
-    expect(depJob).toBeDefined();
-    expect(depJob!.payload).not.toBeNull();
-    expect(depJob!.payload).toContain('[upstream change: /changed-root.ts (exports-changed)]');
-    expect(depJob!.payload).toContain('[assessing dependent:');
-    expect(depJob!.payload).toContain('export function depFn');
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    const depChangeImpactCall = mockSubmitJob.mock.calls.find(
+      (c: unknown[]) => c[0] === depPath && c[1] === 'change_impact'
+    );
+    expect(depChangeImpactCall).toBeDefined();
+    const payload = depChangeImpactCall![4] as string;
+    expect(payload).not.toBeNull();
+    expect(payload).toContain(`[upstream change: ${changedRootPath} (exports-changed)]`);
+    expect(payload).toContain('[assessing dependent:');
+    expect(payload).toContain('export function depFn');
   });
 
   it('produces null payload for change_impact jobs when changeContext is absent (backward compat)', () => {
-    clearTables();
-    insertFile('/no-ctx.ts');
+    const noCtxPath = p('no-ctx.ts');
+    insertFile(noCtxPath);
 
-    cascadeStale('/no-ctx.ts', { timestamp: 7200 });
+    cascadeStale(noCtxPath, { timestamp: 7200 });
 
-    const sqlite = getSqlite();
-    const job = sqlite
-      .prepare(
-        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
-      )
-      .get('/no-ctx.ts') as { payload: string | null } | undefined;
-
-    expect(job).toBeDefined();
-    expect(job!.payload).toBeNull();
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    const changeImpactCall = mockSubmitJob.mock.calls.find(
+      (c: unknown[]) => c[0] === noCtxPath && c[1] === 'change_impact'
+    );
+    expect(changeImpactCall).toBeDefined();
+    // 5th argument should be undefined (no changeContext)
+    expect(changeImpactCall![4]).toBeUndefined();
   });
 
   it('truncates large dependent file content at 14KB in dependent payload', async () => {
-    clearTables();
-    const largePath = path.join(tmpDir, 'large-dep.ts');
+    const largePath = p('large-dep.ts');
     // 20KB of content
     await fs.writeFile(largePath, 'x'.repeat(20 * 1024));
+    const changedForLargePath = p('changed-for-large.ts');
+    insertFile(changedForLargePath);
+    const sqlite = getSqlite();
+    const largeName = path.basename(largePath);
+    sqlite.prepare('INSERT OR IGNORE INTO files (path, name, is_directory) VALUES (?, ?, 0)').run(largePath, largeName);
+    insertDep(largePath, changedForLargePath);
 
-    insertFile('/changed-for-large.ts');
-    insertFile(largePath);
-    insertDep(largePath, '/changed-for-large.ts');
-
-    cascadeStale('/changed-for-large.ts', {
+    cascadeStale(changedForLargePath, {
       timestamp: 7300,
       changeContext: {
         directPayload: 'small root diff',
         changeType: 'exports-changed',
-        changedFilePath: '/changed-for-large.ts',
+        changedFilePath: changedForLargePath,
       },
     });
 
-    const sqlite = getSqlite();
-    const depJob = sqlite
-      .prepare(
-        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'"
-      )
-      .get(largePath) as { payload: string | null } | undefined;
-
-    expect(depJob).toBeDefined();
-    expect(depJob!.payload).not.toBeNull();
-    // Content should be truncated — payload should not contain 20KB of 'x's
-    expect(depJob!.payload).toContain('[truncated]');
-    // The header text adds a bit, but total should be reasonable
-    expect(depJob!.payload!.length).toBeLessThan(20 * 1024);
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    const depCall = mockSubmitJob.mock.calls.find(
+      (c: unknown[]) => c[0] === largePath && c[1] === 'change_impact'
+    );
+    expect(depCall).toBeDefined();
+    const payload = depCall![4] as string;
+    expect(payload).not.toBeNull();
+    // Content should be truncated
+    expect(payload).toContain('[truncated]');
+    expect(payload.length).toBeLessThan(20 * 1024);
   });
 
   it('queues summary and concepts jobs WITHOUT payload even with changeContext', () => {
-    clearTables();
-    insertFile('/ctx-job-types.ts');
+    const ctxJobPath = p('ctx-job-types.ts');
+    insertFile(ctxJobPath);
 
-    cascadeStale('/ctx-job-types.ts', {
+    cascadeStale(ctxJobPath, {
       timestamp: 7400,
       changeContext: {
         directPayload: 'diff',
         changeType: 'exports-changed',
-        changedFilePath: '/ctx-job-types.ts',
+        changedFilePath: ctxJobPath,
       },
     });
 
-    const sqlite = getSqlite();
-    const summaryJob = sqlite
-      .prepare(
-        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'summary'"
-      )
-      .get('/ctx-job-types.ts') as { payload: string | null } | undefined;
-
-    const conceptsJob = sqlite
-      .prepare(
-        "SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'concepts'"
-      )
-      .get('/ctx-job-types.ts') as { payload: string | null } | undefined;
-
-    expect(summaryJob!.payload).toBeNull();
-    expect(conceptsJob!.payload).toBeNull();
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    const summaryCall = mockSubmitJob.mock.calls.find(
+      (c: unknown[]) => c[0] === ctxJobPath && c[1] === 'summary'
+    );
+    const conceptsCall = mockSubmitJob.mock.calls.find(
+      (c: unknown[]) => c[0] === ctxJobPath && c[1] === 'concepts'
+    );
+    expect(summaryCall).toBeDefined();
+    expect(conceptsCall).toBeDefined();
+    // summary and concepts have no payload (5th arg undefined)
+    expect(summaryCall![4]).toBeUndefined();
+    expect(conceptsCall![4]).toBeUndefined();
   });
 });
 
 describe('markSelfStale', () => {
-  it('marks only summary and concepts stale (NOT change_impact), queues 2 jobs', () => {
+  beforeEach(() => {
     clearTables();
-    insertFile('/self-only.ts');
+    (submitJob as ReturnType<typeof vi.fn>).mockClear();
+  });
 
-    markSelfStale('/self-only.ts', { timestamp: 6000 });
+  it('marks only summary and concepts stale (NOT change_impact), queues 2 jobs', () => {
+    const selfPath = p('self-only.ts');
+    insertFile(selfPath);
+
+    markSelfStale(selfPath, { timestamp: 6000 });
 
     const sqlite = getSqlite();
-    const row = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get('/self-only.ts') as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null } | undefined;
+    const row = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(selfPath) as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null } | undefined;
 
     expect(row?.summary_stale_since).toBe(6000);
     expect(row?.concepts_stale_since).toBe(6000);
     expect(row?.change_impact_stale_since).toBeNull(); // NOT set
 
-    const jobs = sqlite.prepare('SELECT job_type FROM llm_jobs').all() as { job_type: string }[];
-    expect(jobs).toHaveLength(2);
-    const types = jobs.map(j => j.job_type);
-    expect(types).toContain('summary');
-    expect(types).toContain('concepts');
-    expect(types).not.toContain('change_impact');
-  });
-});
-
-// ─── cascadeStale with isExhausted guard ─────────────────────────────────────
-
-describe('cascadeStale with isExhausted guard', () => {
-  it('isExhausted=true skips job insertion but marks stale', () => {
-    clearTables();
-    insertFile('/exhausted-A.ts');
-    insertFile('/exhausted-B.ts');
-    insertDep('/exhausted-B.ts', '/exhausted-A.ts');
-
-    cascadeStale('/exhausted-A.ts', {
-      timestamp: 9000,
-      isExhausted: () => true,
-    });
-
-    const sqlite = getSqlite();
-    // Staleness marks MUST be set even when budget is exhausted
-    const aRow = sqlite
-      .prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?')
-      .get('/exhausted-A.ts') as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null } | undefined;
-    const bRow = sqlite
-      .prepare('SELECT summary_stale_since FROM files WHERE path = ?')
-      .get('/exhausted-B.ts') as { summary_stale_since: number | null } | undefined;
-
-    expect(aRow?.summary_stale_since).toBe(9000);
-    expect(aRow?.concepts_stale_since).toBe(9000);
-    expect(aRow?.change_impact_stale_since).toBe(9000);
-    expect(bRow?.summary_stale_since).toBe(9000);
-
-    // NO LLM jobs should be inserted when budget is exhausted
-    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string }[];
-    expect(jobs).toHaveLength(0);
-  });
-
-  it('isExhausted=false inserts jobs normally (backward compat)', () => {
-    clearTables();
-    insertFile('/not-exhausted.ts');
-
-    cascadeStale('/not-exhausted.ts', {
-      timestamp: 9100,
-      isExhausted: () => false,
-    });
-
-    const sqlite = getSqlite();
-    // 3 jobs for 1 file (summary, concepts, change_impact)
-    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string; job_type: string }[];
-    expect(jobs).toHaveLength(3);
-  });
-
-  it('markSelfStale with isExhausted=true skips job insertion but marks stale', () => {
-    clearTables();
-    insertFile('/mark-self-exhausted.ts');
-
-    markSelfStale('/mark-self-exhausted.ts', {
-      timestamp: 9200,
-      isExhausted: () => true,
-    });
-
-    const sqlite = getSqlite();
-    const row = sqlite
-      .prepare('SELECT summary_stale_since, concepts_stale_since FROM files WHERE path = ?')
-      .get('/mark-self-exhausted.ts') as { summary_stale_since: number | null; concepts_stale_since: number | null } | undefined;
-
-    // Staleness columns must be set
-    expect(row?.summary_stale_since).toBe(9200);
-    expect(row?.concepts_stale_since).toBe(9200);
-
-    // NO jobs inserted when budget is exhausted
-    const jobs = sqlite.prepare('SELECT * FROM llm_jobs').all() as { file_path: string }[];
-    expect(jobs).toHaveLength(0);
+    const mockSubmitJob = submitJob as ReturnType<typeof vi.fn>;
+    expect(mockSubmitJob).toHaveBeenCalledTimes(2);
+    const jobTypes = mockSubmitJob.mock.calls.map((c: unknown[]) => c[1]);
+    expect(jobTypes).toContain('summary');
+    expect(jobTypes).toContain('concepts');
+    expect(jobTypes).not.toContain('change_impact');
   });
 });

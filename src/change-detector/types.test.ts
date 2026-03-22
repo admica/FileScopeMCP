@@ -11,7 +11,6 @@ import { openDatabase, closeDatabase, getSqlite } from '../db/db.js';
 import {
   getExportsSnapshot,
   setExportsSnapshot,
-  insertLlmJob,
 } from '../db/repository.js';
 
 let tmpDir: string;
@@ -156,46 +155,3 @@ describe('setExportsSnapshot / getExportsSnapshot round-trip', () => {
   });
 });
 
-describe('insertLlmJob', () => {
-  it('inserts a row into llm_jobs with status=pending', () => {
-    insertLlmJob({
-      file_path: '/project/src/foo.py',
-      job_type: 'change_impact',
-      priority_tier: 2,
-    });
-
-    // Verify via direct sqlite query
-    const sqlite = getSqlite();
-    const rows = sqlite.prepare('SELECT * FROM llm_jobs WHERE file_path = ?').all('/project/src/foo.py') as Array<{
-      file_path: string;
-      job_type: string;
-      priority_tier: number;
-      status: string;
-      created_at: number;
-    }>;
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0].file_path).toBe('/project/src/foo.py');
-    expect(rows[0].job_type).toBe('change_impact');
-    expect(rows[0].status).toBe('pending');
-    expect(rows[0].created_at).toBeGreaterThan(0);
-  });
-
-  it('inserts job with payload when provided', () => {
-    insertLlmJob({
-      file_path: '/project/src/bar.py',
-      job_type: 'summary',
-      priority_tier: 1,
-      payload: JSON.stringify({ diff: '--- a\n+++ b\n@@ -1,1 +1,2 @@\n+new line' }),
-    });
-
-    const sqlite = getSqlite();
-    const rows = sqlite.prepare('SELECT * FROM llm_jobs WHERE file_path = ?').all('/project/src/bar.py') as Array<{
-      status: string;
-      error_message: string | null;
-    }>;
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe('pending');
-  });
-});

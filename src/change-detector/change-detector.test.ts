@@ -8,10 +8,15 @@ import * as fs from 'fs/promises';
 import { ChangeDetector } from './change-detector.js';
 import { queueLlmDiffJob } from './llm-diff-fallback.js';
 import { getGitDiffOrContent } from './git-diff.js';
-import { insertLlmJobIfNotPending } from '../db/repository.js';
+
+vi.mock('../broker/client.js', () => ({
+  submitJob: vi.fn(),
+}));
+
+import { submitJob } from '../broker/client.js';
 
 // ─── DB setup ──────────────────────────────────────────────────────────────
-// The change detector uses getExportsSnapshot/setExportsSnapshot/insertLlmJob,
+// The change detector uses getExportsSnapshot/setExportsSnapshot,
 // which require an open SQLite DB. We open a temp DB for these tests.
 import { openDatabase, closeDatabase } from '../db/db.js';
 import { getSqlite } from '../db/db.js';
@@ -48,15 +53,6 @@ beforeAll(async () => {
       package_version TEXT,
       is_dev_dependency INTEGER
     );
-    CREATE TABLE IF NOT EXISTS llm_jobs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      file_path TEXT NOT NULL,
-      job_type TEXT NOT NULL,
-      priority_tier INTEGER NOT NULL DEFAULT 2,
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL,
-      payload TEXT
-    );
   `);
 });
 
@@ -72,6 +68,7 @@ describe('ChangeDetector', () => {
 
   beforeEach(() => {
     detector = new ChangeDetector(tmpDir);
+    (submitJob as ReturnType<typeof vi.fn>).mockClear();
   });
 
   it('classifies a .ts file and returns SemanticChangeSummary with confidence=ast', async () => {
@@ -182,59 +179,6 @@ describe('getGitDiffOrContent', () => {
   });
 });
 
-// ─── insertLlmJobIfNotPending payload tests ──────────────────────────────────
-
-describe('insertLlmJobIfNotPending with payload', () => {
-  it('passes payload through to inserted job row', () => {
-    const sqlite = getSqlite();
-    sqlite.exec("DELETE FROM llm_jobs WHERE file_path = '/payload-test.py'");
-
-    insertLlmJobIfNotPending('/payload-test.py', 'change_impact', 2, 'my diff payload');
-
-    const row = sqlite
-      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'")
-      .get('/payload-test.py') as { payload: string } | undefined;
-
-    expect(row).toBeDefined();
-    expect(row!.payload).toBe('my diff payload');
-  });
-
-  it('works without payload (backward compat) — payload is null', () => {
-    const sqlite = getSqlite();
-    sqlite.exec("DELETE FROM llm_jobs WHERE file_path = '/no-payload-test.py'");
-
-    insertLlmJobIfNotPending('/no-payload-test.py', 'summary', 2);
-
-    const row = sqlite
-      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'summary'")
-      .get('/no-payload-test.py') as { payload: string | null } | undefined;
-
-    expect(row).toBeDefined();
-    expect(row!.payload).toBeNull();
-  });
-});
-
-// ─── _classifyWithLlmFallback wiring tests ──────────────────────────────────
-
-describe('ChangeDetector LLM fallback wiring', () => {
-  it('classify on a .py file queues a change_impact job with non-null payload', async () => {
-    const pyFile = path.join(tmpDir, 'wired-test.py');
-    await fs.writeFile(pyFile, 'def hello():\n    pass\n');
-
-    const detector = new ChangeDetector(tmpDir);
-    await detector.classify(pyFile);
-
-    const sqlite = getSqlite();
-    const row = sqlite
-      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact' AND status = 'pending'")
-      .get(pyFile) as { payload: string | null } | undefined;
-
-    expect(row).toBeDefined();
-    expect(row!.payload).not.toBeNull();
-    expect(row!.payload!.length).toBeGreaterThan(0);
-  });
-});
-
 // ─── ast-parser console.warn check ──────────────────────────────────────────
 
 describe('ast-parser logger usage', () => {
@@ -250,21 +194,23 @@ describe('ast-parser logger usage', () => {
 // ─── queueLlmDiffJob dedup source check ─────────────────────────────────────
 
 describe('queueLlmDiffJob dedup', () => {
-  it('llm-diff-fallback.ts source uses insertLlmJobIfNotPending (not raw insertLlmJob)', async () => {
+  it('llm-diff-fallback.ts source uses submitJob (not legacy insertLlmJobIfNotPending)', async () => {
     const fallbackSource = await fs.readFile(
       new URL('./llm-diff-fallback.ts', import.meta.url),
       'utf-8'
     );
-    // Must NOT contain the non-dedup raw call pattern
-    expect(fallbackSource).not.toContain('insertLlmJob(');
-    // Must contain the dedup function
-    expect(fallbackSource).toContain('insertLlmJobIfNotPending');
+    expect(fallbackSource).not.toContain('insertLlmJobIfNotPending');
+    expect(fallbackSource).toContain('submitJob');
   });
 });
 
 // ─── queueLlmDiffJob tests ──────────────────────────────────────────────────
 
 describe('queueLlmDiffJob', () => {
+  beforeEach(() => {
+    (submitJob as ReturnType<typeof vi.fn>).mockClear();
+  });
+
   it('returns SemanticChangeSummary with changeType=unknown and confidence=heuristic', () => {
     const result = queueLlmDiffJob('/fake/script.go', 'some diff content');
 
@@ -274,47 +220,66 @@ describe('queueLlmDiffJob', () => {
     expect(typeof result.timestamp).toBe('number');
   });
 
-  it('inserts an llm_job row with job_type=change_impact, priority_tier=2, status=pending', () => {
+  it('calls submitJob with job_type=change_impact and the diff as payload', async () => {
     const filePath = path.join(tmpDir, 'queued.go');
+    await fs.writeFile(filePath, 'package main\nfunc main() {}');
     const diff = 'func main() { println("hello") }';
 
     queueLlmDiffJob(filePath, diff);
 
-    const sqlite = getSqlite();
-    const row = sqlite
-      .prepare("SELECT * FROM llm_jobs WHERE file_path = ? AND job_type = 'change_impact'")
-      .get(filePath) as { job_type: string; priority_tier: number; status: string; payload: string } | undefined;
-
-    expect(row).toBeDefined();
-    expect(row!.job_type).toBe('change_impact');
-    expect(row!.priority_tier).toBe(2);
-    expect(row!.status).toBe('pending');
-    expect(row!.payload).toBe(diff);
+    const mockSJ = submitJob as ReturnType<typeof vi.fn>;
+    expect(mockSJ).toHaveBeenCalledTimes(1);
+    expect(mockSJ.mock.calls[0][1]).toBe('change_impact');
+    // 5th arg is the payload (truncated diff)
+    expect(mockSJ.mock.calls[0][4]).toBe(diff);
   });
 
-  it('truncates diffs longer than ~16KB with [truncated] suffix', () => {
+  it('truncates diffs longer than ~16KB with [truncated] suffix', async () => {
     const filePath = path.join(tmpDir, 'large-diff.go');
+    await fs.writeFile(filePath, 'package main\nfunc main() {}');
     // 20KB diff
     const longDiff = 'x'.repeat(20 * 1024);
 
     queueLlmDiffJob(filePath, longDiff);
 
-    const sqlite = getSqlite();
-    const row = sqlite
-      .prepare("SELECT payload FROM llm_jobs WHERE file_path = ?")
-      .get(filePath) as { payload: string } | undefined;
-
-    expect(row).toBeDefined();
+    const mockSJ = submitJob as ReturnType<typeof vi.fn>;
+    expect(mockSJ).toHaveBeenCalledTimes(1);
+    const payload = mockSJ.mock.calls[0][4] as string;
     // Payload should be truncated — must be shorter than the original
-    expect(row!.payload.length).toBeLessThan(longDiff.length);
-    expect(row!.payload).toContain('[truncated]');
+    expect(payload.length).toBeLessThan(longDiff.length);
+    expect(payload).toContain('[truncated]');
   });
 
-  it('returns unknown summary even if insertLlmJob throws (no DB)', () => {
+  it('returns unknown summary even if submitJob throws (no DB)', () => {
     // We can't easily close the DB here, but we can test that the function
     // is resilient by passing an empty diff (legitimate edge case)
     const result = queueLlmDiffJob('', '');
     expect(result.changeType).toBe('unknown');
     expect(result.confidence).toBe('heuristic');
+  });
+});
+
+// ─── ChangeDetector LLM fallback wiring tests ───────────────────────────────
+
+describe('ChangeDetector LLM fallback wiring', () => {
+  beforeEach(() => {
+    (submitJob as ReturnType<typeof vi.fn>).mockClear();
+  });
+
+  it('classify on a .py file calls submitJob with job_type=change_impact and non-null payload', async () => {
+    const pyFile = path.join(tmpDir, 'wired-test.py');
+    await fs.writeFile(pyFile, 'def hello():\n    pass\n');
+
+    const detector = new ChangeDetector(tmpDir);
+    await detector.classify(pyFile);
+
+    const mockSJ = submitJob as ReturnType<typeof vi.fn>;
+    expect(mockSJ).toHaveBeenCalledTimes(1);
+    expect(mockSJ.mock.calls[0][1]).toBe('change_impact');
+    // 5th arg is the payload — should be non-null for a file with a diff
+    const payload = mockSJ.mock.calls[0][4];
+    expect(payload).toBeDefined();
+    expect(typeof payload).toBe('string');
+    expect((payload as string).length).toBeGreaterThan(0);
   });
 });

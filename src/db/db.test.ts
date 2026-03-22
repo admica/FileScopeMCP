@@ -66,14 +66,14 @@ describe('openDatabase', () => {
     expect(tableNames).toContain('file_dependencies');
   });
 
-  it('creates llm_jobs table after migration', () => {
+  it('does NOT create llm_jobs table after migration (dropped by 0003)', () => {
     dbPath = makeTmpDb();
     const { sqlite } = openDatabase(dbPath);
     const tables = sqlite.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     ).all() as { name: string }[];
     const tableNames = tables.map(t => t.name);
-    expect(tableNames).toContain('llm_jobs');
+    expect(tableNames).not.toContain('llm_jobs');
   });
 
   it('creates schema_version table after migration', () => {
@@ -111,16 +111,14 @@ describe('openDatabase', () => {
     expect(colNames).toContain('dependency_type');
   });
 
-  it('llm_jobs table has required columns', () => {
+  it('does NOT create llm_runtime_state table after migration (dropped by 0003)', () => {
     dbPath = makeTmpDb();
     const { sqlite } = openDatabase(dbPath);
-    const cols = sqlite.prepare("PRAGMA table_info(llm_jobs)").all() as { name: string }[];
-    const colNames = cols.map(c => c.name);
-    const expected = ['job_id', 'file_path', 'job_type', 'priority_tier', 'status',
-                      'created_at', 'started_at', 'completed_at', 'error_message', 'retry_count'];
-    for (const col of expected) {
-      expect(colNames).toContain(col);
-    }
+    const tables = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all() as { name: string }[];
+    const tableNames = tables.map(t => t.name);
+    expect(tableNames).not.toContain('llm_runtime_state');
   });
 });
 

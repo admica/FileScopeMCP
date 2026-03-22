@@ -500,10 +500,10 @@ export class ServerCoordinator {
                   if (changeSummary.affectsDependents) {
                     // Export/type surface changed — propagate staleness to all transitive dependents.
                     // Build a changeContext so cascade jobs carry non-null payloads for the LLM pipeline.
-                    // Note: for non-TS/JS files, _classifyWithLlmFallback already queued a more
-                    // detailed diff-based change_impact job via queueLlmDiffJob. The dedup in
-                    // insertLlmJobIfNotPending will prevent a duplicate — cascadeStale's change_impact
-                    // for the root file acts as a safety net.
+                    // Note: for non-TS/JS files, _classifyWithLlmFallback already submitted a more
+                    // detailed diff-based change_impact job via queueLlmDiffJob/submitJob.
+                    // cascadeStale's change_impact for the root file acts as a redundant safety net
+                    // (broker deduplicates by file+type in its in-memory queue).
                     const changeContext = {
                       directPayload: `[file changed: ${filePath} (${changeSummary.changeType})]`,
                       changeType: changeSummary.changeType,

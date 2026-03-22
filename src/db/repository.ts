@@ -4,7 +4,7 @@
 // Per RESEARCH.md Pattern 3.
 import { eq, like, asc, or } from 'drizzle-orm';
 import { getDb, getSqlite } from './db.js';
-import { files, file_dependencies, llm_jobs } from './schema.js';
+import { files, file_dependencies } from './schema.js';
 import type { FileNode, PackageDependency } from '../types.js';
 import type { ExportSnapshot } from '../change-detector/types.js';
 
@@ -399,121 +399,6 @@ export function markStale(filePaths: string[], timestamp: number): void {
   tx();
 }
 
-/**
- * Inserts a pending LLM job only if no pending job with the same (file_path, job_type)
- * already exists. Prevents duplicate job rows when cascades overlap.
- * Uses getSqlite() for the existence check (raw SELECT) then delegates to insertLlmJob.
- *
- * Optional `payload` parameter passes context to the LLM job (e.g., git diff content
- * for change_impact jobs). Existing callers without payload continue to work unchanged.
- */
-export function insertLlmJobIfNotPending(
-  filePath: string,
-  jobType: 'summary' | 'concepts' | 'change_impact',
-  priorityTier: number,
-  payload?: string
-): void {
-  const sqlite = getSqlite();
-  const existing = sqlite
-    .prepare(
-      "SELECT 1 FROM llm_jobs WHERE file_path = ? AND job_type = ? AND status = 'pending' LIMIT 1"
-    )
-    .get(filePath, jobType);
-  if (existing) return;
-  insertLlmJob({ file_path: filePath, job_type: jobType, priority_tier: priorityTier, payload });
-}
-
-// ─── LLM jobs ─────────────────────────────────────────────────────────────────
-
-/**
- * Inserts a new pending LLM job into the llm_jobs table.
- * Used by the change detection system to queue async LLM classification jobs
- * for unsupported languages (CHNG-03).
- */
-export function insertLlmJob(params: {
-  file_path: string;
-  job_type: 'summary' | 'concepts' | 'change_impact';
-  priority_tier: number;
-  payload?: string;
-}): void {
-  const db = getDb();
-  db.insert(llm_jobs)
-    .values({
-      file_path: params.file_path,
-      job_type: params.job_type,
-      priority_tier: params.priority_tier,
-      status: 'pending',
-      created_at: new Date(Date.now()),
-      payload: params.payload ?? null,
-    })
-    .run();
-}
-
-// ─── LLM pipeline job management ──────────────────────────────────────────────
-
-/**
- * Dequeues the next pending LLM job ordered by priority_tier ASC, created_at ASC.
- * Returns null if the queue is empty.
- * Uses a raw prepared statement for minimal latency on the hot dequeue path.
- */
-export function dequeueNextJob(): {
-  job_id: number;
-  file_path: string;
-  job_type: string;
-  priority_tier: number;
-  payload: string | null;
-} | null {
-  const sqlite = getSqlite();
-  const row = sqlite
-    .prepare(
-      "SELECT job_id, file_path, job_type, priority_tier, payload FROM llm_jobs WHERE status = 'pending' ORDER BY priority_tier ASC, created_at ASC LIMIT 1"
-    )
-    .get() as {
-      job_id: number;
-      file_path: string;
-      job_type: string;
-      priority_tier: number;
-      payload: string | null;
-    } | undefined;
-
-  return row ?? null;
-}
-
-/**
- * Marks a job as in_progress, recording the start timestamp.
- */
-export function markJobInProgress(jobId: number): void {
-  const sqlite = getSqlite();
-  sqlite
-    .prepare(
-      "UPDATE llm_jobs SET status = 'in_progress', started_at = ? WHERE job_id = ?"
-    )
-    .run(Date.now(), jobId);
-}
-
-/**
- * Marks a job as done, recording the completion timestamp.
- */
-export function markJobDone(jobId: number): void {
-  const sqlite = getSqlite();
-  sqlite
-    .prepare(
-      "UPDATE llm_jobs SET status = 'done', completed_at = ? WHERE job_id = ?"
-    )
-    .run(Date.now(), jobId);
-}
-
-/**
- * Marks a job as failed, recording the completion timestamp and error message.
- */
-export function markJobFailed(jobId: number, errorMessage: string): void {
-  const sqlite = getSqlite();
-  sqlite
-    .prepare(
-      "UPDATE llm_jobs SET status = 'failed', completed_at = ?, error_message = ? WHERE job_id = ?"
-    )
-    .run(Date.now(), errorMessage, jobId);
-}
 
 /**
  * Writes an LLM result to the appropriate column in the files table.
@@ -567,44 +452,3 @@ export function clearStaleness(filePath: string, jobType: string): void {
     .run(filePath);
 }
 
-/**
- * Recovers orphaned in_progress jobs left by a previous crashed process.
- * Sets status back to 'pending' and clears started_at.
- * Returns the number of jobs recovered.
- * Per RESEARCH.md Pitfall 3.
- */
-export function recoverOrphanedJobs(): number {
-  const sqlite = getSqlite();
-  const result = sqlite
-    .prepare(
-      "UPDATE llm_jobs SET status = 'pending', started_at = NULL WHERE status = 'in_progress'"
-    )
-    .run();
-  return result.changes;
-}
-
-// ─── LLM runtime state persistence ────────────────────────────────────────────
-
-/**
- * Loads a value from the llm_runtime_state key-value table.
- * Returns null if the key does not exist.
- * Used to persist token budget state across process restarts (RESEARCH.md Pitfall 4).
- */
-export function loadLlmRuntimeState(key: string): string | null {
-  const sqlite = getSqlite();
-  const row = sqlite
-    .prepare('SELECT value FROM llm_runtime_state WHERE key = ?')
-    .get(key) as { value: string } | undefined;
-  return row?.value ?? null;
-}
-
-/**
- * Saves a value to the llm_runtime_state key-value table.
- * Uses INSERT OR REPLACE for upsert semantics.
- */
-export function saveLlmRuntimeState(key: string, value: string): void {
-  const sqlite = getSqlite();
-  sqlite
-    .prepare('INSERT OR REPLACE INTO llm_runtime_state (key, value) VALUES (?, ?)')
-    .run(key, value);
-}
