@@ -32,13 +32,13 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
 ### Pipeline
 
-- [ ] **PIPE-01**: submitJob() replaces insertLlmJobIfNotPending() as the single entry point for all LLM job creation (cascade engine, diff fallback)
+- [x] **PIPE-01**: submitJob() replaces insertLlmJobIfNotPending() as the single entry point for all LLM job creation (cascade engine, diff fallback)
 
 ### Config Migration
 
 - [x] **CONF-01**: LLM model/provider/baseURL config removed from instance config.json — broker owns model config
 - [x] **CONF-02**: Instance config.json retains only a broker connection toggle (llm.enabled means "connect to broker")
-- [ ] **CONF-03**: toggle_llm MCP tool connects/disconnects from broker instead of starting/stopping local pipeline
+- [x] **CONF-03**: toggle_llm MCP tool connects/disconnects from broker instead of starting/stopping local pipeline
 
 ### Cleanup
 
@@ -112,10 +112,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLIENT-03 | Phase 17 | Complete |
 | CLIENT-04 | Phase 17 | Complete |
 | CLIENT-05 | Phase 17 | Complete |
-| PIPE-01 | Phase 17 | Pending |
+| PIPE-01 | Phase 17 | Complete |
 | CONF-01 | Phase 17 | Complete |
 | CONF-02 | Phase 17 | Complete |
-| CONF-03 | Phase 17 | Pending |
+| CONF-03 | Phase 17 | Complete |
 | CLEAN-01 | Phase 18 | Pending |
 | CLEAN-02 | Phase 18 | Pending |
 | CLEAN-03 | Phase 18 | Pending |

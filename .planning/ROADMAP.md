@@ -44,7 +44,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
 **Milestone Goal:** Standalone broker process that coordinates LLM access across multiple FileScopeMCP instances through importance-based priority ordering, replacing per-instance direct Ollama calls.
 
 - [x] **Phase 16: Broker Core** — Standalone broker process: Unix socket server, in-memory priority queue, sequential Ollama worker, PID guard, graceful shutdown, and esbuild entry point (completed 2026-03-22)
-- [ ] **Phase 17: Instance Client + Pipeline Wiring** — broker-client.ts with submitJob() as unified LLM entry point, config migration, reconnection, startup resubmission, and coordinator lifecycle wiring
+- [x] **Phase 17: Instance Client + Pipeline Wiring** — broker-client.ts with submitJob() as unified LLM entry point, config migration, reconnection, startup resubmission, and coordinator lifecycle wiring (completed 2026-03-22)
 - [ ] **Phase 18: Cleanup** — Drop legacy llm_jobs/llm_runtime_state tables, delete pipeline.ts and rate-limiter.ts, remove dead job CRUD from repository.ts, and strip isExhausted threading
 - [ ] **Phase 19: Observability** — Update get_llm_status to report broker connection state, queue depth, in-progress job, and per-repo token totals from ~/.filescope/stats.json
 
@@ -75,7 +75,7 @@ Plans:
   3. After a broker disconnect, the instance automatically reconnects every 10 seconds; jobs accumulated in the local stale-file list are resubmitted to the broker on each successful reconnect
   4. Instance config.json with only `llm.enabled: true` (no model or provider fields) produces a working instance that processes LLM jobs through the broker
   5. toggle_llm MCP tool connects to or disconnects from the broker at runtime — calling it twice toggles the instance back to its original state
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 17-01-PLAN.md — Broker client module and config simplification
 - [ ] 17-02-PLAN.md — Wire callers, coordinator lifecycle, toggle_llm, esbuild
@@ -119,6 +119,6 @@ Plans:
 | 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 17. Instance Client + Pipeline Wiring | 1/2 | In Progress|  | - |
+| 17. Instance Client + Pipeline Wiring | 2/2 | Complete   | 2026-03-22 | - |
 | 18. Cleanup | v1.2 | 0/TBD | Not started | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |
