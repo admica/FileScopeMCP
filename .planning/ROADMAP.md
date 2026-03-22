@@ -88,7 +88,7 @@ Plans:
   1. A fresh FileScopeMCP instance startup on an existing .filescope.db that contains llm_jobs or llm_runtime_state tables produces a DB without those tables — the migration runs automatically on init
   2. Importing coordinator.ts, cascade-engine.ts, or repository.ts in a TypeScript build produces no references to insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState, or isExhausted
   3. The files src/llm/pipeline.ts and src/llm/rate-limiter.ts do not exist in the repository; all existing tests pass with no import errors
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 18-01-PLAN.md — DB migration, schema cleanup, dead module deletion, repository surgery, test fixes
 - [ ] 18-02-PLAN.md — isExhausted parameter removal, comment cleanup, final verification
@@ -123,5 +123,5 @@ Plans:
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 18. Cleanup | v1.2 | 0/2 | Not started | - |
+| 18. Cleanup | 1/2 | In Progress|  | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |

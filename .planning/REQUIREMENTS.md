@@ -42,10 +42,10 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
 ### Cleanup
 
-- [ ] **CLEAN-01**: llm_jobs and llm_runtime_state tables dropped from local .filescope.db on init
-- [ ] **CLEAN-02**: TokenBudgetGuard module (rate-limiter.ts) deleted entirely
-- [ ] **CLEAN-03**: pipeline.ts deleted — broker client replaces it
-- [ ] **CLEAN-04**: Dead job CRUD functions removed from repository.ts (insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState)
+- [x] **CLEAN-01**: llm_jobs and llm_runtime_state tables dropped from local .filescope.db on init
+- [x] **CLEAN-02**: TokenBudgetGuard module (rate-limiter.ts) deleted entirely
+- [x] **CLEAN-03**: pipeline.ts deleted — broker client replaces it
+- [x] **CLEAN-04**: Dead job CRUD functions removed from repository.ts (insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState)
 - [ ] **CLEAN-05**: isExhausted parameter threading removed from cascade engine and coordinator
 
 ### Observability
@@ -116,10 +116,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONF-01 | Phase 17 | Complete |
 | CONF-02 | Phase 17 | Complete |
 | CONF-03 | Phase 17 | Complete |
-| CLEAN-01 | Phase 18 | Pending |
-| CLEAN-02 | Phase 18 | Pending |
-| CLEAN-03 | Phase 18 | Pending |
-| CLEAN-04 | Phase 18 | Pending |
+| CLEAN-01 | Phase 18 | Complete |
+| CLEAN-02 | Phase 18 | Complete |
+| CLEAN-03 | Phase 18 | Complete |
+| CLEAN-04 | Phase 18 | Complete |
 | CLEAN-05 | Phase 18 | Pending |
 | OBS-01 | Phase 19 | Pending |
 | OBS-02 | Phase 19 | Pending |
