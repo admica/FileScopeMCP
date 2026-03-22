@@ -41,39 +41,8 @@ export const file_dependencies = sqliteTable('file_dependencies', {
   index('dep_target_idx').on(t.target_path),
 ]);
 
-// Pre-built for Phase 5 — avoids schema migration when LLM pipeline arrives
-// status enum: pending → in_progress → done | failed
-export const llm_jobs = sqliteTable('llm_jobs', {
-  job_id:        integer('job_id').primaryKey({ autoIncrement: true }),
-  file_path:     text('file_path').notNull(),
-  job_type:      text('job_type', {
-    enum: ['summary', 'concepts', 'change_impact']
-  }).notNull(),
-  priority_tier: integer('priority_tier').notNull().default(2), // 1=interactive, 2=cascade, 3=background
-  status:        text('status', {
-    enum: ['pending', 'in_progress', 'done', 'failed']
-  }).notNull().default('pending'),
-  created_at:    integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  started_at:    integer('started_at', { mode: 'timestamp_ms' }),
-  completed_at:  integer('completed_at', { mode: 'timestamp_ms' }),
-  error_message: text('error_message'),
-  retry_count:   integer('retry_count').notNull().default(0),
-  payload:       text('payload'),  // JSON payload for the job (e.g., diff for change_impact jobs)
-}, (t) => [
-  index('jobs_status_priority_idx').on(t.status, t.priority_tier),
-  index('jobs_file_path_idx').on(t.file_path),
-]);
-
 // Schema versioning — single integer row
 // Future phases check this and apply upgrade logic as needed
 export const schema_version = sqliteTable('schema_version', {
   version: integer('version').primaryKey().notNull(),
-});
-
-// Generic key-value store for LLM runtime state that must survive restarts.
-// Keys: 'lifetime_tokens_used' (INTEGER as text), 'budget_exhausted_at' (timestamp ms as text).
-// Per RESEARCH.md Pitfall 4 — token budget must be persisted to prevent budget bypass on restart.
-export const llm_runtime_state = sqliteTable('llm_runtime_state', {
-  key:   text('key').primaryKey().notNull(),
-  value: text('value').notNull(),
 });
