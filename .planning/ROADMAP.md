@@ -43,7 +43,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
 
 **Milestone Goal:** Standalone broker process that coordinates LLM access across multiple FileScopeMCP instances through importance-based priority ordering, replacing per-instance direct Ollama calls.
 
-- [ ] **Phase 16: Broker Core** — Standalone broker process: Unix socket server, in-memory priority queue, sequential Ollama worker, PID guard, graceful shutdown, and esbuild entry point
+- [x] **Phase 16: Broker Core** — Standalone broker process: Unix socket server, in-memory priority queue, sequential Ollama worker, PID guard, graceful shutdown, and esbuild entry point (completed 2026-03-22)
 - [ ] **Phase 17: Instance Client + Pipeline Wiring** — broker-client.ts with submitJob() as unified LLM entry point, config migration, reconnection, startup resubmission, and coordinator lifecycle wiring
 - [ ] **Phase 18: Cleanup** — Drop legacy llm_jobs/llm_runtime_state tables, delete pipeline.ts and rate-limiter.ts, remove dead job CRUD from repository.ts, and strip isExhausted threading
 - [ ] **Phase 19: Observability** — Update get_llm_status to report broker connection state, queue depth, in-progress job, and per-repo token totals from ~/.filescope/stats.json
@@ -60,7 +60,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
   3. A job that takes longer than 120 seconds is aborted and the submitting client receives an error response; the broker continues processing the next job immediately
   4. When the broker receives SIGTERM or SIGINT it finishes the in-progress job (or aborts after timeout), closes all client connections, removes broker.sock and broker.pid, and exits cleanly
   5. When a client connection closes, all pending jobs submitted by that connection are dropped from the queue
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 16-PLAN-01.md — Foundation: broker types, config loader, and priority queue
 - [ ] 16-PLAN-02.md — Worker, server, main entry point, and esbuild wiring
@@ -115,7 +115,7 @@ Plans:
 | 13. Streaming Directory Scan | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
-| 16. Broker Core | 1/2 | In Progress|  | - |
+| 16. Broker Core | 2/2 | Complete   | 2026-03-22 | - |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 0/TBD | Not started | - |
 | 18. Cleanup | v1.2 | 0/TBD | Not started | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |

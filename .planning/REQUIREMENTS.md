@@ -9,18 +9,18 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
 ### Broker Core
 
-- [ ] **BROKER-01**: Broker process listens on Unix domain socket at ~/.filescope/broker.sock
+- [x] **BROKER-01**: Broker process listens on Unix domain socket at ~/.filescope/broker.sock
 - [x] **BROKER-02**: Broker creates ~/.filescope/ directory on first run if it doesn't exist
 - [x] **BROKER-03**: Broker reads LLM config (provider, model, baseURL) from ~/.filescope/broker.json
-- [ ] **BROKER-04**: Broker writes PID file at ~/.filescope/broker.pid and cleans up stale socket/PID on startup
+- [x] **BROKER-04**: Broker writes PID file at ~/.filescope/broker.pid and cleans up stale socket/PID on startup
 - [x] **BROKER-05**: Broker maintains in-memory priority queue ordered by importance DESC, created_at ASC
 - [x] **BROKER-06**: Broker deduplicates pending jobs per (repoPath, filePath, jobType) — latest submission replaces older
-- [ ] **BROKER-07**: Broker builds prompts from file content and calls Ollama with structured output fallback
-- [ ] **BROKER-08**: Broker processes one job at a time (serialized Ollama access)
-- [ ] **BROKER-09**: Broker enforces 120s timeout per job to protect against hung Ollama calls
-- [ ] **BROKER-10**: Broker performs graceful shutdown on SIGTERM/SIGINT — finish current job, close connections, remove socket and PID files
-- [ ] **BROKER-11**: Broker drops pending jobs for a connection when that connection closes
-- [ ] **BROKER-12**: Broker built as separate esbuild entry point (src/broker/main.ts -> dist/broker.js)
+- [x] **BROKER-07**: Broker builds prompts from file content and calls Ollama with structured output fallback
+- [x] **BROKER-08**: Broker processes one job at a time (serialized Ollama access)
+- [x] **BROKER-09**: Broker enforces 120s timeout per job to protect against hung Ollama calls
+- [x] **BROKER-10**: Broker performs graceful shutdown on SIGTERM/SIGINT — finish current job, close connections, remove socket and PID files
+- [x] **BROKER-11**: Broker drops pending jobs for a connection when that connection closes
+- [x] **BROKER-12**: Broker built as separate esbuild entry point (src/broker/main.ts -> dist/broker.js)
 
 ### Instance Client
 
@@ -95,18 +95,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BROKER-01 | Phase 16 | Pending |
+| BROKER-01 | Phase 16 | Complete |
 | BROKER-02 | Phase 16 | Complete |
 | BROKER-03 | Phase 16 | Complete |
-| BROKER-04 | Phase 16 | Pending |
+| BROKER-04 | Phase 16 | Complete |
 | BROKER-05 | Phase 16 | Complete |
 | BROKER-06 | Phase 16 | Complete |
-| BROKER-07 | Phase 16 | Pending |
-| BROKER-08 | Phase 16 | Pending |
-| BROKER-09 | Phase 16 | Pending |
-| BROKER-10 | Phase 16 | Pending |
-| BROKER-11 | Phase 16 | Pending |
-| BROKER-12 | Phase 16 | Pending |
+| BROKER-07 | Phase 16 | Complete |
+| BROKER-08 | Phase 16 | Complete |
+| BROKER-09 | Phase 16 | Complete |
+| BROKER-10 | Phase 16 | Complete |
+| BROKER-11 | Phase 16 | Complete |
+| BROKER-12 | Phase 16 | Complete |
 | CLIENT-01 | Phase 17 | Pending |
 | CLIENT-02 | Phase 17 | Pending |
 | CLIENT-03 | Phase 17 | Pending |

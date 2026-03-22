@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: LLM Broker
 status: unknown
-stopped_at: Completed 16-shared-llm-queue-01-PLAN.md
-last_updated: "2026-03-22T14:02:57.794Z"
+stopped_at: Completed 16-shared-llm-queue-02-PLAN.md
+last_updated: "2026-03-22T14:09:55.307Z"
 last_activity: 2026-03-21
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -43,6 +43,7 @@ Plan: 1 of 2
 
 *Updated after each plan completion*
 | Phase 16-shared-llm-queue P01 | 8 | 3 tasks | 3 files |
+| Phase 16-shared-llm-queue P02 | 3 | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -58,6 +59,8 @@ Key v1.2 architectural decisions (logged in PROJECT.md Key Decisions table):
 - [Phase 16-shared-llm-queue]: dedupKey exported as runtime function from types.ts so queue.ts can import without circular dependency
 - [Phase 16-shared-llm-queue]: PriorityQueue.size returns dedupMap.size not heap.length — dedup map is authoritative active count
 - [Phase 16-shared-llm-queue]: loadBrokerConfig is async-shaped but internally synchronous — startup sequencing is sequential before async work
+- [Phase 16-shared-llm-queue]: dist/broker/main.js is the correct broker binary path — esbuild mirrors src/broker/ structure under dist/
+- [Phase 16-shared-llm-queue]: Re-throw AbortError before structured output fallback prevents timeout confusion in broker worker (Pitfall 5)
 
 ### Pending Todos
 
@@ -71,5 +74,5 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-21
-Stopped at: Completed 16-shared-llm-queue-01-PLAN.md
+Stopped at: Completed 16-shared-llm-queue-02-PLAN.md
 Resume file: None
