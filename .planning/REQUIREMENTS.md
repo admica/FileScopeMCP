@@ -24,11 +24,11 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
 ### Instance Client
 
-- [ ] **CLIENT-01**: Instance auto-discovers broker by connecting to ~/.filescope/broker.sock
-- [ ] **CLIENT-02**: Instance submits jobs to broker with file content, importance score, and job type
-- [ ] **CLIENT-03**: Instance receives async results from broker and writes to local .filescope.db via writeLlmResult/clearStaleness
-- [ ] **CLIENT-04**: Instance reconnects to broker on disconnect with fixed-interval retry (10s)
-- [ ] **CLIENT-05**: Instance scans local DB for stale files on connect/reconnect and resubmits all to broker
+- [x] **CLIENT-01**: Instance auto-discovers broker by connecting to ~/.filescope/broker.sock
+- [x] **CLIENT-02**: Instance submits jobs to broker with file content, importance score, and job type
+- [x] **CLIENT-03**: Instance receives async results from broker and writes to local .filescope.db via writeLlmResult/clearStaleness
+- [x] **CLIENT-04**: Instance reconnects to broker on disconnect with fixed-interval retry (10s)
+- [x] **CLIENT-05**: Instance scans local DB for stale files on connect/reconnect and resubmits all to broker
 
 ### Pipeline
 
@@ -36,8 +36,8 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
 ### Config Migration
 
-- [ ] **CONF-01**: LLM model/provider/baseURL config removed from instance config.json — broker owns model config
-- [ ] **CONF-02**: Instance config.json retains only a broker connection toggle (llm.enabled means "connect to broker")
+- [x] **CONF-01**: LLM model/provider/baseURL config removed from instance config.json — broker owns model config
+- [x] **CONF-02**: Instance config.json retains only a broker connection toggle (llm.enabled means "connect to broker")
 - [ ] **CONF-03**: toggle_llm MCP tool connects/disconnects from broker instead of starting/stopping local pipeline
 
 ### Cleanup
@@ -107,14 +107,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BROKER-10 | Phase 16 | Complete |
 | BROKER-11 | Phase 16 | Complete |
 | BROKER-12 | Phase 16 | Complete |
-| CLIENT-01 | Phase 17 | Pending |
-| CLIENT-02 | Phase 17 | Pending |
-| CLIENT-03 | Phase 17 | Pending |
-| CLIENT-04 | Phase 17 | Pending |
-| CLIENT-05 | Phase 17 | Pending |
+| CLIENT-01 | Phase 17 | Complete |
+| CLIENT-02 | Phase 17 | Complete |
+| CLIENT-03 | Phase 17 | Complete |
+| CLIENT-04 | Phase 17 | Complete |
+| CLIENT-05 | Phase 17 | Complete |
 | PIPE-01 | Phase 17 | Pending |
-| CONF-01 | Phase 17 | Pending |
-| CONF-02 | Phase 17 | Pending |
+| CONF-01 | Phase 17 | Complete |
+| CONF-02 | Phase 17 | Complete |
 | CONF-03 | Phase 17 | Pending |
 | CLEAN-01 | Phase 18 | Pending |
 | CLEAN-02 | Phase 18 | Pending |

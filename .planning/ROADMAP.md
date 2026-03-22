@@ -75,7 +75,7 @@ Plans:
   3. After a broker disconnect, the instance automatically reconnects every 10 seconds; jobs accumulated in the local stale-file list are resubmitted to the broker on each successful reconnect
   4. Instance config.json with only `llm.enabled: true` (no model or provider fields) produces a working instance that processes LLM jobs through the broker
   5. toggle_llm MCP tool connects to or disconnects from the broker at runtime — calling it twice toggles the instance back to its original state
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 17-01-PLAN.md — Broker client module and config simplification
 - [ ] 17-02-PLAN.md — Wire callers, coordinator lifecycle, toggle_llm, esbuild
@@ -119,6 +119,6 @@ Plans:
 | 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 17. Instance Client + Pipeline Wiring | v1.2 | 0/2 | Not started | - |
+| 17. Instance Client + Pipeline Wiring | 1/2 | In Progress|  | - |
 | 18. Cleanup | v1.2 | 0/TBD | Not started | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |
