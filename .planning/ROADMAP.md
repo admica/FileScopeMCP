@@ -62,8 +62,8 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
   5. When a client connection closes, all pending jobs submitted by that connection are dropped from the queue
 **Plans:** 2/2 plans complete
 Plans:
-- [ ] 16-PLAN-01.md — Foundation: broker types, config loader, and priority queue
-- [ ] 16-PLAN-02.md — Worker, server, main entry point, and esbuild wiring
+- [x] 16-01-PLAN.md — Foundation: broker types, config loader, and priority queue
+- [x] 16-02-PLAN.md — Worker, server, main entry point, and esbuild wiring
 
 ### Phase 17: Instance Client + Pipeline Wiring
 **Goal**: Instances communicate with the broker through a single submitJob() function that transparently routes to the broker when available, and all LLM callers use this new entry point; config no longer requires model details in instance config.json
@@ -75,7 +75,10 @@ Plans:
   3. After a broker disconnect, the instance automatically reconnects every 10 seconds; jobs accumulated in the local stale-file list are resubmitted to the broker on each successful reconnect
   4. Instance config.json with only `llm.enabled: true` (no model or provider fields) produces a working instance that processes LLM jobs through the broker
   5. toggle_llm MCP tool connects to or disconnects from the broker at runtime — calling it twice toggles the instance back to its original state
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 17-01-PLAN.md — Broker client module and config simplification
+- [ ] 17-02-PLAN.md — Wire callers, coordinator lifecycle, toggle_llm, esbuild
 
 ### Phase 18: Cleanup
 **Goal**: All legacy local job queue infrastructure is gone — no llm_jobs or llm_runtime_state tables, no pipeline.ts polling loop, no TokenBudgetGuard gating, no dead job CRUD functions, no isExhausted parameter threading
@@ -115,7 +118,7 @@ Plans:
 | 13. Streaming Directory Scan | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
-| 16. Broker Core | 2/2 | Complete    | 2026-03-22 | - |
-| 17. Instance Client + Pipeline Wiring | v1.2 | 0/TBD | Not started | - |
+| 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
+| 17. Instance Client + Pipeline Wiring | v1.2 | 0/2 | Not started | - |
 | 18. Cleanup | v1.2 | 0/TBD | Not started | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |
