@@ -115,7 +115,7 @@ Plans:
 | 13. Streaming Directory Scan | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
-| 16. Broker Core | 2/2 | Complete   | 2026-03-22 | - |
+| 16. Broker Core | 2/2 | Complete    | 2026-03-22 | - |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 0/TBD | Not started | - |
 | 18. Cleanup | v1.2 | 0/TBD | Not started | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |
