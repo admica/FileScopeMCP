@@ -1,68 +1,93 @@
-# Requirements: FileScopeMCP v1.1
+# Requirements: FileScopeMCP v1.2
 
-**Defined:** 2026-03-19
+**Defined:** 2026-03-21
 **Core Value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
-## v1.1 Requirements
+## v1.2 Requirements
 
-Requirements for v1.1 Hardening release. Each maps to roadmap phases.
+Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
-### Bug Fixes
+### Broker Core
 
-- [x] **BUG-01**: Importance propagation recurses through all transitive dependents when a file's importance changes, using a visited set to prevent infinite loops
-- [x] **BUG-02**: Watcher restart backoff counter only resets after the watcher has been stable for at least 60 seconds, not immediately on successful start
+- [ ] **BROKER-01**: Broker process listens on Unix domain socket at ~/.filescope/broker.sock
+- [x] **BROKER-02**: Broker creates ~/.filescope/ directory on first run if it doesn't exist
+- [x] **BROKER-03**: Broker reads LLM config (provider, model, baseURL) from ~/.filescope/broker.json
+- [ ] **BROKER-04**: Broker writes PID file at ~/.filescope/broker.pid and cleans up stale socket/PID on startup
+- [x] **BROKER-05**: Broker maintains in-memory priority queue ordered by importance DESC, created_at ASC
+- [x] **BROKER-06**: Broker deduplicates pending jobs per (repoPath, filePath, jobType) — latest submission replaces older
+- [ ] **BROKER-07**: Broker builds prompts from file content and calls Ollama with structured output fallback
+- [ ] **BROKER-08**: Broker processes one job at a time (serialized Ollama access)
+- [ ] **BROKER-09**: Broker enforces 120s timeout per job to protect against hung Ollama calls
+- [ ] **BROKER-10**: Broker performs graceful shutdown on SIGTERM/SIGINT — finish current job, close connections, remove socket and PID files
+- [ ] **BROKER-11**: Broker drops pending jobs for a connection when that connection closes
+- [ ] **BROKER-12**: Broker built as separate esbuild entry point (src/broker/main.ts -> dist/broker.js)
 
-### Code Quality
+### Instance Client
 
-- [x] **QUAL-01**: file-utils.ts uses a single consolidated set of fs imports (no duplicate `import * as fs` and `import * as fsSync from 'fs'`)
-- [x] **QUAL-02**: Path normalization uses one canonical function with clear naming, eliminating the confusing `normalizePath` vs `normalizeAndResolvePath` split
-- [x] **QUAL-03**: `PackageDependency.fromPath()` no longer misclassifies local files as package dependencies due to the hardcoded fallback list (`react`, `firebase`, etc.)
-- [x] **QUAL-04**: Dead `createFileTree` export removed from file-utils.ts
+- [ ] **CLIENT-01**: Instance auto-discovers broker by connecting to ~/.filescope/broker.sock
+- [ ] **CLIENT-02**: Instance submits jobs to broker with file content, importance score, and job type
+- [ ] **CLIENT-03**: Instance receives async results from broker and writes to local .filescope.db via writeLlmResult/clearStaleness
+- [ ] **CLIENT-04**: Instance reconnects to broker on disconnect with fixed-interval retry (10s)
+- [ ] **CLIENT-05**: Instance scans local DB for stale files on connect/reconnect and resubmits all to broker
 
-### Performance
+### Pipeline
 
-- [x] **PERF-01**: Project supports a `.filescopeignore` file (gitignore syntax) that gates directory recursion at scan time — ignored directories are never entered
-- [x] **PERF-02**: `scanDirectory` uses streaming (async generator via `fs.promises.opendir`) instead of building the full tree in memory
-- [x] **PERF-03**: Integrity sweep no longer polls on a fixed 30-second interval; instead, file freshness is validated lazily via mtime comparison on MCP tool access, with a full sweep only at startup
+- [ ] **PIPE-01**: submitJob() replaces insertLlmJobIfNotPending() as the single entry point for all LLM job creation (cascade engine, diff fallback)
 
-### Language Support
+### Config Migration
 
-- [x] **LANG-01**: Go import parsing extracts dependencies from `import "pkg"` and grouped `import (...)` blocks, with `go.mod` module name resolution for intra-project paths
-- [x] **LANG-02**: Ruby import parsing extracts dependencies from `require` and `require_relative` calls, with `.rb` extension probing for intra-project paths
+- [ ] **CONF-01**: LLM model/provider/baseURL config removed from instance config.json — broker owns model config
+- [ ] **CONF-02**: Instance config.json retains only a broker connection toggle (llm.enabled means "connect to broker")
+- [ ] **CONF-03**: toggle_llm MCP tool connects/disconnects from broker instead of starting/stopping local pipeline
 
-### Cycle Detection
+### Cleanup
 
-- [x] **CYCL-01**: Tarjan's SCC algorithm detects circular dependency groups in the file graph using an iterative (non-recursive) implementation
-- [x] **CYCL-02**: Cycle information is exposed via MCP tools — users can detect all cycles in the project and query which cycle group a specific file belongs to
+- [ ] **CLEAN-01**: llm_jobs and llm_runtime_state tables dropped from local .filescope.db on init
+- [ ] **CLEAN-02**: TokenBudgetGuard module (rate-limiter.ts) deleted entirely
+- [ ] **CLEAN-03**: pipeline.ts deleted — broker client replaces it
+- [ ] **CLEAN-04**: Dead job CRUD functions removed from repository.ts (insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState)
+- [ ] **CLEAN-05**: isExhausted parameter threading removed from cascade engine and coordinator
+
+### Observability
+
+- [ ] **OBS-01**: get_llm_status MCP tool reports broker connection status, queue depth, and per-repo token totals
+- [ ] **OBS-02**: Broker responds to status requests with pending count, in-progress job, connected client count, and per-repo breakdown
 
 ## Future Requirements
 
-Deferred to future release. Tracked but not in current roadmap.
+Deferred to future milestones. Tracked but not in current roadmap.
 
-### Architecture Cleanup
+### Scaling
 
-- **ARCH-01**: Eliminate `reconstructTreeFromDb` bridge pattern — work directly against SQLite model
-- **ARCH-02**: Per-directory file watching granularity (less relevant with one-instance-per-project)
+- **SCALE-01**: Broker supports configurable maxConcurrent workers for multi-GPU setups
+- **SCALE-02**: Priority aging prevents low-importance job starvation under sustained high load
 
-### Language Support
+### Resilience
 
-- **LANG-03**: Barrel re-export parsing (`export * from`) for TypeScript/JavaScript
-- **LANG-04**: Python relative imports (`from . import`) and `importlib`
-- **LANG-05**: Rust `mod` declarations resolving to `mod.rs` or same-name files
+- **RESIL-01**: Version handshake on connect — broker rejects incompatible client versions
+- **RESIL-02**: Persistent token stats across broker restarts
 
-### Test Coverage
+### Config
 
-- **TEST-01**: Full watcher debounce integration tests
-- **TEST-02**: Large-codebase performance benchmarks
+- **CONF-04**: Broker hot-reload of config without restart
+
+### Language Support (carried from v1.1)
+
+- **LANG-03**: Barrel re-export parsing for TypeScript/JavaScript
+- **LANG-04**: Python relative imports and importlib
+- **LANG-05**: Rust mod declarations
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Git integration | Explicitly out of scope per PROJECT.md — file-system level only |
-| `read_file_content` lazy loading | Low priority — rare for users to read very large files via MCP |
-| tree-sitter AST parsing for Go/Ruby | Regex is sufficient for Go/Ruby import syntax; AST adds native dep complexity |
-| Cascade-integrated cycle detection | v1.1 scope is display-only; cascade integration deferred to future milestone |
+| Shared database for job queue | Broker is a process, not a database — in-memory queue is simpler and faster |
+| Direct Ollama fallback mode | One code path: broker or no LLM. Eliminates dual-mode testing burden |
+| Leader election | Adds failover complexity for no real benefit — just run the broker |
+| TCP/HTTP protocol | Unix socket is local-only, faster, no port conflicts |
+| "accepted" acknowledgment message | Fire-and-forget submit — socket delivery is reliable, reconnect handles crashes |
+| "cancel" message on shutdown | Broker detects connection close and drops pending jobs automatically |
+| Lazy file content | Separate concern, deferred to future milestone |
 
 ## Traceability
 
@@ -70,25 +95,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUG-01 | Phase 10 | Complete |
-| BUG-02 | Phase 10 | Complete |
-| QUAL-01 | Phase 10 | Complete |
-| QUAL-02 | Phase 10 | Complete |
-| QUAL-03 | Phase 10 | Complete |
-| QUAL-04 | Phase 10 | Complete |
-| PERF-01 | Phase 11 | Complete |
-| PERF-02 | Phase 13 | Complete |
-| PERF-03 | Phase 14 | Complete |
-| LANG-01 | Phase 12 | Complete |
-| LANG-02 | Phase 12 | Complete |
-| CYCL-01 | Phase 15 | Complete |
-| CYCL-02 | Phase 15 | Complete |
+| BROKER-01 | Phase 16 | Pending |
+| BROKER-02 | Phase 16 | Complete |
+| BROKER-03 | Phase 16 | Complete |
+| BROKER-04 | Phase 16 | Pending |
+| BROKER-05 | Phase 16 | Complete |
+| BROKER-06 | Phase 16 | Complete |
+| BROKER-07 | Phase 16 | Pending |
+| BROKER-08 | Phase 16 | Pending |
+| BROKER-09 | Phase 16 | Pending |
+| BROKER-10 | Phase 16 | Pending |
+| BROKER-11 | Phase 16 | Pending |
+| BROKER-12 | Phase 16 | Pending |
+| CLIENT-01 | Phase 17 | Pending |
+| CLIENT-02 | Phase 17 | Pending |
+| CLIENT-03 | Phase 17 | Pending |
+| CLIENT-04 | Phase 17 | Pending |
+| CLIENT-05 | Phase 17 | Pending |
+| PIPE-01 | Phase 17 | Pending |
+| CONF-01 | Phase 17 | Pending |
+| CONF-02 | Phase 17 | Pending |
+| CONF-03 | Phase 17 | Pending |
+| CLEAN-01 | Phase 18 | Pending |
+| CLEAN-02 | Phase 18 | Pending |
+| CLEAN-03 | Phase 18 | Pending |
+| CLEAN-04 | Phase 18 | Pending |
+| CLEAN-05 | Phase 18 | Pending |
+| OBS-01 | Phase 19 | Pending |
+| OBS-02 | Phase 19 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 13 total
-- Mapped to phases: 13
+- v1.2 requirements: 28 total
+- Mapped to phases: 28
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-03-19*
-*Last updated: 2026-03-19 after roadmap creation*
+*Requirements defined: 2026-03-21*
+*Last updated: 2026-03-21 after roadmap creation*
