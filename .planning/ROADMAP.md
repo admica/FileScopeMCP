@@ -3,7 +3,8 @@
 ## Milestones
 
 - ✅ **v1.0 Autonomous File Metadata** — Phases 1-9 (shipped 2026-03-19)
-- 🚧 **v1.1 Hardening** — Phases 10-15 (in progress)
+- ✅ **v1.1 Hardening** — Phases 10-15 (shipped 2026-03-20)
+- 🚧 **v1.2 LLM Broker** — Phases 16-19 (in progress)
 
 ## Phases
 
@@ -24,98 +25,76 @@ See: `.planning/milestones/v1.0-ROADMAP.md` for full phase details.
 
 </details>
 
-### 🚧 v1.1 Hardening (In Progress)
+<details>
+<summary>✅ v1.1 Hardening (Phases 10-15) — SHIPPED 2026-03-20</summary>
 
-**Milestone Goal:** Fix open bugs, improve code quality, add cycle detection and richer language support, and harden performance for large codebases.
+- [x] Phase 10: Code Quality and Bug Fixes — completed 2026-03-19
+- [x] Phase 11: .filescopeignore Support — completed 2026-03-19
+- [x] Phase 12: Go and Ruby Language Support — completed 2026-03-19
+- [x] Phase 13: Streaming Directory Scan — completed 2026-03-20
+- [x] Phase 14: mtime-Based Lazy Validation — completed 2026-03-20
+- [x] Phase 15: Cycle Detection — completed 2026-03-20
 
-- [x] **Phase 10: Code Quality and Bug Fixes** - Establish a clean, correct baseline by eliminating dead code, consolidating imports, fixing path normalization, correcting the firebase false positive, fixing transitive importance propagation, and fixing watcher restart backoff (completed 2026-03-19)
-- [x] **Phase 11: .filescopeignore Support** - Add gitignore-syntax project exclusion file that gates directory recursion at scan time (completed 2026-03-19)
-- [x] **Phase 12: Go and Ruby Language Support** - Add full dependency parsing for Go (import blocks + go.mod resolution) and Ruby (require/require_relative) (completed 2026-03-19)
-- [x] **Phase 13: Streaming Directory Scan** - Replace eager full-tree memory build with async generator that yields one FileNode at a time (completed 2026-03-20)
-- [x] **Phase 14: mtime-Based Lazy Validation** - Replace 30-second polling integrity sweep with mtime comparison on MCP tool access (completed 2026-03-20)
-- [x] **Phase 15: Cycle Detection** - Add Tarjan's SCC cycle detection and expose via detect_cycles and get_cycles_for_file MCP tools (completed 2026-03-20)
+See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
+
+</details>
+
+### v1.2 LLM Broker (In Progress)
+
+**Milestone Goal:** Standalone broker process that coordinates LLM access across multiple FileScopeMCP instances through importance-based priority ordering, replacing per-instance direct Ollama calls.
+
+- [ ] **Phase 16: Broker Core** — Standalone broker process: Unix socket server, in-memory priority queue, sequential Ollama worker, PID guard, graceful shutdown, and esbuild entry point
+- [ ] **Phase 17: Instance Client + Pipeline Wiring** — broker-client.ts with submitJob() as unified LLM entry point, config migration, reconnection, startup resubmission, and coordinator lifecycle wiring
+- [ ] **Phase 18: Cleanup** — Drop legacy llm_jobs/llm_runtime_state tables, delete pipeline.ts and rate-limiter.ts, remove dead job CRUD from repository.ts, and strip isExhausted threading
+- [ ] **Phase 19: Observability** — Update get_llm_status to report broker connection state, queue depth, in-progress job, and per-repo token totals from ~/.filescope/stats.json
 
 ## Phase Details
 
-### Phase 10: Code Quality and Bug Fixes
-**Goal**: The codebase is clean, correct, and all existing tests pass — with accurate importance scores, reliable watcher error recovery, consolidated fs imports, and no dead code
-**Depends on**: Nothing (first phase of v1.1)
-**Requirements**: QUAL-01, QUAL-02, QUAL-03, QUAL-04, BUG-01, BUG-02
+### Phase 16: Broker Core
+**Goal**: A standalone broker binary exists that instances can connect to — it accepts job submissions over a Unix domain socket, prioritizes them by importance, and processes them one at a time through Ollama
+**Depends on**: Phase 15
+**Requirements**: BROKER-01, BROKER-02, BROKER-03, BROKER-04, BROKER-05, BROKER-06, BROKER-07, BROKER-08, BROKER-09, BROKER-10, BROKER-11, BROKER-12
 **Success Criteria** (what must be TRUE):
-  1. Importance scores for files with transitive dependents reflect the full dependency chain depth, not just depth-1 dependents
-  2. Watcher restart backoff counter holds its value through an error spike and only resets after 60 consecutive seconds of stable operation
-  3. file-utils.ts has one consolidated fs import block with no duplicate `import * as fs` or `import * as fsSync` declarations
-  4. `normalizePath` and `normalizeAndResolvePath` are replaced by a single canonical path normalization function with unambiguous naming
-  5. Local files are never misclassified as package dependencies (react, firebase, etc.) due to a hardcoded fallback list, and the dead `createFileTree` export is absent from file-utils.ts
-**Plans:** 2/2 plans complete
+  1. Running `node dist/broker.js` starts a process that creates ~/.filescope/broker.sock and ~/.filescope/broker.pid; a second invocation detects the running broker and exits without clobbering the socket
+  2. A client connecting and submitting two jobs for the same (repoPath, filePath, jobType) results in only one job being processed — the second submission replaces the first if still pending
+  3. A job that takes longer than 120 seconds is aborted and the submitting client receives an error response; the broker continues processing the next job immediately
+  4. When the broker receives SIGTERM or SIGINT it finishes the in-progress job (or aborts after timeout), closes all client connections, removes broker.sock and broker.pid, and exits cleanly
+  5. When a client connection closes, all pending jobs submitted by that connection are dropped from the queue
+**Plans:** 2 plans
 Plans:
-- [ ] 10-01-PLAN.md — Dead code cleanup (fs imports, createFileTree, commonPkgs) and watcher backoff fix
-- [ ] 10-02-PLAN.md — Path normalization consolidation and transitive importance propagation fix
+- [ ] 16-PLAN-01.md — Foundation: broker types, config loader, and priority queue
+- [ ] 16-PLAN-02.md — Worker, server, main entry point, and esbuild wiring
 
-### Phase 11: .filescopeignore Support
-**Goal**: Users can place a `.filescopeignore` file (gitignore syntax) in their project root and have FileScopeMCP never enter excluded directories during scans or file watching
-**Depends on**: Phase 10
-**Requirements**: PERF-01
+### Phase 17: Instance Client + Pipeline Wiring
+**Goal**: Instances communicate with the broker through a single submitJob() function that transparently routes to the broker when available, and all LLM callers use this new entry point; config no longer requires model details in instance config.json
+**Depends on**: Phase 16
+**Requirements**: CLIENT-01, CLIENT-02, CLIENT-03, CLIENT-04, CLIENT-05, PIPE-01, CONF-01, CONF-02, CONF-03
 **Success Criteria** (what must be TRUE):
-  1. A `.filescopeignore` file with gitignore-style patterns causes matching directories to be skipped entirely during recursive directory scan — their contents never appear in the file tree
-  2. The ignore rules apply to both the initial scan and real-time file watching, with no additional configuration required beyond creating the file
-  3. Standard gitignore syntax (negation, globstar, directory anchoring, comments) works correctly in `.filescopeignore`
-**Plans:** 2/2 plans complete
-Plans:
-- [ ] 11-01-PLAN.md — Install ignore package, global-state integration, isExcluded wiring with tests
-- [ ] 11-02-PLAN.md — FileWatcher integration with .filescopeignore for watch-time exclusion
+  1. cascade-engine.ts and llm-diff-fallback.ts call submitJob() with no direct reference to insertLlmJobIfNotPending() or the LLM pipeline — a single code change in broker-client.ts controls LLM routing for all callers
+  2. When the broker is running, an instance connects on startup and all LLM jobs flow through the socket; when the broker is not running, the instance logs a connection failure and operates without LLM processing (no crash, no retry loop blocking startup)
+  3. After a broker disconnect, the instance automatically reconnects every 10 seconds; jobs accumulated in the local stale-file list are resubmitted to the broker on each successful reconnect
+  4. Instance config.json with only `llm.enabled: true` (no model or provider fields) produces a working instance that processes LLM jobs through the broker
+  5. toggle_llm MCP tool connects to or disconnects from the broker at runtime — calling it twice toggles the instance back to its original state
+**Plans**: TBD
 
-### Phase 12: Go and Ruby Language Support
-**Goal**: FileScopeMCP correctly parses import dependencies for Go and Ruby files, enabling accurate dependency graphs and importance scoring for projects using those languages
-**Depends on**: Phase 11
-**Requirements**: LANG-01, LANG-02
+### Phase 18: Cleanup
+**Goal**: All legacy local job queue infrastructure is gone — no llm_jobs or llm_runtime_state tables, no pipeline.ts polling loop, no TokenBudgetGuard gating, no dead job CRUD functions, no isExhausted parameter threading
+**Depends on**: Phase 17
+**Requirements**: CLEAN-01, CLEAN-02, CLEAN-03, CLEAN-04, CLEAN-05
 **Success Criteria** (what must be TRUE):
-  1. Go files with single-line `import "pkg"` and grouped `import (...)` blocks have their imported packages extracted and intra-project paths resolved to filesystem paths using the module name from `go.mod`
-  2. Ruby files have `require` and `require_relative` calls extracted, with `require_relative` paths and local `require` paths resolved to `.rb` files in the project tree
-  3. Go and Ruby files appear in dependency graphs with correct dependent/dependency relationships, and their importance scores reflect how many other files import them
-**Plans:** 2/2 plans complete
-Plans:
-- [ ] 12-01-PLAN.md — Go import parsing (regex extraction, go.mod resolution, importance scoring, tests)
-- [ ] 12-02-PLAN.md — Ruby import parsing (require/require_relative resolution, .rb probing, importance scoring, tests)
+  1. A fresh FileScopeMCP instance startup on an existing .filescope.db that contains llm_jobs or llm_runtime_state tables produces a DB without those tables — the migration runs automatically on init
+  2. Importing coordinator.ts, cascade-engine.ts, or repository.ts in a TypeScript build produces no references to insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState, or isExhausted
+  3. The files src/llm/pipeline.ts and src/llm/rate-limiter.ts do not exist in the repository; all existing tests pass with no import errors
+**Plans**: TBD
 
-### Phase 13: Streaming Directory Scan
-**Goal**: Large codebases scan without loading all file nodes into memory at once — the directory scanner yields one FileNode at a time using an async generator
-**Depends on**: Phase 12
-**Requirements**: PERF-02
+### Phase 19: Observability
+**Goal**: Operators can query the broker's current state and token usage history through the existing get_llm_status MCP tool, which now reports broker-mode details including connection status, queue depth, active job, and lifetime per-repo token totals
+**Depends on**: Phase 18
+**Requirements**: OBS-01, OBS-02
 **Success Criteria** (what must be TRUE):
-  1. Projects with 10,000+ files complete an initial scan without exhausting process memory, measured by peak RSS not growing proportionally with file count
-  2. The streamed scan produces an identical file tree and dependency graph to the previous eager scan for the same project directory
-  3. `.filescopeignore` exclusion remains a pre-recursion gate in the streaming scan — excluded directories are never entered by the async generator
-**Plans:** 2/2 plans complete
-Plans:
-- [ ] 13-01-PLAN.md — Convert scanDirectory to async generator with opendir, add collectStream test helper
-- [ ] 13-02-PLAN.md — Coordinator two-pass integration (stream-to-SQLite, dependency extraction, importance calculation)
-
-### Phase 14: mtime-Based Lazy Validation
-**Goal**: The 30-second polling integrity sweep is eliminated — file freshness is validated on demand when MCP tools access file data, with a startup-only full sweep for new/deleted file detection
-**Depends on**: Phase 13
-**Requirements**: PERF-03
-**Success Criteria** (what must be TRUE):
-  1. No `setInterval` integrity sweep timer runs after startup — file freshness is checked only at startup (full sweep) and on MCP tool access (per-file mtime comparison)
-  2. When an MCP tool accesses a file whose mtime differs from the stored value, the response includes a `stale: true` indicator and the file is queued for re-analysis
-  3. Disk I/O on large projects (1,000+ tracked files) drops measurably after startup — no background stat-polling of all files every 30 seconds
-**Plans:** 1/1 plans complete
-Plans:
-- [ ] 14-01-PLAN.md — Remove polling sweep, add startup sweep + per-file checkFileFreshness, wire into MCP handlers
-
-### Phase 15: Cycle Detection
-**Goal**: Users can detect circular dependency groups in their project and query which cycle group any file belongs to, via two new MCP tools backed by an iterative Tarjan's SCC implementation
-**Depends on**: Phase 10
-**Requirements**: CYCL-01, CYCL-02
-**Success Criteria** (what must be TRUE):
-  1. `detect_cycles` MCP tool returns all circular dependency groups in the project, each listing the files that form the cycle
-  2. `get_cycles_for_file` MCP tool returns the cycle group a specific file belongs to, or indicates the file is not part of any cycle
-  3. Cycle detection runs on-demand only (not on every file change) and completes in under 2 seconds on a project with 10,000+ dependency edges
-  4. A project with no circular dependencies returns an empty cycle list from `detect_cycles`
-**Plans:** 2/2 plans complete
-Plans:
-- [ ] 15-01-PLAN.md — Iterative Tarjan's SCC algorithm + batch edge loader (TDD)
-- [ ] 15-02-PLAN.md — Wire detect_cycles and get_cycles_for_file MCP tools
+  1. Calling get_llm_status while connected to a broker returns a response containing: mode "broker", brokerConnected true, the number of pending jobs in the broker queue, the currently processing job's file path (or null), and per-repo lifetime token counts read from ~/.filescope/stats.json
+  2. Calling get_llm_status while the broker is not running returns mode "broker", brokerConnected false, and the last-known per-repo token totals (stale but present); the tool does not error or hang
+**Plans**: TBD
 
 ## Progress
 
@@ -130,9 +109,13 @@ Plans:
 | 7. Fix change_impact Pipeline | v1.0 | 1/1 | Complete | 2026-03-18 |
 | 8. Integration Fixes | v1.0 | 2/2 | Complete | 2026-03-19 |
 | 9. Verification Documentation | v1.0 | 2/2 | Complete | 2026-03-19 |
-| 10. Code Quality and Bug Fixes | 2/2 | Complete    | 2026-03-19 | - |
-| 11. .filescopeignore Support | 2/2 | Complete    | 2026-03-19 | - |
-| 12. Go and Ruby Language Support | 2/2 | Complete    | 2026-03-19 | - |
-| 13. Streaming Directory Scan | 2/2 | Complete    | 2026-03-20 | - |
-| 14. mtime-Based Lazy Validation | 1/1 | Complete    | 2026-03-20 | - |
-| 15. Cycle Detection | 2/2 | Complete    | 2026-03-20 | - |
+| 10. Code Quality and Bug Fixes | v1.1 | 2/2 | Complete | 2026-03-19 |
+| 11. .filescopeignore Support | v1.1 | 2/2 | Complete | 2026-03-19 |
+| 12. Go and Ruby Language Support | v1.1 | 2/2 | Complete | 2026-03-19 |
+| 13. Streaming Directory Scan | v1.1 | 2/2 | Complete | 2026-03-20 |
+| 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
+| 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
+| 16. Broker Core | v1.2 | 0/2 | Not started | - |
+| 17. Instance Client + Pipeline Wiring | v1.2 | 0/TBD | Not started | - |
+| 18. Cleanup | v1.2 | 0/TBD | Not started | - |
+| 19. Observability | v1.2 | 0/TBD | Not started | - |
