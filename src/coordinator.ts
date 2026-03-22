@@ -17,12 +17,11 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, getFile, upsertFile, loadLlmRuntimeState, saveLlmRuntimeState, getDependencies, setDependencies, purgeRecordsOutsideRoot } from './db/repository.js';
+import { getAllFiles, getFile, upsertFile, getDependencies, setDependencies, purgeRecordsOutsideRoot } from './db/repository.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
-import { LLMPipeline } from './llm/pipeline.js';
-import type { LLMConfig } from './llm/types.js';
+import { connect as brokerConnect, disconnect as brokerDisconnect, isConnected as brokerIsConnected } from './broker/client.js';
 
 // Module-private async mutex to serialize all tree mutations.
 // Both the file-watcher callback and the integrity sweep mutate the SQLite state;
@@ -64,7 +63,6 @@ export class ServerCoordinator {
   private _initialized = false;
   private _projectRoot: string | null = null;
   private changeDetector: ChangeDetector | null = null;
-  private llmPipeline: LLMPipeline | null = null;
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -127,56 +125,50 @@ export class ServerCoordinator {
   }
 
   /**
-   * Toggle LLM pipeline on/off at runtime (called by toggle_llm MCP tool).
+   * Toggle broker connection on/off at runtime (called by toggle_llm MCP tool).
    * Does not persist the config change — caller is responsible for saving config.
    */
-  toggleLlm(enabled: boolean): void {
-    if (enabled && !this.isLlmRunning()) {
-      const config = getConfig();
-      if (config?.llm) {
-        this.startLlmPipeline(config.llm);
-      } else {
-        log('toggleLlm: enabled=true but no llm config found');
-      }
-    } else if (!enabled && this.isLlmRunning()) {
-      this.stopLlmPipeline();
+  async toggleLlm(enabled: boolean): Promise<void> {
+    if (enabled && !brokerIsConnected()) {
+      await this.connectBroker();
+    } else if (!enabled && brokerIsConnected()) {
+      this.disconnectBroker();
     }
   }
 
   /**
-   * Returns true if the LLM pipeline is currently running.
+   * Returns true if the broker client is currently connected.
    */
   isLlmRunning(): boolean {
-    return this.llmPipeline?.isRunning() ?? false;
+    return brokerIsConnected();
   }
 
   /**
-   * Returns true if the LLM lifetime token budget has been exhausted.
-   * Used as a circuit breaker to prevent new jobs from being inserted.
+   * Budget is a broker concern now — always returns false for Phase 17.
    */
   isLlmBudgetExhausted(): boolean {
-    return this.llmPipeline?.getBudgetGuard().isExhausted() ?? false;
+    return false; // Budget is a broker concern now — always returns false for Phase 17
   }
 
   /**
-   * Returns the total number of tokens consumed across the lifetime of the pipeline.
+   * Phase 19 will report from broker stats.
    */
   getLlmLifetimeTokensUsed(): number {
-    return this.llmPipeline?.getBudgetGuard().getLifetimeTokensUsed() ?? 0;
+    return 0; // Phase 19 will report from broker stats
   }
 
   /**
-   * Returns the configured lifetime token budget (0 = unlimited).
+   * Budget is a broker concern now.
    */
   getLlmTokenBudget(): number {
-    return getConfig()?.llm?.tokenBudget ?? 0;
+    return 0; // Budget is a broker concern now
   }
 
   /**
-   * Returns the configured per-minute token rate limit (default 40000).
+   * Rate limiting is a broker concern now.
    */
   getLlmMaxTokensPerMinute(): number {
-    return getConfig()?.llm?.maxTokensPerMinute ?? 40_000;
+    return 0; // Rate limiting is a broker concern now
   }
 
   /**
@@ -256,10 +248,10 @@ export class ServerCoordinator {
 
       this._initialized = true;
 
-      // Start LLM pipeline if configured and enabled (non-blocking)
+      // Connect to broker if LLM enabled (non-blocking)
       const appConfig = getConfig();
       if (appConfig?.llm?.enabled) {
-        this.startLlmPipeline(appConfig.llm);
+        await this.connectBroker();
       }
 
       return this._okResponse(`Project path set to ${projectRoot}. File tree built and saved to SQLite.`);
@@ -319,8 +311,8 @@ export class ServerCoordinator {
     // Drain the mutex (wait for any in-flight mutations to complete)
     await this.treeMutex.run(async () => {});
 
-    // Stop LLM pipeline before closing DB (pipeline persists budget state)
-    this.stopLlmPipeline();
+    // Disconnect broker client before closing DB
+    this.disconnectBroker();
 
     // Close the database
     closeDatabase();
@@ -338,33 +330,26 @@ export class ServerCoordinator {
   }
 
   // ---------------------------------------------------------------------------
-  // Private methods
+  // Broker lifecycle (public — called by mcp-server.ts toggle_llm)
   // ---------------------------------------------------------------------------
 
-  private startLlmPipeline(llmConfig: LLMConfig): void {
-    this.llmPipeline = new LLMPipeline(llmConfig);
-    // Restore persisted lifetime token usage
-    const savedTokens = loadLlmRuntimeState('lifetime_tokens_used');
-    if (savedTokens !== null) {
-      const parsed = parseInt(savedTokens, 10);
-      if (!isNaN(parsed)) {
-        this.llmPipeline.getBudgetGuard().setLifetimeTokensUsed(parsed);
-        log(`LLM pipeline: restored ${parsed} lifetime tokens from persistent state`);
-      }
+  async connectBroker(): Promise<void> {
+    if (!this._projectRoot) {
+      log('[Coordinator] Cannot connect to broker: no project root');
+      return;
     }
-    this.llmPipeline.start();
-    log('LLM pipeline started');
+    await brokerConnect(this._projectRoot);
+    log('[Coordinator] Broker client connected');
   }
 
-  private stopLlmPipeline(): void {
-    if (this.llmPipeline === null) return;
-    // Persist budget state before stopping
-    const lifetimeTokens = this.llmPipeline.getBudgetGuard().getLifetimeTokensUsed();
-    saveLlmRuntimeState('lifetime_tokens_used', String(lifetimeTokens));
-    this.llmPipeline.stop();
-    this.llmPipeline = null;
-    log('LLM pipeline stopped');
+  disconnectBroker(): void {
+    brokerDisconnect();
+    log('[Coordinator] Broker client disconnected');
   }
+
+  // ---------------------------------------------------------------------------
+  // Private methods
+  // ---------------------------------------------------------------------------
 
   private _okResponse(text: string): ToolResponse {
     return { content: [{ type: 'text', text }] };
@@ -524,10 +509,10 @@ export class ServerCoordinator {
                       changeType: changeSummary.changeType,
                       changedFilePath: filePath,
                     };
-                    cascadeStale(filePath, { timestamp: Date.now(), changeContext, isExhausted: () => this.isLlmBudgetExhausted() });
+                    cascadeStale(filePath, { timestamp: Date.now(), changeContext, isExhausted: () => false });
                   } else {
                     // Body-only change — mark only this file's summary and concepts stale
-                    markSelfStale(filePath, { timestamp: Date.now(), isExhausted: () => this.isLlmBudgetExhausted() });
+                    markSelfStale(filePath, { timestamp: Date.now(), isExhausted: () => false });
                   }
                 }
               }
@@ -537,7 +522,7 @@ export class ServerCoordinator {
               if (fileWatchingConfig.watchForDeleted) {
                 // Cascade BEFORE removeFileNode: dependency edges must still exist
                 // so getDependents() can find all dependents of the deleted file.
-                cascadeStale(filePath, { timestamp: Date.now(), isExhausted: () => this.isLlmBudgetExhausted() });
+                cascadeStale(filePath, { timestamp: Date.now(), isExhausted: () => false });
                 log(`[Coordinator] Calling removeFileNode for ${filePath}`);
                 await removeFileNode(filePath, tempTree, projectRoot);
               }
@@ -606,7 +591,7 @@ export class ServerCoordinator {
       // Queue LLM re-analysis for the stale file
       markSelfStale(filePath, {
         timestamp: Date.now(),
-        isExhausted: () => this.isLlmBudgetExhausted()
+        isExhausted: () => false
       });
 
       log(`[LazyMtime] Stale file detected: ${filePath}`);

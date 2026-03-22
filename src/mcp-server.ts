@@ -628,38 +628,28 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     });
   });
 
-  server.tool("toggle_llm", "Enable or disable the background LLM processing pipeline", {
-    enabled: z.boolean().describe("true to start LLM pipeline, false to stop it"),
+  server.tool("toggle_llm", "Enable or disable broker LLM processing", {
+    enabled: z.boolean().describe("true to connect to broker, false to disconnect"),
   }, async ({ enabled }) => {
     if (!coordinator.isInitialized()) {
       return { content: [{ type: "text", text: "Error: Project not initialized. Call set_project_path first." }], isError: true };
     }
     try {
       const config = getConfig();
-      if (enabled && (!config?.llm)) {
-        // Synthesize default local-first config BEFORE calling coordinator
-        // Per locked decision: openai-compatible (Ollama), qwen2.5-coder:14b, localhost:11434
-        const defaultLlmConfig = {
-          enabled: true,
-          provider: 'openai-compatible' as const,
-          model: 'qwen2.5-coder:14b',
-          baseURL: 'http://localhost:11434/v1',
-        };
-        if (config) {
-          config.llm = defaultLlmConfig;
-          setConfig(config);
-          await saveConfig(config);
-        }
-      } else if (config?.llm) {
+      if (config) {
+        if (!config.llm) config.llm = {};
         config.llm.enabled = enabled;
         setConfig(config);
         await saveConfig(config);
       }
-      // NOW call toggleLlm — getConfig()?.llm is guaranteed to be set
-      coordinator.toggleLlm(enabled);
-      return { content: [{ type: "text", text: `LLM pipeline ${enabled ? 'started' : 'stopped'}. Setting persisted to config.` }] };
+      if (enabled) {
+        await coordinator.connectBroker();
+      } else {
+        coordinator.disconnectBroker();
+      }
+      return { content: [{ type: "text", text: `Broker LLM ${enabled ? 'connected' : 'disconnected'}. Setting persisted to config.` }] };
     } catch (err) {
-      return { content: [{ type: "text", text: `Error toggling LLM: ${err}` }], isError: true };
+      return { content: [{ type: "text", text: `Error toggling broker: ${err}` }], isError: true };
     }
   });
 
