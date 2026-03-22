@@ -77,8 +77,8 @@ Plans:
   5. toggle_llm MCP tool connects to or disconnects from the broker at runtime — calling it twice toggles the instance back to its original state
 **Plans:** 2/2 plans complete
 Plans:
-- [ ] 17-01-PLAN.md — Broker client module and config simplification
-- [ ] 17-02-PLAN.md — Wire callers, coordinator lifecycle, toggle_llm, esbuild
+- [x] 17-01-PLAN.md — Broker client module and config simplification
+- [x] 17-02-PLAN.md — Wire callers, coordinator lifecycle, toggle_llm, esbuild
 
 ### Phase 18: Cleanup
 **Goal**: All legacy local job queue infrastructure is gone — no llm_jobs or llm_runtime_state tables, no pipeline.ts polling loop, no TokenBudgetGuard gating, no dead job CRUD functions, no isExhausted parameter threading
@@ -88,7 +88,10 @@ Plans:
   1. A fresh FileScopeMCP instance startup on an existing .filescope.db that contains llm_jobs or llm_runtime_state tables produces a DB without those tables — the migration runs automatically on init
   2. Importing coordinator.ts, cascade-engine.ts, or repository.ts in a TypeScript build produces no references to insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState, or isExhausted
   3. The files src/llm/pipeline.ts and src/llm/rate-limiter.ts do not exist in the repository; all existing tests pass with no import errors
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 18-01-PLAN.md — DB migration, schema cleanup, dead module deletion, repository surgery, test fixes
+- [ ] 18-02-PLAN.md — isExhausted parameter removal, comment cleanup, final verification
 
 ### Phase 19: Observability
 **Goal**: Operators can query the broker's current state and token usage history through the existing get_llm_status MCP tool, which now reports broker-mode details including connection status, queue depth, active job, and lifetime per-repo token totals
@@ -119,6 +122,6 @@ Plans:
 | 14. mtime-Based Lazy Validation | v1.1 | 1/1 | Complete | 2026-03-20 |
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 17. Instance Client + Pipeline Wiring | 2/2 | Complete   | 2026-03-22 | - |
-| 18. Cleanup | v1.2 | 0/TBD | Not started | - |
+| 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
+| 18. Cleanup | v1.2 | 0/2 | Not started | - |
 | 19. Observability | v1.2 | 0/TBD | Not started | - |
