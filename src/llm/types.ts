@@ -6,32 +6,18 @@ import { z } from 'zod';
 // ─── LLM Configuration ────────────────────────────────────────────────────────
 
 /**
- * LLM provider configuration. Stored in the top-level config file under `llm`.
+ * LLM instance configuration. Stored in the top-level config file under `llm`.
+ * Model and provider config has moved to ~/.filescope/broker.json.
  */
 export interface LLMConfig {
-  enabled: boolean;
-  provider: 'anthropic' | 'openai-compatible';
-  model: string;
-  baseURL?: string;          // Required for openai-compatible; optional for anthropic proxy
-  apiKey?: string;           // Overrides ANTHROPIC_API_KEY / provider env var
-  maxTokensPerCall?: number; // Per-call token cap (default: 1024)
-  maxTokensPerMinute?: number; // Sliding-window RPM guard (default: 40000)
-  tokenBudget?: number;      // Lifetime token cap; undefined = unlimited
+  enabled?: boolean;
 }
 
 /**
  * Zod schema for LLMConfig — used in config-utils.ts ConfigSchema.
- * All fields have safe defaults so a minimal { enabled: true } works.
  */
 export const LLMConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  provider: z.enum(['anthropic', 'openai-compatible']).default('anthropic'),
-  model: z.string().default('claude-3-haiku-20240307'),
-  baseURL: z.string().optional(),
-  apiKey: z.string().optional(),
-  maxTokensPerCall: z.number().int().positive().optional(),
-  maxTokensPerMinute: z.number().int().positive().optional(),
-  tokenBudget: z.number().int().positive().optional(),
+  enabled: z.boolean().optional(),
 }).optional();
 
 // ─── Structured output schemas ─────────────────────────────────────────────────
