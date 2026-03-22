@@ -144,13 +144,6 @@ export class ServerCoordinator {
   }
 
   /**
-   * Budget is a broker concern now — always returns false for Phase 17.
-   */
-  isLlmBudgetExhausted(): boolean {
-    return false; // Budget is a broker concern now — always returns false for Phase 17
-  }
-
-  /**
    * Phase 19 will report from broker stats.
    */
   getLlmLifetimeTokensUsed(): number {
@@ -509,10 +502,10 @@ export class ServerCoordinator {
                       changeType: changeSummary.changeType,
                       changedFilePath: filePath,
                     };
-                    cascadeStale(filePath, { timestamp: Date.now(), changeContext, isExhausted: () => false });
+                    cascadeStale(filePath, { timestamp: Date.now(), changeContext });
                   } else {
                     // Body-only change — mark only this file's summary and concepts stale
-                    markSelfStale(filePath, { timestamp: Date.now(), isExhausted: () => false });
+                    markSelfStale(filePath, { timestamp: Date.now() });
                   }
                 }
               }
@@ -522,7 +515,7 @@ export class ServerCoordinator {
               if (fileWatchingConfig.watchForDeleted) {
                 // Cascade BEFORE removeFileNode: dependency edges must still exist
                 // so getDependents() can find all dependents of the deleted file.
-                cascadeStale(filePath, { timestamp: Date.now(), isExhausted: () => false });
+                cascadeStale(filePath, { timestamp: Date.now() });
                 log(`[Coordinator] Calling removeFileNode for ${filePath}`);
                 await removeFileNode(filePath, tempTree, projectRoot);
               }
@@ -589,10 +582,7 @@ export class ServerCoordinator {
       upsertFile(node);
 
       // Queue LLM re-analysis for the stale file
-      markSelfStale(filePath, {
-        timestamp: Date.now(),
-        isExhausted: () => false
-      });
+      markSelfStale(filePath, { timestamp: Date.now() });
 
       log(`[LazyMtime] Stale file detected: ${filePath}`);
       return true;

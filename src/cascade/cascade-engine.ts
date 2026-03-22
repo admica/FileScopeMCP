@@ -71,9 +71,9 @@ function buildDependentPayload(changeContext: ChangeContext, dependentFilePath: 
  */
 export function cascadeStale(
   changedFilePath: string,
-  opts: { timestamp: number; changeContext?: ChangeContext; isExhausted?: () => boolean }
+  opts: { timestamp: number; changeContext?: ChangeContext }
 ): void {
-  const { timestamp, changeContext, isExhausted } = opts;
+  const { timestamp, changeContext } = opts;
   const visited = new Set<string>();
   const queue: Array<[string, number]> = [[changedFilePath, 0]];
   visited.add(changedFilePath);
@@ -136,8 +136,8 @@ export function cascadeStale(
  * Body-only changes don't affect the change impact assessment of the file.
  * Queues 2 LLM jobs: summary and concepts at priority tier 2.
  */
-export function markSelfStale(filePath: string, opts: { timestamp: number; isExhausted?: () => boolean }): void {
-  const { timestamp, isExhausted } = opts;
+export function markSelfStale(filePath: string, opts: { timestamp: number }): void {
+  const { timestamp } = opts;
   const sqlite = getSqlite();
   sqlite
     .prepare(

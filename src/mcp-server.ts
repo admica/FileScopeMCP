@@ -658,7 +658,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     return createMcpResponse({
       enabled: coordinator.isLlmRunning(),
       running: coordinator.isLlmRunning(),
-      budgetExhausted: coordinator.isLlmBudgetExhausted(),
+      budgetExhausted: false,
       lifetimeTokensUsed: coordinator.getLlmLifetimeTokensUsed(),
       tokenBudget: coordinator.getLlmTokenBudget(),
       maxTokensPerMinute: coordinator.getLlmMaxTokensPerMinute(),

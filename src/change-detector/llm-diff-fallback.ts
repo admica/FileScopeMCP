@@ -8,7 +8,7 @@ import { submitJob } from '../broker/client.js';
 import { log } from '../logger.js';
 import type { SemanticChangeSummary } from './types.js';
 
-// ~16KB diff limit — prevents oversized payloads in the llm_jobs table.
+// ~16KB diff limit — prevents oversized payloads sent to the LLM broker.
 // Calculated as MAX_DIFF_TOKENS * ~4 bytes/token with GPT-4 token estimates.
 const MAX_DIFF_BYTES = 16 * 1024; // 16 384 bytes
 
@@ -17,7 +17,7 @@ const MAX_DIFF_BYTES = 16 * 1024; // 16 384 bytes
  * via tree-sitter (e.g., Go, Rust, Python).
  *
  * - Truncates the diff at MAX_DIFF_BYTES with a "[truncated]" suffix
- * - Inserts a row into llm_jobs (job_type='change_impact', priority_tier=2)
+ * - Submits a change_impact job to the broker via submitJob
  * - Returns a conservative SemanticChangeSummary immediately (no await)
  *
  * The job is intentionally fire-and-forget here — Phase 5 will pick it up
