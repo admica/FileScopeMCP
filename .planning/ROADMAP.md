@@ -46,7 +46,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
 - [x] **Phase 16: Broker Core** — Standalone broker process: Unix socket server, in-memory priority queue, sequential Ollama worker, PID guard, graceful shutdown, and esbuild entry point (completed 2026-03-22)
 - [x] **Phase 17: Instance Client + Pipeline Wiring** — broker-client.ts with submitJob() as unified LLM entry point, config migration, reconnection, startup resubmission, and coordinator lifecycle wiring (completed 2026-03-22)
 - [x] **Phase 18: Cleanup** — Drop legacy llm_jobs/llm_runtime_state tables, delete pipeline.ts and rate-limiter.ts, remove dead job CRUD from repository.ts, and strip isExhausted threading (completed 2026-03-22)
-- [ ] **Phase 19: Observability** — Update get_llm_status to report broker connection state, queue depth, in-progress job, and per-repo token totals from ~/.filescope/stats.json
+- [x] **Phase 19: Observability** — Update get_llm_status to report broker connection state, queue depth, in-progress job, and per-repo token totals from ~/.filescope/stats.json (completed 2026-03-23)
 
 ## Phase Details
 
@@ -100,7 +100,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Calling get_llm_status while connected to a broker returns a response containing: mode "broker", brokerConnected true, the number of pending jobs in the broker queue, the currently processing job's file path (or null), and per-repo lifetime token counts read from ~/.filescope/stats.json
   2. Calling get_llm_status while the broker is not running returns mode "broker", brokerConnected false, and the last-known per-repo token totals (stale but present); the tool does not error or hang
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 19-01-PLAN.md — Broker-side stats persistence and StatusResponse enrichment
 - [ ] 19-02-PLAN.md — Client requestStatus(), coordinator getBrokerStatus(), MCP tool update
@@ -127,4 +127,4 @@ Plans:
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 19. Observability | 1/2 | In Progress|  | - |
+| 19. Observability | 2/2 | Complete   | 2026-03-23 | - |

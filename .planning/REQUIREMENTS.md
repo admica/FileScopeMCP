@@ -50,7 +50,7 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 
 ### Observability
 
-- [ ] **OBS-01**: get_llm_status MCP tool reports broker connection status, queue depth, and per-repo token totals
+- [x] **OBS-01**: get_llm_status MCP tool reports broker connection status, queue depth, and per-repo token totals
 - [x] **OBS-02**: Broker responds to status requests with pending count, in-progress job, connected client count, and per-repo breakdown
 
 ## Future Requirements
@@ -121,7 +121,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLEAN-03 | Phase 18 | Complete |
 | CLEAN-04 | Phase 18 | Complete |
 | CLEAN-05 | Phase 18 | Complete |
-| OBS-01 | Phase 19 | Pending |
+| OBS-01 | Phase 19 | Complete |
 | OBS-02 | Phase 19 | Complete |
 
 **Coverage:**

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: LLM Broker
 status: unknown
-stopped_at: Completed 19-01-PLAN.md
-last_updated: "2026-03-23T01:58:37.890Z"
+stopped_at: Completed 19-02-PLAN.md
+last_updated: "2026-03-23T02:04:37.777Z"
 last_activity: 2026-03-23
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -49,6 +49,7 @@ Plan: 1 of 2
 | Phase 18-cleanup P01 | 45 | 2 tasks | 11 files |
 | Phase 18-cleanup P02 | 2 | 1 tasks | 4 files |
 | Phase 19-observability P01 | 3 | 2 tasks | 4 files |
+| Phase 19-observability P02 | 220 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Key v1.2 architectural decisions (logged in PROJECT.md Key Decisions table):
 - [Phase 19-observability]: accumulateTokens returns updated BrokerStats so caller avoids second readStats call
 - [Phase 19-observability]: Token accumulation before connection-destroyed check ensures stats are always recorded even when result discarded
 - [Phase 19-observability]: Status response uses spread { ...this.repoTokens } for snapshot copy, not live reference
+- [Phase 19-observability]: requestStatus timer.unref() prevents in-flight status queries from blocking process exit
+- [Phase 19-observability]: getBrokerStatus uses shared readStats fallback for both disconnected and timeout cases
 
 ### Pending Todos
 
@@ -92,5 +95,5 @@ None.
 ## Session Continuity
 
 Last activity: 2026-03-23
-Stopped at: Completed 19-01-PLAN.md
+Stopped at: Completed 19-02-PLAN.md
 Resume file: None
