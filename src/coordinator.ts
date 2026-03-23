@@ -21,7 +21,8 @@ import { getAllFiles, getFile, upsertFile, getDependencies, setDependencies, pur
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
-import { connect as brokerConnect, disconnect as brokerDisconnect, isConnected as brokerIsConnected } from './broker/client.js';
+import { connect as brokerConnect, disconnect as brokerDisconnect, isConnected as brokerIsConnected, requestStatus } from './broker/client.js';
+import { readStats } from './broker/stats.js';
 
 // Module-private async mutex to serialize all tree mutations.
 // Both the file-watcher callback and the integrity sweep mutate the SQLite state;
@@ -144,24 +145,52 @@ export class ServerCoordinator {
   }
 
   /**
-   * Phase 19 will report from broker stats.
+   * Returns current broker status for the get_llm_status MCP tool.
+   * Connected: queries broker for live data.
+   * Disconnected: reads last-known stats from ~/.filescope/stats.json.
    */
-  getLlmLifetimeTokensUsed(): number {
-    return 0; // Phase 19 will report from broker stats
-  }
+  async getBrokerStatus(): Promise<{
+    mode: 'broker';
+    brokerConnected: boolean;
+    pendingCount: number | null;
+    inProgressJob: { repoPath: string; filePath: string; jobType: string } | null;
+    connectedClients: number | null;
+    repoTokens: Record<string, number>;
+  }> {
+    if (!brokerIsConnected()) {
+      const stats = readStats();
+      return {
+        mode: 'broker',
+        brokerConnected: false,
+        pendingCount: null,
+        inProgressJob: null,
+        connectedClients: null,
+        repoTokens: stats.repoTokens,
+      };
+    }
 
-  /**
-   * Budget is a broker concern now.
-   */
-  getLlmTokenBudget(): number {
-    return 0; // Budget is a broker concern now
-  }
+    const status = await requestStatus();
+    if (!status) {
+      // Timeout or socket error during request — fall back to disk stats
+      const stats = readStats();
+      return {
+        mode: 'broker',
+        brokerConnected: true,
+        pendingCount: null,
+        inProgressJob: null,
+        connectedClients: null,
+        repoTokens: stats.repoTokens,
+      };
+    }
 
-  /**
-   * Rate limiting is a broker concern now.
-   */
-  getLlmMaxTokensPerMinute(): number {
-    return 0; // Rate limiting is a broker concern now
+    return {
+      mode: 'broker',
+      brokerConnected: true,
+      pendingCount: status.pendingCount,
+      inProgressJob: status.inProgressJob,
+      connectedClients: status.connectedClients,
+      repoTokens: status.repoTokens,
+    };
   }
 
   /**

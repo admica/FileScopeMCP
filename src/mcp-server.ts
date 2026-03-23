@@ -653,16 +653,10 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     }
   });
 
-  server.tool("get_llm_status", "Get LLM pipeline status including budget and rate limit info", {}, async () => {
+  server.tool("get_llm_status", "Get broker connection status, queue depth, and per-repo token usage", {}, async () => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
-    return createMcpResponse({
-      enabled: coordinator.isLlmRunning(),
-      running: coordinator.isLlmRunning(),
-      budgetExhausted: false,
-      lifetimeTokensUsed: coordinator.getLlmLifetimeTokensUsed(),
-      tokenBudget: coordinator.getLlmTokenBudget(),
-      maxTokensPerMinute: coordinator.getLlmMaxTokensPerMinute(),
-    });
+    const status = await coordinator.getBrokerStatus();
+    return createMcpResponse(status);
   });
 
   server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {
