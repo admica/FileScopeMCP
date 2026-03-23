@@ -1,7 +1,7 @@
 // src/broker/client.ts
 // Broker client module for FileScopeMCP instances.
 // Manages the connection lifecycle to the shared LLM broker over a Unix domain socket.
-// Exports: connect, disconnect, submitJob, isConnected
+// Exports: connect, disconnect, submitJob, isConnected, requestStatus
 import * as net from 'node:net';
 import * as readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
 import { SOCK_PATH } from './config.js';
-import type { SubmitMessage, BrokerMessage } from './types.js';
+import type { SubmitMessage, StatusMessage, StatusResponse, BrokerMessage } from './types.js';
 import { writeLlmResult, clearStaleness } from '../db/repository.js';
 import { getSqlite } from '../db/db.js';
 import { log } from '../logger.js';
@@ -21,6 +21,8 @@ let socket: net.Socket | null = null;
 let reconnectTimer: ReturnType<typeof setInterval> | null = null;
 let repoPath: string = '';
 let _intentionalDisconnect: boolean = false;
+
+const pendingStatusRequests = new Map<string, (r: StatusResponse | null) => void>();
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -81,6 +83,32 @@ export function submitJob(
   socket!.write(JSON.stringify(msg) + '\n');
 }
 
+/**
+ * Request current broker status. Returns null if not connected or if the
+ * request times out (2 seconds). Fire-and-forget — does not throw.
+ */
+export function requestStatus(timeoutMs = 2000): Promise<StatusResponse | null> {
+  if (!isConnected()) return Promise.resolve(null);
+
+  return new Promise<StatusResponse | null>((resolve) => {
+    const id = randomUUID();
+    const timer = setTimeout(() => {
+      pendingStatusRequests.delete(id);
+      resolve(null);
+    }, timeoutMs);
+    timer.unref();
+
+    pendingStatusRequests.set(id, (response) => {
+      clearTimeout(timer);
+      pendingStatusRequests.delete(id);
+      resolve(response);
+    });
+
+    const msg: StatusMessage = { type: 'status', id };
+    socket!.write(JSON.stringify(msg) + '\n');
+  });
+}
+
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -133,6 +161,11 @@ function attemptConnect(): Promise<void> {
 
     sock.on('close', () => {
       socket = null;
+      // Clean up any pending status requests — they'll never get a response
+      for (const resolve of pendingStatusRequests.values()) {
+        resolve(null);
+      }
+      pendingStatusRequests.clear();
       if (!_intentionalDisconnect) {
         log('[broker-client] Disconnected — reconnecting in 10s');
         startReconnectTimer();
@@ -171,6 +204,9 @@ function handleBrokerMessage(msg: BrokerMessage): void {
   } else if (msg.type === 'error') {
     log(`[broker-client] Broker error [${msg.code}]: ${msg.message}${msg.filePath ? ` (${msg.filePath})` : ''}`);
     // File stays stale — will be resubmitted on next reconnect
+  } else if (msg.type === 'status_response') {
+    const resolver = pendingStatusRequests.get(msg.id);
+    if (resolver) resolver(msg);
   }
 }
 
