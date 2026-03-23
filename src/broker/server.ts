@@ -9,6 +9,7 @@ import * as readline from 'node:readline';
 import { log } from '../logger.js';
 import type { BrokerConfig } from './config.js';
 import { SOCK_PATH } from './config.js';
+import { readStats, accumulateTokens } from './stats.js';
 import { PriorityQueue } from './queue.js';
 import { BrokerWorker } from './worker.js';
 import type {
@@ -28,6 +29,7 @@ export class BrokerServer {
   private readonly worker: BrokerWorker;
   private readonly config: BrokerConfig;
   private readonly connections: Set<net.Socket> = new Set();
+  private repoTokens: Record<string, number> = {};
 
   constructor(config: BrokerConfig) {
     this.config = config;
@@ -39,6 +41,7 @@ export class BrokerServer {
       (job, code, message) => this.handleJobError(job, code, message),
     );
     this.server = net.createServer((socket) => this.handleConnection(socket));
+    this.repoTokens = readStats().repoTokens;
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -196,6 +199,7 @@ export class BrokerServer {
         ? { repoPath: currentJob.repoPath, filePath: currentJob.filePath, jobType: currentJob.jobType }
         : null,
       connectedClients: this.connections.size,
+      repoTokens: { ...this.repoTokens },
     };
     this.send(socket, response);
   }
@@ -203,6 +207,10 @@ export class BrokerServer {
   // ─── Private: worker callbacks ────────────────────────────────────────────
 
   private handleJobComplete(job: QueueJob, result: JobResult): void {
+    // Accumulate token stats regardless of connection state
+    const updated = accumulateTokens(job.repoPath, result.totalTokens);
+    this.repoTokens = updated.repoTokens;
+
     // Pitfall 3: check if connection is still alive before writing
     if (job.connection.destroyed) {
       log(`Job ${job.id} completed but client disconnected — discarding result`);
