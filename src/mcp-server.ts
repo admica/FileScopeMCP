@@ -3,25 +3,19 @@ import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ReadBuffer, deserializeMessage, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import { z } from "zod";
-import * as fs from "fs/promises";
 import * as path from "path";
 import {
-  FileNode,
   ToolResponse,
   FileTreeConfig,
-  FileWatchingConfig
 } from "./types.js";
-import { normalizePath, canonicalizePath, buildDependentMap, calculateImportance, excludeAndRemoveFile } from "./file-utils.js";
-import * as fsSync from "fs";
-import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
-import { loadConfig, saveConfig } from './config-utils.js';
+import { normalizePath, excludeAndRemoveFile } from "./file-utils.js";
+import { setConfig, getConfig } from './global-state.js';
+import { saveConfig } from './config-utils.js';
 import { log, enableFileLogging, enableDaemonFileLogging } from './logger.js';
 import {
   getFile,
   upsertFile,
-  deleteFile as dbDeleteFile,
   getAllFiles,
-  setDependencies,
   getDependencies,
   getDependents,
   getStaleness,
@@ -146,16 +140,6 @@ function createMcpResponse(content: any, isError = false): ToolResponse {
   };
 }
 
-// Read the content of a file
-async function readFileContent(filePath: string): Promise<string> {
-  try {
-    return await fs.readFile(filePath, 'utf-8');
-  } catch (error) {
-    log(`Failed to read file ${filePath}: ` + error);
-    throw error;
-  }
-}
-
 // Server implementation
 const serverInfo = {
   name: "FileScopeMCP",
@@ -187,128 +171,10 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     return await coordinator.init(params.path);
   });
 
-  server.tool("list_saved_trees", "List all saved file trees", async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const config = coordinator.getCurrentConfig();
-    const fileCount = getAllFiles().length;
-    return createMcpResponse({
-      message: "SQLite is the single source of truth — one tree per project.",
-      projectRoot: coordinator.getProjectRoot(),
-      filename: config?.filename ?? null,
-      baseDirectory: config?.baseDirectory ?? null,
-      lastUpdated: config?.lastUpdated ?? null,
-      totalFiles: fileCount
-    });
-  });
-
-  server.tool("delete_file_tree", "Delete the current file tree data from SQLite", {
-    confirm: z.boolean().describe("Must be true to confirm deletion")
-  }, async (params: { confirm: boolean }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    if (!params.confirm) {
-      return createMcpResponse("Pass confirm: true to delete all file tree data from SQLite.", true);
-    }
-    try {
-      const sqlite = getSqlite();
-      const fileCount = sqlite.prepare('SELECT COUNT(*) as c FROM files').get() as any;
-      sqlite.exec('DELETE FROM file_dependencies');
-      sqlite.exec('DELETE FROM files');
-      coordinator.setConfig(null as any);
-      return createMcpResponse(`Cleared SQLite: removed ${fileCount.c} file records and all dependency edges. Call set_project_path to rebuild.`);
-    } catch (error) {
-      return createMcpResponse(`Failed to clear SQLite: ` + error, true);
-    }
-  });
-
-  server.tool("create_file_tree", "Re-scan a directory and rebuild the file tree in SQLite", {
-    baseDirectory: z.string().describe("Base directory to scan for files (absolute path or '.' for project root)")
-  }, async (params: { baseDirectory: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-
-    try {
-      let baseDir = params.baseDirectory;
-      if (baseDir === '.' || baseDir === './') {
-        baseDir = coordinator.getProjectRoot()!;
-      } else if (!path.isAbsolute(baseDir)) {
-        baseDir = path.join(coordinator.getProjectRoot()!, baseDir);
-      }
-
-      const result = await coordinator.init(baseDir);
-      return result;
-    } catch (error) {
-      log('Error in create_file_tree: ' + error);
-      return createMcpResponse(`Failed to create file tree: ` + error, true);
-    }
-  });
-
-  server.tool("select_file_tree", "Get the current active file tree configuration", {}, async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const config = coordinator.getCurrentConfig();
-    if (!config) {
-      return createMcpResponse("No active file tree. Call set_project_path to initialize.", true);
-    }
-    const fileCount = getAllFiles().length;
-    return createMcpResponse({
-      message: "Current active file tree (SQLite — one tree per project)",
-      projectRoot: coordinator.getProjectRoot(),
-      baseDirectory: config.baseDirectory,
-      lastUpdated: config.lastUpdated,
-      totalFiles: fileCount
-    });
-  });
-
   server.tool("list_files", "List all files in the project with their importance rankings", async () => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
     // Return the tree reconstructed from DB for backward compat (COMPAT-01)
     return createMcpResponse(coordinator.getFileTree());
-  });
-
-  server.tool("get_file_importance", "Get the importance ranking of a specific file", {
-    filepath: z.string().describe("The path to the file to check")
-  }, async (params: { filepath: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    log('Get file importance called with params: ' + JSON.stringify(params));
-
-    try {
-      const normalizedPath = normalizePath(params.filepath);
-      log('Normalized path: ' + normalizedPath);
-
-      // Use repository for direct DB lookup
-      const node = getFile(normalizedPath);
-      log('Found node from DB: ' + JSON.stringify(node ? {
-        path: node.path,
-        importance: node.importance,
-        dependencies: node.dependencies?.length,
-        dependents: node.dependents?.length
-      } : null));
-
-      if (!node) {
-        return createMcpResponse(`File not found: ${params.filepath}`, true);
-      }
-
-      const isStale = coordinator.checkFileFreshness(normalizedPath);
-      const importanceStale = getStaleness(normalizedPath);
-      const llmDataImportance = getSqlite()
-        .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
-        .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
-      return createMcpResponse({
-        path: node.path,
-        ...(isStale && { stale: true }),
-        importance: node.importance || 0,
-        dependencies: node.dependencies || [],
-        dependents: node.dependents || [],
-        packageDependencies: node.packageDependencies || [],
-        summary: node.summary || null,
-        ...(importanceStale.summaryStale !== null && { summaryStale: importanceStale.summaryStale }),
-        ...(importanceStale.conceptsStale !== null && { conceptsStale: importanceStale.conceptsStale }),
-        ...(importanceStale.changeImpactStale !== null && { changeImpactStale: importanceStale.changeImpactStale }),
-        concepts: llmDataImportance?.concepts ? JSON.parse(llmDataImportance.concepts) : null,
-        changeImpact: llmDataImportance?.change_impact ? JSON.parse(llmDataImportance.change_impact) : null,
-      });
-    } catch (error) {
-      log('Error in get_file_importance: ' + error);
-      return createMcpResponse(`Failed to get file importance: ` + error, true);
-    }
   });
 
   server.tool("find_important_files", "Find the most important files in the project", {
@@ -345,7 +211,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     return createMcpResponse(importantFiles);
   });
 
-  server.tool("get_file_summary", "Get the summary of a specific file", {
+  server.tool("get_file_summary", "Get full file intel: summary, importance, dependencies, concepts, change impact, and staleness", {
     filepath: z.string().describe("The path to the file to check")
   }, async (params: { filepath: string }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
@@ -357,12 +223,8 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       return createMcpResponse(`File not found: ${params.filepath}`, true);
     }
 
-    if (!node.summary) {
-      return createMcpResponse(`No summary available for ${params.filepath}`);
-    }
-
     const isStale = coordinator.checkFileFreshness(normalizedPath);
-    const summaryStale = getStaleness(normalizedPath);
+    const staleness = getStaleness(normalizedPath);
     const sqlite = getSqlite();
     const llmData = sqlite
       .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
@@ -370,10 +232,14 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     return createMcpResponse({
       path: node.path,
       ...(isStale && { stale: true }),
-      summary: node.summary,
-      ...(summaryStale.summaryStale !== null && { summaryStale: summaryStale.summaryStale }),
-      ...(summaryStale.conceptsStale !== null && { conceptsStale: summaryStale.conceptsStale }),
-      ...(summaryStale.changeImpactStale !== null && { changeImpactStale: summaryStale.changeImpactStale }),
+      importance: node.importance || 0,
+      dependencies: node.dependencies || [],
+      dependents: node.dependents || [],
+      packageDependencies: node.packageDependencies || [],
+      summary: node.summary || null,
+      ...(staleness.summaryStale !== null && { summaryStale: staleness.summaryStale }),
+      ...(staleness.conceptsStale !== null && { conceptsStale: staleness.conceptsStale }),
+      ...(staleness.changeImpactStale !== null && { changeImpactStale: staleness.changeImpactStale }),
       concepts: llmData?.concepts ? JSON.parse(llmData.concepts) : null,
       changeImpact: llmData?.change_impact ? JSON.parse(llmData.change_impact) : null,
     });
@@ -401,26 +267,6 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       path: normalizedPath,
       summary: params.summary
     });
-  });
-
-  server.tool("read_file_content", "Read the content of a specific file", {
-    filepath: z.string().describe("The path to the file to read")
-  }, async (params: { filepath: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    try {
-      const content = await readFileContent(params.filepath);
-      const normalizedPath = normalizePath(params.filepath);
-      const isStale = coordinator.checkFileFreshness(normalizedPath);
-      if (isStale) {
-        return createMcpResponse({
-          content,
-          stale: true
-        });
-      }
-      return createMcpResponse(content);
-    } catch (error) {
-      return createMcpResponse(`Failed to read file: ${params.filepath} - ` + error, true);
-    }
   });
 
   server.tool("set_file_importance", "Manually set the importance ranking of a specific file", {
@@ -469,165 +315,6 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     }
   });
 
-  server.tool("recalculate_importance", "Recalculate importance values for all files based on dependencies", async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-
-    log('Recalculating importance values...');
-
-    // Bridge: get a temporary tree from DB, run calculation algorithms, write back
-    const tempTree = coordinator.getFileTree();
-    buildDependentMap(tempTree);
-    calculateImportance(tempTree);
-
-    // Flatten tree and upsert all nodes back to DB
-    function flattenTree(node: FileNode): FileNode[] {
-      const result: FileNode[] = [];
-      if (!node.isDirectory) result.push(node);
-      if (node.children) {
-        for (const child of node.children) {
-          result.push(...flattenTree(child));
-        }
-      }
-      return result;
-    }
-
-    const allTreeNodes = flattenTree(tempTree);
-    for (const node of allTreeNodes) {
-      upsertFile(node);
-    }
-
-    // Count files with non-zero importance from DB
-    const allFiles = getAllFiles().filter(f => !f.isDirectory);
-    const filesWithImportance = allFiles.filter(file => (file.importance || 0) > 0);
-
-    return createMcpResponse({
-      message: "Importance values recalculated",
-      totalFiles: allFiles.length,
-      filesWithImportance: filesWithImportance.length
-    });
-  });
-
-  server.tool("toggle_file_watching", "Toggle file watching on/off", async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const config = getConfig();
-    if (!config) {
-      return createMcpResponse('No configuration loaded', true);
-    }
-
-    // Create default file watching config if it doesn't exist
-    if (!config.fileWatching) {
-      config.fileWatching = {
-        enabled: true,
-        ignoreDotFiles: true,
-        autoRebuildTree: true,
-        maxWatchedDirectories: 1000,
-        watchForNewFiles: true,
-        watchForDeleted: true,
-        watchForChanged: true
-      };
-    } else {
-      // Toggle the enabled status
-      config.fileWatching.enabled = !config.fileWatching.enabled;
-    }
-
-    // Save the updated config
-    setConfig(config);
-    await saveConfig(config);
-
-    if (config.fileWatching.enabled) {
-      await coordinator.reinitializeWatcher();
-      return createMcpResponse('File watching enabled');
-    } else {
-      // Stop watching — coordinator owns the watcher
-      await coordinator.toggleFileWatching();
-      return createMcpResponse('File watching disabled');
-    }
-  });
-
-  server.tool("get_file_watching_status", "Get the current status of file watching", async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const config = getConfig();
-    const status = {
-      enabled: config?.fileWatching?.enabled || false,
-      isActive: coordinator.getFileWatcher() !== null && coordinator.getFileWatcher() !== undefined,
-      config: config?.fileWatching || null
-    };
-
-    return createMcpResponse(status);
-  });
-
-  server.tool("update_file_watching_config", "Update file watching configuration", {
-    config: z.object({
-      enabled: z.boolean().optional(),
-      ignoreDotFiles: z.boolean().optional(),
-      autoRebuildTree: z.boolean().optional(),
-      maxWatchedDirectories: z.number().int().positive().optional(),
-      watchForNewFiles: z.boolean().optional(),
-      watchForDeleted: z.boolean().optional(),
-      watchForChanged: z.boolean().optional()
-    }).describe("File watching configuration options")
-  }, async (params: { config: Partial<FileWatchingConfig> }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const config = getConfig();
-    if (!config) {
-      return createMcpResponse('No configuration loaded', true);
-    }
-
-    // Create or update file watching config
-    if (!config.fileWatching) {
-      config.fileWatching = {
-        enabled: false,
-        ignoreDotFiles: true,
-        autoRebuildTree: true,
-        maxWatchedDirectories: 1000,
-        watchForNewFiles: true,
-        watchForDeleted: true,
-        watchForChanged: true,
-        ...params.config
-      };
-    } else {
-      config.fileWatching = {
-        ...config.fileWatching,
-        ...params.config
-      };
-    }
-
-    // Save the updated config
-    setConfig(config);
-    await saveConfig(config);
-
-    // Restart watcher if it's enabled, otherwise stop it
-    if (config.fileWatching.enabled) {
-      await coordinator.reinitializeWatcher();
-    } else {
-      await coordinator.toggleFileWatching();
-    }
-
-    return createMcpResponse({
-      message: 'File watching configuration updated',
-      config: config.fileWatching
-    });
-  });
-
-  server.tool("debug_list_all_files", "List all file paths in the current file tree", async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
-
-    // Get a flat list of all files from DB
-    const allFiles = getAllFiles().filter(f => !f.isDirectory);
-
-    // Extract just the paths and basenames
-    const fileDetails = allFiles.map(file => ({
-      path: file.path,
-      basename: path.basename(file.path),
-      importance: file.importance || 0
-    }));
-
-    return createMcpResponse({
-      totalFiles: fileDetails.length,
-      files: fileDetails
-    });
-  });
-
   server.tool("toggle_llm", "Enable or disable broker LLM processing", {
     enabled: z.boolean().describe("true to connect to broker, false to disconnect"),
   }, async ({ enabled }) => {
@@ -653,10 +340,25 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     }
   });
 
-  server.tool("get_llm_status", "Get broker connection status, queue depth, and per-repo token usage", {}, async () => {
+  server.tool("status", "System health: broker connection, queue depth, token usage, file watching, and project info", {}, async () => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
-    const status = await coordinator.getBrokerStatus();
-    return createMcpResponse(status);
+    const broker = await coordinator.getBrokerStatus();
+    const config = coordinator.getCurrentConfig();
+    const appConfig = getConfig();
+    const fileCount = getAllFiles().length;
+    return createMcpResponse({
+      project: {
+        root: coordinator.getProjectRoot(),
+        baseDirectory: config?.baseDirectory ?? null,
+        totalFiles: fileCount,
+        lastUpdated: config?.lastUpdated ?? null,
+      },
+      broker,
+      fileWatching: {
+        enabled: appConfig?.fileWatching?.enabled || false,
+        isActive: coordinator.getFileWatcher() !== null && coordinator.getFileWatcher() !== undefined,
+      },
+    });
   });
 
   server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {
