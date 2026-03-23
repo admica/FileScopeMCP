@@ -140,6 +140,9 @@ const DEFAULT_CONFIG: Config = {
     watchForDeleted: true,
     watchForChanged: true
   },
+  llm: {
+    enabled: true,
+  },
   version: "1.0.0"
 };
 
