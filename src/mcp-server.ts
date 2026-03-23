@@ -161,11 +161,11 @@ const server = new McpServer(serverInfo, {
  */
 function registerTools(server: McpServer, coordinator: ServerCoordinator): void {
   const projectPathNotSetError = createMcpResponse(
-    "Project path not set. Please call 'set_project_path' or initialize the server with --base-dir.",
+    "Project path not set. Please call 'set_base_directory' to point at a different directory, or restart with --base-dir.",
     true
   );
 
-  server.tool("set_project_path", "Sets the project directory to analyze", {
+  server.tool("set_base_directory", "Override the base directory to analyze a subdirectory or different project path", {
     path: z.string().describe("The absolute path to the project directory"),
   }, async (params: { path: string }) => {
     return await coordinator.init(params.path);
@@ -319,7 +319,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     enabled: z.boolean().describe("true to connect to broker, false to disconnect"),
   }, async ({ enabled }) => {
     if (!coordinator.isInitialized()) {
-      return { content: [{ type: "text", text: "Error: Project not initialized. Call set_project_path first." }], isError: true };
+      return { content: [{ type: "text", text: "Error: Project not initialized. Call set_base_directory first." }], isError: true };
     }
     try {
       const config = getConfig();

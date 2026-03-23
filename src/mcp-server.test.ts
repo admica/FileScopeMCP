@@ -248,7 +248,7 @@ describe('COMPAT-01: MCP tool names and schemas remain identical', () => {
     );
 
     const expectedTools = [
-      'set_project_path',
+      'set_base_directory',
       'list_saved_trees',
       'delete_file_tree',
       'create_file_tree',

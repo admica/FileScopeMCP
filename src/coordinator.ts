@@ -307,8 +307,10 @@ export class ServerCoordinator {
         log('--base-dir argument found but is empty. Server will wait for manual initialization.');
       }
     } else {
-      log('No --base-dir argument found. Server initialized in a waiting state.');
-      log('Call the `set_project_path` tool to analyze a directory.');
+      // No --base-dir argument — auto-init to CWD
+      const cwd = process.cwd();
+      log(`No --base-dir argument. Auto-initializing to CWD: ${cwd}`);
+      await this.init(cwd);
     }
   }
 
