@@ -90,8 +90,8 @@ Plans:
   3. The files src/llm/pipeline.ts and src/llm/rate-limiter.ts do not exist in the repository; all existing tests pass with no import errors
 **Plans:** 2/2 plans complete
 Plans:
-- [ ] 18-01-PLAN.md — DB migration, schema cleanup, dead module deletion, repository surgery, test fixes
-- [ ] 18-02-PLAN.md — isExhausted parameter removal, comment cleanup, final verification
+- [x] 18-01-PLAN.md — DB migration, schema cleanup, dead module deletion, repository surgery, test fixes
+- [x] 18-02-PLAN.md — isExhausted parameter removal, comment cleanup, final verification
 
 ### Phase 19: Observability
 **Goal**: Operators can query the broker's current state and token usage history through the existing get_llm_status MCP tool, which now reports broker-mode details including connection status, queue depth, active job, and lifetime per-repo token totals
@@ -100,7 +100,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Calling get_llm_status while connected to a broker returns a response containing: mode "broker", brokerConnected true, the number of pending jobs in the broker queue, the currently processing job's file path (or null), and per-repo lifetime token counts read from ~/.filescope/stats.json
   2. Calling get_llm_status while the broker is not running returns mode "broker", brokerConnected false, and the last-known per-repo token totals (stale but present); the tool does not error or hang
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 19-01-PLAN.md — Broker-side stats persistence and StatusResponse enrichment
+- [ ] 19-02-PLAN.md — Client requestStatus(), coordinator getBrokerStatus(), MCP tool update
 
 ## Progress
 
@@ -123,5 +126,5 @@ Plans:
 | 15. Cycle Detection | v1.1 | 2/2 | Complete | 2026-03-20 |
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 18. Cleanup | 2/2 | Complete   | 2026-03-22 | - |
-| 19. Observability | v1.2 | 0/TBD | Not started | - |
+| 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
+| 19. Observability | v1.2 | 0/2 | Not started | - |
