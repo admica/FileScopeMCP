@@ -46,12 +46,12 @@ Requirements for the LLM Broker milestone. Each maps to roadmap phases.
 - [x] **CLEAN-02**: TokenBudgetGuard module (rate-limiter.ts) deleted entirely
 - [x] **CLEAN-03**: pipeline.ts deleted — broker client replaces it
 - [x] **CLEAN-04**: Dead job CRUD functions removed from repository.ts (insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState)
-- [ ] **CLEAN-05**: isExhausted parameter threading removed from cascade engine and coordinator
+- [x] **CLEAN-05**: isExhausted parameter threading removed from cascade engine and coordinator
 
 ### Observability
 
 - [ ] **OBS-01**: get_llm_status MCP tool reports broker connection status, queue depth, and per-repo token totals
-- [ ] **OBS-02**: Broker responds to status requests with pending count, in-progress job, connected client count, and per-repo breakdown
+- [x] **OBS-02**: Broker responds to status requests with pending count, in-progress job, connected client count, and per-repo breakdown
 
 ## Future Requirements
 
@@ -120,9 +120,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLEAN-02 | Phase 18 | Complete |
 | CLEAN-03 | Phase 18 | Complete |
 | CLEAN-04 | Phase 18 | Complete |
-| CLEAN-05 | Phase 18 | Pending |
+| CLEAN-05 | Phase 18 | Complete |
 | OBS-01 | Phase 19 | Pending |
-| OBS-02 | Phase 19 | Pending |
+| OBS-02 | Phase 19 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 28 total

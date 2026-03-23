@@ -100,7 +100,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Calling get_llm_status while connected to a broker returns a response containing: mode "broker", brokerConnected true, the number of pending jobs in the broker queue, the currently processing job's file path (or null), and per-repo lifetime token counts read from ~/.filescope/stats.json
   2. Calling get_llm_status while the broker is not running returns mode "broker", brokerConnected false, and the last-known per-repo token totals (stale but present); the tool does not error or hang
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 19-01-PLAN.md — Broker-side stats persistence and StatusResponse enrichment
 - [ ] 19-02-PLAN.md — Client requestStatus(), coordinator getBrokerStatus(), MCP tool update
@@ -127,4 +127,4 @@ Plans:
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 19. Observability | v1.2 | 0/2 | Not started | - |
+| 19. Observability | 1/2 | In Progress|  | - |
