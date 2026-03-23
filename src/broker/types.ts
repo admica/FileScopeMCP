@@ -46,7 +46,7 @@ export type ErrorMessage = {
   filePath?: string;
 };
 
-export type BrokerMessage = ResultMessage | ErrorMessage;
+export type BrokerMessage = ResultMessage | ErrorMessage | StatusResponse;
 
 // ─── Internal queue job type ──────────────────────────────────────────────────
 
@@ -78,6 +78,7 @@ export type StatusResponse = {
   pendingCount: number;
   inProgressJob: { repoPath: string; filePath: string; jobType: string } | null;
   connectedClients: number;
+  repoTokens: Record<string, number>;   // per-repo lifetime totals
 };
 
 // ─── Dedup key helper ─────────────────────────────────────────────────────────
