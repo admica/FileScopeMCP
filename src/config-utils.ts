@@ -28,9 +28,109 @@ const ConfigSchema = z.object({
 // Verify the schema matches our Config type
 type ValidateConfig = z.infer<typeof ConfigSchema> extends Config ? true : false;
 
+/** Per-repo runtime directory for config, database, and PID files. */
+export const FILESCOPE_DIR = '.filescope';
+export const CONFIG_FILENAME = 'config.json';
+
+const DEFAULT_EXCLUDES: string[] = [
+  // Version control
+  "**/.git",
+  "**/.svn",
+  "**/.hg",
+  // Node / JS / TS
+  "**/node_modules",
+  "**/package-lock.json",
+  "**/.next",
+  "**/.nuxt",
+  "**/.angular",
+  "**/.expo",
+  "**/.parcel-cache",
+  "**/.turbo",
+  "**/.vercel",
+  "**/.svelte-kit",
+  "**/.storybook",
+  "**/jspm_packages",
+  "**/.npm",
+  "**/.pnpm-store",
+  "**/.yarn",
+  "**/*.js.map",
+  "**/*.ts.map",
+  // Python
+  "**/__pycache__",
+  "**/*.pyc",
+  "**/*.pyo",
+  "**/venv",
+  "**/.venv",
+  "**/venv_*",
+  "**/.venv_*",
+  "**/.tox",
+  "**/.pytest_cache",
+  "**/.eggs",
+  "**/*.egg-info",
+  "**/.ipynb_checkpoints",
+  // Rust
+  "**/target",
+  "**/*.rlib",
+  "**/.cargo",
+  "**/Cargo.lock",
+  "**/.rustup",
+  // Go
+  "**/vendor",
+  // C / C++
+  "**/cmake-build-*",
+  "**/CMakeFiles",
+  "**/CMakeCache.txt",
+  "**/*.o",
+  "**/*.obj",
+  "**/*.so",
+  "**/*.a",
+  "**/*.out",
+  "**/obj/**",
+  // Java / Kotlin / Gradle
+  "**/*.class",
+  "**/*.gradle",
+  "**/.gradle",
+  // C# / .NET
+  "**/bin",
+  "**/obj",
+  "**/*.dll",
+  // Zig
+  "**/zig-cache",
+  "**/zig-out",
+  // Build outputs
+  "**/dist",
+  "**/build",
+  "**/coverage",
+  // Logs and temp files
+  "**/*.log",
+  "**/*.lock",
+  "**/*.bak",
+  "**/*.tmp",
+  "**/*.temp",
+  "**/*.swp",
+  "**/*.swo",
+  // OS files
+  "**/.DS_Store",
+  "**/Thumbs.db",
+  // IDE / editor
+  "**/.vscode",
+  "**/.idea",
+  "**/.cursor",
+  "**/.cursorrules",
+  // Environment / secrets
+  "**/.env*",
+  // Caches
+  "**/cache",
+  "**/.cache",
+  "**/.cache-loader",
+  "**/.firebase",
+  "**/.output",
+  "**/.local",
+];
+
 const DEFAULT_CONFIG: Config = {
   baseDirectory: "",
-  excludePatterns: [],
+  excludePatterns: DEFAULT_EXCLUDES,
   fileWatching: {
     enabled: true,
     ignoreDotFiles: true,
@@ -43,7 +143,7 @@ const DEFAULT_CONFIG: Config = {
   version: "1.0.0"
 };
 
-export async function loadConfig(configPath: string = 'config.json'): Promise<Config> {
+export async function loadConfig(configPath: string = path.join(FILESCOPE_DIR, CONFIG_FILENAME)): Promise<Config> {
   logDebug(`Loading config from ${configPath}`);
   logDebug(`Current working directory: ${process.cwd()}`);
 
@@ -98,8 +198,10 @@ export async function loadConfig(configPath: string = 'config.json'): Promise<Co
   }
 }
 
-export async function saveConfig(config: Config, configPath: string = 'config.json'): Promise<void> {
+export async function saveConfig(config: Config, configPath: string = path.join(FILESCOPE_DIR, CONFIG_FILENAME)): Promise<void> {
   try {
+    const dir = path.dirname(path.resolve(configPath));
+    await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
   } catch (err) {
     logError('Error saving config:', err);

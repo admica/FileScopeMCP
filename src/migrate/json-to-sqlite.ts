@@ -142,7 +142,7 @@ export function runMigrationIfNeeded(projectRoot: string, sqlite: InstanceType<t
     return;
   }
 
-  const dbPath = path.join(projectRoot, '.filescope.db');
+  const dbPath = path.join(projectRoot, '.filescope', 'data.db');
 
   for (const jsonFile of jsonFiles) {
     const jsonPath = path.join(projectRoot, jsonFile);

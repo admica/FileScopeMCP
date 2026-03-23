@@ -12,7 +12,7 @@ import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, a
 import { canonicalizePath } from './storage-utils.js';
 import { extractSnapshot, isTreeSitterLanguage } from './change-detector/ast-parser.js';
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
-import { loadConfig } from './config-utils.js';
+import { loadConfig, FILESCOPE_DIR } from './config-utils.js';
 import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
@@ -239,7 +239,9 @@ export class ServerCoordinator {
     };
 
     // Open the SQLite database for this project (coordinator owns the lifecycle)
-    const dbPath = path.join(projectRoot, '.filescope.db');
+    const filescopeDir = path.join(projectRoot, FILESCOPE_DIR);
+    fsSync.mkdirSync(filescopeDir, { recursive: true });
+    const dbPath = path.join(filescopeDir, 'data.db');
     openDatabase(dbPath);
     log(`Opened SQLite database at: ${dbPath}`);
 
@@ -388,7 +390,7 @@ export class ServerCoordinator {
    * for this project. Overwrites stale PID files (process no longer running).
    */
   private async acquirePidFile(projectRoot: string): Promise<void> {
-    const pidPath = path.join(projectRoot, '.filescope.pid');
+    const pidPath = path.join(projectRoot, FILESCOPE_DIR, 'instance.pid');
     try {
       const existing = fsSync.readFileSync(pidPath, 'utf-8');
       const existingPid = parseInt(existing.trim(), 10);
@@ -418,7 +420,7 @@ export class ServerCoordinator {
    * Release the PID file. Called as the final step of shutdown().
    */
   private releasePidFile(projectRoot: string): void {
-    const pidPath = path.join(projectRoot, '.filescope.pid');
+    const pidPath = path.join(projectRoot, FILESCOPE_DIR, 'instance.pid');
     try { fsSync.unlinkSync(pidPath); } catch { /* already gone */ }
   }
 

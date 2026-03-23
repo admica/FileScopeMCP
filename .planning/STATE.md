@@ -4,7 +4,7 @@ milestone: v1.2
 milestone_name: LLM Broker
 status: unknown
 stopped_at: Completed 19-02-PLAN.md
-last_updated: "2026-03-23T02:04:37.777Z"
+last_updated: "2026-03-23T02:05:48.621Z"
 last_activity: 2026-03-23
 progress:
   total_phases: 4
@@ -92,8 +92,14 @@ None.
 - Old Phase 16 plan at `.planning/phases/16-shared-llm-queue/PLAN.md` is superseded — can be archived during Phase 16 planning
 - Priority aging threshold (+1 per 5 min, cap 10) should be exposed in broker.json rather than hardcoded
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260323-kgd | Auto-init MCP to CWD, rename set_project_path to set_base_directory | 2026-03-23 | 50b7016 | [260323-kgd](./quick/260323-kgd-auto-init-mcp-to-cwd-rename-set-project-/) |
+
 ## Session Continuity
 
-Last activity: 2026-03-23
+Last activity: 2026-03-23 - Completed quick task 260323-kgd: Auto-init MCP to CWD, rename set_project_path to set_base_directory
 Stopped at: Completed 19-02-PLAN.md
 Resume file: None

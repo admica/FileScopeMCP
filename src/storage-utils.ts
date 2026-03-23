@@ -156,9 +156,9 @@ export async function loadFileTree(filename: string): Promise<FileTreeStorage> {
 export async function listSavedFileTrees(): Promise<{type: "text", text: string}[]> {
   try {
     const projectRoot = getProjectRoot();
-    const dbPath = path.join(projectRoot, '.filescope.db');
+    const dbPath = path.join(projectRoot, '.filescope', 'data.db');
     if (fsSync.existsSync(dbPath)) {
-      return [{ type: 'text' as const, text: '.filescope.db' }];
+      return [{ type: 'text' as const, text: '.filescope/data.db' }];
     }
     return [];
   } catch (err) {
