@@ -5,7 +5,7 @@
 <!-- Add Badges Here (e.g., License, Version, Build Status) -->
 [![Build Status](https://github.com/admica/FileScopeMCP/actions/workflows/build.yml/badge.svg)](https://github.com/admica/FileScopeMCP/actions)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.x-green)](https://nodejs.org/)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-red.svg)](LICENSE)
 
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/admica/FileScopeMCP)](https://archestra.ai/mcp-catalog/admica__filescopemcp)
 
@@ -727,4 +727,4 @@ Add `.filescope/` to your `.gitignore` to exclude all runtime artifacts at once.
 
 ## License
 
-This project is licensed under the GNU General Public License v3 (GPL-3.0). See the [LICENSE](LICENSE) file for the full license text.
+Copyright (c) 2026 admica. All rights reserved. See the [LICENSE](LICENSE) file for details.

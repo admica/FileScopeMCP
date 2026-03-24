@@ -97,9 +97,10 @@ None.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260323-kgd | Auto-init MCP to CWD, rename set_project_path to set_base_directory | 2026-03-23 | 50b7016 | [260323-kgd](./quick/260323-kgd-auto-init-mcp-to-cwd-rename-set-project-/) |
+| 260324-0yz | Comprehensive documentation update: README and config.example.json for v1.2 | 2026-03-24 | a96b263 | [260324-0yz](./quick/260324-0yz-comprehensive-documentation-update-readm/) |
 
 ## Session Continuity
 
-Last activity: 2026-03-23 - Completed quick task 260323-kgd: Auto-init MCP to CWD, rename set_project_path to set_base_directory
-Stopped at: Completed 19-02-PLAN.md
+Last activity: 2026-03-24 - Completed quick task 260324-0yz: Comprehensive documentation update for v1.2
+Stopped at: Completed quick task 260324-0yz
 Resume file: None
