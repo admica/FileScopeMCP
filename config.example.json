@@ -1,0 +1,21 @@
+{
+  "baseDirectory": "/path/to/your/project",
+  "excludePatterns": [
+    "docs/generated/**",
+    "*.csv",
+    "tmp/"
+  ],
+  "fileWatching": {
+    "enabled": true,
+    "ignoreDotFiles": true,
+    "autoRebuildTree": true,
+    "maxWatchedDirectories": 1000,
+    "watchForNewFiles": true,
+    "watchForDeleted": true,
+    "watchForChanged": true
+  },
+  "llm": {
+    "enabled": true
+  },
+  "version": "1.0.0"
+}
