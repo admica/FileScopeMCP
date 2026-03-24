@@ -1,7 +1,7 @@
 {
   "llm": {
     "provider": "openai-compatible",
-    "model": "qwen2.5-coder:7b",
+    "model": "FileScopeMCP-brain",
     "baseURL": "http://localhost:11434/v1",
     "maxTokensPerCall": 1024
   },

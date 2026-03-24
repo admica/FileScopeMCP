@@ -71,6 +71,7 @@ All of this information is exposed to your AI assistant through the Model Contex
 
 - **LLM Broker**
   - Standalone broker process owns all Ollama (or OpenAI-compatible) communication — auto-spawned when the first MCP instance connects.
+  - Custom Ollama model (`FileScopeMCP-brain`) with tuned system prompt and parameters for code analysis — defined in `Modelfile`.
   - Communicates over a Unix domain socket at `~/.filescope/broker.sock` using NDJSON protocol.
   - In-memory priority queue: interactive (tier 1) > cascade (tier 2) > background (tier 3).
   - Per-repo token usage stats persisted to `~/.filescope/stats.json`.
@@ -119,22 +120,178 @@ All of this information is exposed to your AI assistant through the Model Contex
 
 ### Setting Up Local LLM (Optional)
 
-FileScopeMCP includes an automated setup script for Ollama:
+FileScopeMCP uses a custom Ollama model (`FileScopeMCP-brain`) with a tuned system prompt and parameters optimized for code analysis. The `Modelfile` in the repo root defines the model. Without this, FileScopeMCP still works for file tracking and dependency analysis — you just won't get auto-generated summaries, concepts, or change impact assessments.
+
+Pick the guide that matches your setup:
+
+- **[Same machine (Linux/macOS)](#ollama-on-the-same-machine)** — Ollama and FileScopeMCP run on the same OS
+- **[WSL2 + Windows GPU](#ollama-on-windows-with-filescopemcp-in-wsl2)** — FileScopeMCP runs in WSL2, Ollama runs on Windows to access the GPU
+- **[Remote/LAN server](#ollama-on-a-remote-lan-machine)** — Ollama runs on a different machine on your network
+
+---
+
+#### Ollama on the Same Machine
 
 ```bash
 ./setup-llm.sh
 ```
 
 This script will:
-- Install Ollama if not present (supports Linux, macOS, WSL)
+- Install Ollama if not present (supports Linux, macOS)
 - Detect GPU hardware (NVIDIA, AMD, Metal) and configure acceleration
-- Pull the default model (`qwen2.5-coder:14b`)
+- Pull the base model (`qwen2.5-coder:7b-instruct-q6_K`)
+- Create the custom `FileScopeMCP-brain` model from the Modelfile
 - Verify the installation
 
-To check status or use a different model:
+To check status afterward:
 ```bash
-./setup-llm.sh --status           # Check Ollama and model status
-./setup-llm.sh --model codellama  # Pull a different model
+./setup-llm.sh --status
+```
+
+---
+
+#### Ollama on Windows with FileScopeMCP in WSL2
+
+This is the most common setup for Windows users with a dedicated GPU. WSL2 doesn't have direct GPU access for Ollama, so Ollama runs natively on Windows and FileScopeMCP connects to it across the WSL network boundary.
+
+**Step 1: Install Ollama on Windows**
+
+Download and install Ollama from [ollama.com/download/windows](https://ollama.com/download/windows). Run the installer and follow the prompts.
+
+After installation, verify it works by opening **PowerShell** or **Command Prompt** and running:
+
+```powershell
+ollama --version
+```
+
+**Step 2: Configure Ollama to accept network connections**
+
+By default, Ollama only listens on `127.0.0.1` (localhost), which means WSL2 cannot reach it. You must configure it to listen on all network interfaces.
+
+Open **PowerShell** and set the environment variable permanently:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "User")
+```
+
+**Important:** Close and reopen any terminal windows after setting this. If Ollama is running in the system tray, quit it completely and restart it so it picks up the new setting.
+
+**Step 3: Start Ollama**
+
+You have three options:
+
+- **System tray (default):** Just launch the Ollama app from the Start Menu. It runs in the background with a tray icon. This is the easiest option for day-to-day use.
+
+- **Foreground in a terminal** (useful for debugging):
+  ```powershell
+  ollama serve
+  ```
+
+- **Headless background process** (no window, no tray icon):
+  ```powershell
+  Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
+  ```
+
+**Step 4: Pull the base model and create the custom model**
+
+In **PowerShell** or **Command Prompt** on Windows:
+
+```powershell
+ollama pull qwen2.5-coder:7b-instruct-q6_K
+```
+
+This downloads ~5 GB. Wait for it to complete.
+
+Next, copy the Modelfile from WSL to Windows and create the custom model. In your **WSL terminal**:
+
+```bash
+cp ~/FileScopeMCP/Modelfile /mnt/c/Users/$USER/Modelfile
+```
+
+> **Note:** If your Windows username differs from your WSL username, replace `$USER` with your actual Windows username: `/mnt/c/Users/YourWindowsName/Modelfile`
+
+Then in **PowerShell** on Windows:
+
+```powershell
+cd $env:USERPROFILE
+ollama create FileScopeMCP-brain -f Modelfile
+```
+
+Verify both models are available:
+
+```powershell
+ollama list
+```
+
+You should see both `qwen2.5-coder:7b-instruct-q6_K` and `FileScopeMCP-brain` in the output.
+
+**Step 5: Configure the broker in WSL**
+
+Copy the Windows host broker template to your global FileScopeMCP config:
+
+```bash
+mkdir -p ~/.filescope
+cp ~/FileScopeMCP/broker.windows-host.json ~/.filescope/broker.json
+```
+
+> **How it works:** This template uses `wsl-host` as a placeholder in the URL. When the broker starts, it automatically resolves `wsl-host` to your Windows host IP (via `ip route show default`). You never need to hardcode the IP.
+
+**Step 6: Verify the connection from WSL**
+
+Test that Ollama is reachable from inside WSL:
+
+```bash
+# Find your Windows host IP
+ip route show default | awk '{print $3}'
+
+# Test the connection (replace IP if different)
+curl http://$(ip route show default | awk '{print $3}'):11434/v1/models
+```
+
+You should see a JSON response listing your installed models. If you get "Connection refused", see the [WSL + Windows Troubleshooting](#wsl--windows-connectivity-issues) section below.
+
+**Step 7: Restart Claude Code**
+
+Start (or restart) a Claude Code session in your project directory. FileScopeMCP will auto-spawn the broker, connect to Ollama on Windows, and begin processing files. Check status with:
+
+```
+status()
+```
+
+You should see `brokerConnected: true` and files moving through the LLM queue.
+
+---
+
+#### Ollama on a Remote LAN Machine
+
+If Ollama runs on a different machine on your network:
+
+1. On the remote machine, set `OLLAMA_HOST=0.0.0.0:11434` and start Ollama
+2. Copy the LAN broker template:
+   ```bash
+   mkdir -p ~/.filescope
+   cp ~/FileScopeMCP/broker.remote-lan.json ~/.filescope/broker.json
+   ```
+3. Edit `~/.filescope/broker.json` and replace `192.168.1.100` with the actual IP of your Ollama machine
+4. Verify: `curl http://<ollama-ip>:11434/v1/models`
+
+---
+
+#### Windows Firewall Note
+
+Windows Firewall may block incoming connections to Ollama from WSL. If `curl` from WSL times out or is refused even though Ollama is running with `OLLAMA_HOST=0.0.0.0`:
+
+1. Open **Windows Defender Firewall with Advanced Security** (search for "firewall" in the Start Menu)
+2. Click **Inbound Rules** > **New Rule...**
+3. Select **Port** > **TCP** > Specific port: **11434**
+4. Select **Allow the connection**
+5. Check all profiles (Domain, Private, Public)
+6. Name it `Ollama LLM Server` and save
+
+Alternatively, in an **elevated PowerShell** (Run as Administrator):
+
+```powershell
+New-NetFirewallRule -DisplayName "Ollama LLM Server" -Direction Inbound -Protocol TCP -LocalPort 11434 -Action Allow
 ```
 
 ### Claude Code
@@ -381,9 +538,9 @@ LLM model and provider settings are configured globally in `~/.filescope/broker.
 
 **Three templates are shipped with the project:**
 
-- `broker.default.json` — Ollama on localhost, `qwen2.5-coder:7b`
-- `broker.windows-host.json` — Ollama on the Windows host from WSL2, `qwen2.5-coder:14b`, uses `wsl-host` placeholder
-- `broker.remote-lan.json` — Ollama on a LAN machine by IP, `qwen2.5-coder:14b`
+- `broker.default.json` — Ollama on localhost, `FileScopeMCP-brain`
+- `broker.windows-host.json` — Ollama on the Windows host from WSL2, `FileScopeMCP-brain`, uses `wsl-host` placeholder
+- `broker.remote-lan.json` — Ollama on a LAN machine by IP, `FileScopeMCP-brain`
 
 Copy whichever template matches your setup to `~/.filescope/broker.json` and adjust as needed.
 
@@ -394,12 +551,53 @@ Copy whichever template matches your setup to `~/.filescope/broker.json` and adj
 | Field | Default | Description |
 |-------|---------|-------------|
 | `llm.provider` | `"openai-compatible"` | Provider adapter (`"anthropic"` or `"openai-compatible"`) |
-| `llm.model` | `"qwen2.5-coder:14b"` | Model identifier |
+| `llm.model` | `"FileScopeMCP-brain"` | Model identifier (custom Ollama model created from Modelfile) |
 | `llm.baseURL` | — | API endpoint (required for `openai-compatible`) |
 | `llm.apiKey` | — | API key (optional; uses env vars if omitted) |
 | `llm.maxTokensPerCall` | `1024` | Maximum tokens per LLM call |
 | `jobTimeoutMs` | `120000` | Timeout per job in milliseconds |
 | `maxQueueSize` | `1000` | Maximum number of pending jobs |
+
+### Custom LLM Model (Modelfile)
+
+FileScopeMCP uses a custom Ollama model rather than a stock base model. The `Modelfile` in the repo root defines this model and is the single source of truth for LLM behavior.
+
+**Why a custom model?**
+
+The broker sends three types of requests to the LLM — file summaries, concept extraction, and change impact assessment. Each requires specific output formats (plain text or strict JSON). A baked-in system prompt teaches the model all three task types and enforces output rules (no markdown fences, no preamble, no hallucinated identifiers), so per-request prompts can be minimal — just a task tag and the file content. Stock Ollama models default to high temperature and no system prompt, which produces unreliable JSON.
+
+**Architecture — how system prompt and per-request prompts split responsibilities:**
+
+| Concern | Modelfile SYSTEM (baked in) | `src/llm/prompts.ts` (per-request) |
+|---|---|---|
+| Model identity and role | Yes | No |
+| Task type definitions and schemas | Yes | No |
+| Output format rules (JSON strictness) | Yes | No |
+| Task identification | No | `TASK: summary/concepts/change_impact` |
+| File path context | No | `FILE: path` |
+| Source code / diff content | No | In code fences |
+
+The system prompt is sent automatically by Ollama on every request. Per-request prompts (`src/llm/prompts.ts`) only need to specify which task and provide the input — keeping token usage minimal.
+
+**Tuned parameters:**
+
+| Parameter | Value | Why |
+|---|---|---|
+| `num_ctx` | `32768` | Large source files + prompt + response need room |
+| `temperature` | `0.1` | Near-deterministic — factual extraction, not creative writing |
+| `repeat_penalty` | `1.1` | Prevents degenerate repetition loops |
+
+**Modifying the model:**
+
+1. Edit the `Modelfile` in the repo root
+2. Rebuild: `ollama create FileScopeMCP-brain -f Modelfile`
+3. No broker restart needed — the next request uses the updated model
+
+If you change JSON schemas in the Modelfile's system prompt, update the matching Zod schemas in `src/llm/types.ts` (`ConceptsSchema`, `ChangeImpactSchema`) to match, and vice versa.
+
+**Changing the base model:**
+
+To use a different base model (e.g., a larger quantization or different model family), change the `FROM` line in the Modelfile and rebuild. The broker config (`~/.filescope/broker.json`) does not need to change — it references `FileScopeMCP-brain`, not the base model.
 
 ## Directory Structure
 
@@ -678,6 +876,88 @@ The server auto-initializes to the current working directory on startup. If you 
 4. Check `~/.filescope/broker.json` — ensure `baseURL` points to your LLM endpoint and `model` is correct.
 5. Run `./setup-llm.sh --status` to verify Ollama and model installation.
 
+### WSL + Windows connectivity issues
+
+If FileScopeMCP runs in WSL2 and Ollama runs on Windows, there are several points of failure. Work through these in order:
+
+**1. Is Ollama running on Windows?**
+
+In a Windows terminal:
+```powershell
+ollama list
+```
+If this fails, Ollama isn't running. Start it (see [Step 3](#ollama-on-windows-with-filescopemcp-in-wsl2) above).
+
+**2. Is Ollama listening on all interfaces?**
+
+In a Windows terminal:
+```powershell
+netstat -an | findstr 11434
+```
+You should see `0.0.0.0:11434` in the output. If you see `127.0.0.1:11434` instead, Ollama is only accepting local connections. Set the `OLLAMA_HOST` environment variable:
+```powershell
+[System.Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "User")
+```
+Then fully quit and restart Ollama.
+
+**3. Can WSL reach the Windows host?**
+
+From your WSL terminal:
+```bash
+# Get the Windows host IP
+ip route show default | awk '{print $3}'
+
+# Test basic connectivity
+curl http://$(ip route show default | awk '{print $3}'):11434/v1/models
+```
+If `curl` hangs or returns "Connection refused":
+- **Firewall:** Windows Firewall may be blocking port 11434. See the [Windows Firewall Note](#windows-firewall-note) section.
+- **VPN/proxy:** Some VPN software changes WSL2 networking. Try disconnecting the VPN temporarily.
+
+**4. Is the broker config correct?**
+
+```bash
+cat ~/.filescope/broker.json
+```
+The `baseURL` should contain either `wsl-host` (auto-resolved) or the actual Windows host IP. If the file doesn't exist or uses `localhost`, copy the correct template:
+```bash
+cp ~/FileScopeMCP/broker.windows-host.json ~/.filescope/broker.json
+```
+
+**5. Is the broker process running?**
+
+```bash
+ps aux | grep 'broker' | grep -v grep
+```
+If no broker process is running, it may have crashed. Check the log:
+```bash
+cat ~/.filescope/broker.log
+```
+Common errors:
+- `ECONNREFUSED` — Ollama isn't reachable (go back to step 2-3)
+- `model not found` — the `FileScopeMCP-brain` custom model wasn't created on Windows (see [Step 4](#ollama-on-windows-with-filescopemcp-in-wsl2))
+- Stale socket file — remove it and let the broker respawn:
+  ```bash
+  rm ~/.filescope/broker.sock
+  ```
+  Then restart your Claude Code session.
+
+**6. Does the custom model exist on Windows?**
+
+In a Windows terminal:
+```powershell
+ollama list
+```
+You should see `FileScopeMCP-brain` in the list. If not, create it:
+```powershell
+cd $env:USERPROFILE
+ollama create FileScopeMCP-brain -f Modelfile
+```
+If the Modelfile isn't on Windows, copy it from WSL first:
+```bash
+cp ~/FileScopeMCP/Modelfile /mnt/c/Users/$USER/Modelfile
+```
+
 ### "FileScopeMCP daemon already running" error
 A PID file exists for this project. Either another daemon is running, or a previous one crashed without cleanup:
 ```bash
@@ -700,6 +980,15 @@ rm -f /path/to/project/.filescope/data.db-shm
 On the next startup, the system rescans the project and rebuilds the database from scratch.
 
 ## Generated Files Reference
+
+### Repo root (checked into git)
+
+| File | Purpose |
+|------|---------|
+| `Modelfile` | Custom Ollama model definition — system prompt, parameters, base model. See [Custom LLM Model](#custom-llm-model-modelfile). |
+| `broker.default.json` | Broker config template for localhost Ollama |
+| `broker.windows-host.json` | Broker config template for WSL2 with Windows host |
+| `broker.remote-lan.json` | Broker config template for LAN Ollama server |
 
 ### Per-repo files (inside `.filescope/` in your project)
 
