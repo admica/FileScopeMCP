@@ -17,7 +17,7 @@ FileScopeMCP is a fully autonomous file intelligence platform. Once pointed at a
 
 1. Scans the codebase via a streaming async directory walker and builds a dependency graph with 0–10 importance scores for every file.
 2. Watches the filesystem. When files change, it incrementally updates dependency lists and importance scores, then detects semantic changes via tree-sitter AST diffing (TS/JS) or LLM-powered diff analysis (all other languages), and propagates staleness through the dependency graph via the cascade engine.
-3. A background LLM pipeline auto-generates summaries, key concepts, and change impact assessments for stale files — keeping structured metadata current without any manual work.
+3. A standalone LLM broker process communicates with Ollama (or any OpenAI-compatible endpoint) over a Unix domain socket, auto-generating summaries, key concepts, and change impact assessments for stale files — keeping structured metadata current without any manual work.
 4. On-demand mtime-based freshness checks detect files that changed while the server was down, so metadata is never silently stale.
 
 All of this information is exposed to your AI assistant through the Model Context Protocol so it always has accurate, up-to-date context about your codebase structure.
@@ -45,17 +45,16 @@ All of this information is exposed to your AI assistant through the Model Contex
   - Startup integrity sweep detects files added, deleted, or modified while the server was offline and heals the database before accepting requests.
   - Per-file mtime-based lazy validation on read — see [Freshness Validation](#freshness-validation).
   - All mutations are serialized through an async mutex to prevent concurrent corruption.
-  - Per-event-type enable/disable and `autoRebuildTree` master switch.
   - Semantic change detection classifies what changed before triggering cascade — avoids unnecessary LLM calls.
 
 - **File Summaries**
-  - Background LLM auto-generates summaries for files after they change.
+  - Background LLM broker auto-generates summaries for files after they change.
   - Manual override via `set_file_summary` — your summary is preserved until the file changes again.
   - Summaries persist across server restarts in SQLite.
 
 - **SQLite Storage**
-  - All data stored in `.filescope.db` in the project root using SQLite with WAL mode.
-  - Type-safe schema via drizzle-orm: `files`, `file_dependencies`, `llm_jobs`, `schema_version`, `llm_runtime_state` tables.
+  - All data stored in `.filescope/data.db` (SQLite, WAL mode) inside the per-repo directory.
+  - Type-safe schema via drizzle-orm: `files`, `file_dependencies`, `schema_version` tables.
   - Transparent auto-migration: existing JSON tree files are automatically imported on first run — no manual migration step.
 
 - **Semantic Change Detection**
@@ -70,28 +69,21 @@ All of this information is exposed to your AI assistant through the Model Contex
   - Circular dependency protection via visited set — no infinite loops.
   - Depth cap of 10 levels prevents runaway propagation on deeply nested graphs.
 
-- **Background LLM Pipeline**
-  - Auto-generates summaries, concepts (functions, classes, interfaces, exports, purpose), and change impact (risk level, affected areas, breaking changes) for stale files.
-  - Priority-ordered job queue: interactive (tier 1) > cascade (tier 2) > background (tier 3).
-  - Token budget limits and per-minute rate limiting prevent runaway API costs.
-  - Recovers orphaned `in_progress` jobs on restart — no stuck jobs after crashes.
-  - Toggle on/off at runtime via `toggle_llm` MCP tool or config file.
-
-- **Multi-Provider LLM Support**
-  - Anthropic (Claude) via `@ai-sdk/anthropic` — uses `ANTHROPIC_API_KEY` environment variable.
-  - OpenAI-compatible via `@ai-sdk/openai-compatible` — works with Ollama, vLLM, and any OpenAI-compatible API.
-  - Configurable model, baseURL, and apiKey per-project in `config.json`.
-  - Local-first default: Ollama on `localhost:11434` with `qwen2.5-coder:14b`.
-  - Structured output with JSON repair fallback for local models that don't follow schemas perfectly.
+- **LLM Broker**
+  - Standalone broker process owns all Ollama (or OpenAI-compatible) communication — auto-spawned when the first MCP instance connects.
+  - Communicates over a Unix domain socket at `~/.filescope/broker.sock` using NDJSON protocol.
+  - In-memory priority queue: interactive (tier 1) > cascade (tier 2) > background (tier 3).
+  - Per-repo token usage stats persisted to `~/.filescope/stats.json`.
+  - LLM enabled by default (`llm.enabled: true`) — broker is auto-spawned on first connect.
 
 - **Custom Exclusion Patterns**
   - `.filescopeignore` file in the project root — uses gitignore syntax (via the `ignore` package) to exclude files from scanning and watching.
-  - `exclude_and_remove` MCP tool — adds glob patterns at runtime; patterns are persisted to `config.json` so they survive restarts.
-  - Default exclusions for `node_modules`, `.git`, `dist`, `build`, `coverage`, and `.filescope.*` runtime artifacts.
+  - `exclude_and_remove` MCP tool — adds glob patterns at runtime; patterns are persisted to `.filescope/config.json` so they survive restarts.
+  - ~90 built-in default exclusion patterns covering all major languages and toolchains (version control, Node/JS/TS, Python, Rust, Go, C/C++, Java/Kotlin/Gradle, C#/.NET, Zig, build outputs, logs/temp, OS files, IDE/editor, environment/secrets, caches). You only need to add project-specific patterns.
 
 - **Daemon Mode**
   - Runs as a standalone daemon (`--daemon --base-dir=<path>`) for 24/7 operation without an MCP client connected.
-  - PID file guard (`.filescope.pid` in the project root) prevents concurrent daemons on the same project.
+  - PID file guard (`.filescope/instance.pid`) prevents concurrent daemons on the same project.
   - Graceful shutdown on SIGTERM/SIGINT — flushes pending jobs before exit.
   - File-only logging to `.filescope-daemon.log` in the project root — no stdout pollution.
 
@@ -153,16 +145,12 @@ The build script registers FileScopeMCP automatically. To register (or re-regist
 ./install-mcp-claude.sh
 ```
 
-The server is registered globally — no `--base-dir` is needed. When you start a session, tell Claude to run `set_project_path` pointing at your project. This builds the initial file tree, starts the file watcher, and runs the startup integrity sweep:
+The server is registered globally and auto-initializes to the current working directory on startup. No configuration file or manual initialization is needed. When you start a Claude Code session in your project directory, FileScopeMCP automatically scans the codebase, starts the file watcher, and runs the startup integrity sweep.
+
+Use `set_base_directory` if you want to analyze a different directory or subdirectory:
 
 ```
-set_project_path(path: "/path/to/your/project")
-```
-
-After that you can optionally enable the background LLM pipeline:
-
-```
-toggle_llm(enabled: true)
+set_base_directory(path: "/path/to/your/project")
 ```
 
 ### Cursor AI (Linux/WSL — Cursor running on Windows)
@@ -221,7 +209,7 @@ To run FileScopeMCP as a standalone background process (no MCP client required):
 node dist/mcp-server.js --daemon --base-dir=/path/to/project
 ```
 
-The daemon watches the project, runs the startup integrity sweep, and keeps the LLM pipeline active 24/7. Logs are written to `.filescope-daemon.log` in the project root.
+The daemon watches the project, runs the startup integrity sweep, and connects to the LLM broker. Logs are written to `.filescope-daemon.log` in the project root.
 
 ## Quick Start Checklist
 
@@ -237,11 +225,9 @@ ls dist/mcp-server.js   # Should exist after build
 claude mcp list          # Should show FileScopeMCP in the list
 ```
 
-**3. Start a Claude Code session and initialize:**
-```
-set_project_path(path: "/path/to/your/project")
-```
-You should see: `Project path set to /path/to/your/project. File tree built and saved to SQLite.`
+**3. Start a Claude Code session — FileScopeMCP auto-initializes to your project:**
+
+The server scans your project, builds the initial file tree, starts the file watcher, and runs the startup integrity sweep automatically. No manual initialization needed.
 
 **4. Confirm files are tracked:**
 ```
@@ -249,25 +235,16 @@ find_important_files(limit: 5)
 ```
 You should see a list of your most important files with importance scores.
 
-**5. (Optional) Enable the LLM pipeline:**
+**5. Check LLM and broker status:**
 ```
-toggle_llm(enabled: true)
+status()
 ```
-Requires Ollama running locally (default) or a configured LLM provider — see [Configuration](#configuration).
+Shows broker connection state, LLM processing progress (summarized X/Y, concepts X/Y), file watching status, and project info. LLM is enabled by default — the broker auto-spawns on first connect.
 
-**6. (Optional) Check LLM status:**
-```
-get_llm_status()
-```
-Should show `running: true` and token counters.
-
-**7. Add generated files to your `.gitignore`:**
+**6. Add the per-repo directory to your `.gitignore`:**
 ```gitignore
 # FileScopeMCP
-.filescope.db
-.filescope.db-wal
-.filescope.db-shm
-.filescope.pid
+.filescope/
 .filescope-daemon.log
 mcp-debug.log
 ```
@@ -299,8 +276,6 @@ Files are assigned importance scores (0–10) based on a weighted formula that c
 - Location in the project structure — files in `src/` or `app/` are weighted higher
 - File naming — `index`, `main`, `server`, `app`, `config`, `types`, etc. receive additional points
 
-The formula is evaluated from scratch on every calculation, so calling `recalculate_importance` is always idempotent. Manual overrides set via `set_file_importance` will be overwritten when importance is recalculated.
-
 ### Autonomous Updates
 
 When a file event fires, the update pipeline is:
@@ -310,14 +285,14 @@ When a file event fires, the update pipeline is:
 3. **Semantic change detection** — tree-sitter AST diffing for TS/JS files classifies the change (body-only, exports-changed, types-changed, unknown). LLM-powered diff analysis handles all other languages.
 4. **Incremental update** — re-parses the file, diffs old vs. new dependency lists, patches `dependents[]` on affected nodes, and recalculates importance.
 5. **Cascade engine** — if exports or types changed, BFS propagates staleness to all transitive dependents; if body-only, only the changed file is marked stale.
-6. **LLM pipeline** — picks up stale files and regenerates summaries, concepts, and change impact assessments in priority order.
+6. **LLM broker** — picks up stale files and regenerates summaries, concepts, and change impact assessments in priority order.
 
 ### Freshness Validation
 
 FileScopeMCP uses two complementary strategies to keep metadata current:
 
 - **Startup sweep** — runs once when the server initializes. Compares every tracked file against the filesystem to detect adds, deletes, and modifications that occurred while the server was offline. Heals the database before accepting any MCP requests.
-- **Per-file mtime check** — when you query a file through MCP tools (`get_file_importance`, `get_file_summary`, `read_file_content`), the system compares the file's current mtime against the last recorded value. If the file changed, it's immediately flagged stale and queued for LLM re-analysis. This catches changes missed by the watcher without the overhead of periodic full-tree scans.
+- **Per-file mtime check** — when you query a file through MCP tools (`get_file_summary`), the system compares the file's current mtime against the last recorded value. If the file changed, it's immediately flagged stale and queued for LLM re-analysis. This catches changes missed by the watcher without the overhead of periodic full-tree scans.
 
 ### Cycle Detection
 
@@ -338,28 +313,26 @@ The system handles various path formats to ensure consistent file identification
 
 ### Storage
 
-All file tree data is stored in `.filescope.db` (SQLite, WAL mode) in the project root.
+All file tree data is stored in `.filescope/data.db` (SQLite, WAL mode) inside the per-repo directory.
 
-- **Schema** — drizzle-orm manages: `files` (metadata, staleness, concepts, change_impact), `file_dependencies` (bidirectional relationships), `llm_jobs` (background job queue), `schema_version` (migration versioning), `llm_runtime_state` (token budget persistence).
+- **Schema** — drizzle-orm manages: `files` (metadata, staleness, concepts, change_impact), `file_dependencies` (bidirectional relationships), `schema_version` (migration versioning).
 - **Auto-migration** — on first run, any legacy JSON tree files are automatically detected and imported into SQLite. The original JSON files are left in place but are no longer used.
 
-**Persistent exclusions:** When you call `exclude_and_remove`, the pattern is saved to the `excludePatterns` array in `config.json`. Patterns take effect immediately and persist across server restarts.
+**Persistent exclusions:** When you call `exclude_and_remove`, the pattern is saved to the `excludePatterns` array in `.filescope/config.json`. Patterns take effect immediately and persist across server restarts.
 
 ## Configuration
 
-FileScopeMCP uses `config.json` in the project root for all settings. This file is **optional** — sensible defaults are used when it doesn't exist, and it's created automatically when you change settings via MCP tools.
+FileScopeMCP uses `.filescope/config.json` inside your project directory for all instance settings. This file is **optional** — sensible defaults are used when it doesn't exist, and it's created automatically when you change settings via MCP tools.
 
-### Full config.json example
+### config.json example
 
 ```json
 {
   "baseDirectory": "/path/to/your/project",
   "excludePatterns": [
-    "**/node_modules",
-    "**/.git",
-    "**/dist",
-    "**/build",
-    "**/coverage"
+    "docs/generated/**",
+    "*.csv",
+    "tmp/"
   ],
   "fileWatching": {
     "enabled": true,
@@ -371,16 +344,15 @@ FileScopeMCP uses `config.json` in the project root for all settings. This file 
     "watchForChanged": true
   },
   "llm": {
-    "enabled": true,
-    "provider": "openai-compatible",
-    "model": "qwen2.5-coder:14b",
-    "baseURL": "http://localhost:11434/v1",
-    "maxTokensPerMinute": 40000,
-    "tokenBudget": 1000000
+    "enabled": true
   },
   "version": "1.0.0"
 }
 ```
+
+Note: `excludePatterns` here contains only **project-specific additions**. The ~90 built-in default patterns (covering node_modules, .git, dist, build, language-specific artifacts, and more) are always applied automatically — you do not need to list them here.
+
+The `llm` block only controls whether the broker connection is active. Model selection, provider, API endpoint, and all other LLM settings are configured in `~/.filescope/broker.json` — not here.
 
 ### .filescopeignore
 
@@ -399,31 +371,55 @@ tmp/
 vendor/
 ```
 
-This file is loaded once at startup and applied alongside the `excludePatterns` from `config.json`. Changes to `.filescopeignore` require a server restart (or re-calling `set_project_path`) to take effect. Both systems work together — use `config.json` for programmatic patterns (set via MCP tools) and `.filescopeignore` for patterns you want to commit to your repo.
+This file is loaded once at startup and applied alongside the `excludePatterns` from `.filescope/config.json`. Changes to `.filescopeignore` require a server restart to take effect. Both systems work together — use `.filescope/config.json` for programmatic patterns (set via MCP tools) and `.filescopeignore` for patterns you want to commit to your repo.
 
-### LLM provider options
+### Broker Configuration
 
-| Provider | `provider` value | Auth | Use case |
-|----------|-----------------|------|----------|
-| Ollama | `"openai-compatible"` | None needed | Local inference, free |
-| vLLM | `"openai-compatible"` | Optional `apiKey` | Self-hosted GPU server |
-| OpenAI-compatible API | `"openai-compatible"` | `apiKey` or env var | Any compatible endpoint |
-| Anthropic (Claude) | `"anthropic"` | `ANTHROPIC_API_KEY` env var or `apiKey` field | Cloud API |
+LLM model and provider settings are configured globally in `~/.filescope/broker.json`. This file is shared across all projects and controls how the standalone broker process communicates with the LLM endpoint.
 
-**Default behavior:** When `toggle_llm(enabled: true)` is called with no existing LLM config, the system auto-creates a config targeting Ollama at `localhost:11434` with `qwen2.5-coder:14b`.
+**Auto-creation:** If `~/.filescope/broker.json` is missing, the broker automatically copies `broker.default.json` from the FileScopeMCP install directory on first start.
 
-### LLM config fields
+**Three templates are shipped with the project:**
+
+- `broker.default.json` — Ollama on localhost, `qwen2.5-coder:7b`
+- `broker.windows-host.json` — Ollama on the Windows host from WSL2, `qwen2.5-coder:14b`, uses `wsl-host` placeholder
+- `broker.remote-lan.json` — Ollama on a LAN machine by IP, `qwen2.5-coder:14b`
+
+Copy whichever template matches your setup to `~/.filescope/broker.json` and adjust as needed.
+
+**wsl-host auto-resolution:** If `baseURL` contains the string `wsl-host`, the broker automatically replaces it with the Windows host IP at startup by running `ip route show default` (WSL2 only). This lets you use `broker.windows-host.json` without manually updating the IP.
+
+**Broker config fields:**
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `enabled` | `false` | Whether the LLM pipeline runs |
-| `provider` | `"anthropic"` | Provider adapter to use |
-| `model` | `"claude-3-haiku-20240307"` | Model identifier |
-| `baseURL` | — | API endpoint (required for `openai-compatible`) |
-| `apiKey` | — | API key override (otherwise uses env vars) |
-| `maxTokensPerCall` | `1024` | Maximum tokens per LLM call |
-| `maxTokensPerMinute` | `40000` | Sliding-window rate limit |
-| `tokenBudget` | unlimited | Lifetime token cap; pipeline stops when reached |
+| `llm.provider` | `"openai-compatible"` | Provider adapter (`"anthropic"` or `"openai-compatible"`) |
+| `llm.model` | `"qwen2.5-coder:14b"` | Model identifier |
+| `llm.baseURL` | — | API endpoint (required for `openai-compatible`) |
+| `llm.apiKey` | — | API key (optional; uses env vars if omitted) |
+| `llm.maxTokensPerCall` | `1024` | Maximum tokens per LLM call |
+| `jobTimeoutMs` | `120000` | Timeout per job in milliseconds |
+| `maxQueueSize` | `1000` | Maximum number of pending jobs |
+
+## Directory Structure
+
+FileScopeMCP uses two directory locations:
+
+```
+Per-repo (inside your project):
+  .filescope/
+    config.json          # Project config (optional -- sensible defaults used)
+    data.db              # SQLite database (all metadata)
+    instance.pid         # PID lock file
+
+Global (shared across all projects):
+  ~/.filescope/
+    broker.json          # LLM broker config
+    broker.sock          # Unix domain socket (broker IPC)
+    broker.pid           # Broker PID file
+    broker.log           # Broker log output
+    stats.json           # Per-repo token usage stats
+```
 
 ## Technical Details
 
@@ -434,56 +430,38 @@ This file is loaded once at startup and applied alongside the `excludePatterns` 
 - **better-sqlite3** — SQLite storage with WAL mode (loaded via `createRequire` for ESM compatibility)
 - **drizzle-orm** — type-safe SQL schema and queries
 - **tree-sitter** — AST parsing for semantic change detection (loaded via `createRequire`)
-- **Vercel AI SDK** (`ai`, `@ai-sdk/anthropic`, `@ai-sdk/openai-compatible`) — multi-provider LLM abstraction
 - **zod** — runtime validation and structured output schemas
 - **AsyncMutex** — serializes concurrent tree mutations from the watcher and startup sweep
 
 ## Available Tools
 
-The MCP server exposes 22 tools organized by category:
+The MCP server exposes 11 tools (consolidated from 22 in v1.1):
 
 ### Project Setup
 
-- **set_project_path**: Point the server at a project directory and initialize or reload its file tree
-- **create_file_tree**: Re-scan a directory and rebuild the file tree in SQLite
-- **select_file_tree**: Get the current active file tree configuration
-- **list_saved_trees**: Show the current SQLite database status (file count, dependency count)
-- **delete_file_tree**: Clear all data from the SQLite database (requires `confirm: true` safety guard)
+- **set_base_directory** — Override the base directory to analyze a subdirectory or different project path
 
 ### File Analysis
 
-- **list_files**: List all files in the project with their importance rankings
-- **get_file_importance**: Get detailed information about a specific file — includes importance, dependencies, dependents, summary, concepts, changeImpact, and staleness fields
-- **find_important_files**: Find the most important files in the project — includes staleness fields
-- **set_file_importance**: Manually override the importance score for a specific file
-- **recalculate_importance**: Recalculate importance values for all files based on dependencies
-- **read_file_content**: Read the content of a specific file
+- **list_files** — List all files in the project with their importance rankings
+- **find_important_files** — Find the most important files in the project
+- **get_file_summary** — Get full file intel: summary, importance, dependencies, concepts, change impact, and staleness
+- **set_file_summary** — Set the summary of a specific file
+- **set_file_importance** — Manually set the importance ranking of a specific file
 
-### File Summaries
+### LLM Processing
 
-- **get_file_summary**: Get the stored summary of a specific file — includes concepts, changeImpact, and staleness fields
-- **set_file_summary**: Set or update the summary of a specific file
+- **scan_all** — Queue all files for LLM summarization. Intensive — use when you need full codebase intelligence. Takes optional `min_importance` threshold (default 1, skips zero-importance files).
+- **status** — System health: broker connection, queue depth, LLM processing progress, file watching, and project info. Shows summarized/concepts progress (e.g., "45/120"), pending counts, broker connection state, and per-repo token usage.
 
 ### Dependency Analysis
 
-- **detect_cycles**: Detect all circular dependency groups in the project using Tarjan's SCC algorithm
-- **get_cycles_for_file**: Get circular dependency groups that include a specific file
-
-### LLM Pipeline
-
-- **toggle_llm**: Enable or disable background LLM processing. When enabled with no prior config, defaults to Ollama (`openai-compatible`, `qwen2.5-coder:14b`, `localhost:11434`)
-- **get_llm_status**: Get pipeline status — running state, budget exhaustion flag, lifetime tokens used, token budget, and max tokens per minute
-
-### File Watching
-
-- **toggle_file_watching**: Toggle file watching on/off
-- **get_file_watching_status**: Get the current status of file watching
-- **update_file_watching_config**: Update file watching configuration (per-event-type toggles, `autoRebuildTree`, `ignoreDotFiles`, etc.)
+- **detect_cycles** — Detect all circular dependency groups in the project's file graph
+- **get_cycles_for_file** — Get cycle groups containing a specific file
 
 ### Utilities
 
-- **exclude_and_remove**: Exclude a file or glob pattern from the tree and remove matching nodes. Patterns are saved to `config.json` and persist across restarts
-- **debug_list_all_files**: List every file path currently tracked in the active tree (useful for debugging)
+- **exclude_and_remove** — Exclude and remove a file or pattern from the file tree. Patterns are saved to `.filescope/config.json` and persist across restarts.
 
 ## Usage Examples
 
@@ -491,67 +469,76 @@ The easiest way to get started is to enable this MCP in your AI client and let t
 
 ### Analyzing a Project
 
-1. Point the server at your project (builds the tree, starts file watching and the startup sweep):
-   ```
-   set_project_path(path: "/path/to/project")
-   ```
+Start a Claude Code session in your project directory. FileScopeMCP auto-initializes to the current working directory on startup.
 
-2. Find the most important files:
+1. Find the most important files:
    ```
    find_important_files(limit: 5, minImportance: 5)
    ```
 
-3. Get detailed information about a specific file:
-   ```
-   get_file_importance(filepath: "/path/to/project/src/main.ts")
-   ```
-
-### Working with Summaries
-
-1. Read a file's content to understand it:
-   ```
-   read_file_content(filepath: "/path/to/project/src/main.ts")
-   ```
-
-2. Add a summary to the file:
-   ```
-   set_file_summary(filepath: "/path/to/project/src/main.ts", summary: "Main entry point that initializes the application, sets up routing, and starts the server.")
-   ```
-
-3. Retrieve the summary later:
+2. Get detailed information about a specific file:
    ```
    get_file_summary(filepath: "/path/to/project/src/main.ts")
    ```
 
-### Using the LLM Pipeline
+### Working with Summaries
 
-1. Enable background LLM processing (uses Ollama by default):
+1. Add a summary to a file:
    ```
-   toggle_llm(enabled: true)
+   set_file_summary(filepath: "/path/to/project/src/main.ts", summary: "Main entry point that initializes the application, sets up routing, and starts the server.")
    ```
 
-2. Check LLM pipeline status:
+2. Retrieve the summary later:
    ```
-   get_llm_status()
+   get_file_summary(filepath: "/path/to/project/src/main.ts")
+   ```
+
+### Using the LLM Broker
+
+LLM processing is enabled by default. The broker auto-spawns when the first MCP instance connects.
+
+1. Check broker and LLM status:
+   ```
+   status()
    ```
    Returns:
    ```json
    {
-     "enabled": true,
-     "running": true,
-     "budgetExhausted": false,
-     "lifetimeTokensUsed": 42350,
-     "tokenBudget": 1000000,
-     "maxTokensPerMinute": 40000
+     "project": {
+       "root": "/path/to/project",
+       "totalFiles": 120,
+       "lastUpdated": "2026-03-24T12:00:00.000Z"
+     },
+     "llm": {
+       "summarized": "45/120",
+       "conceptsExtracted": "32/120",
+       "pendingSummary": 15,
+       "pendingConcepts": 23
+     },
+     "broker": {
+       "mode": "broker",
+       "brokerConnected": true,
+       "pendingCount": 38,
+       "connectedClients": 1
+     },
+     "fileWatching": {
+       "enabled": true,
+       "isActive": true
+     }
    }
+   ```
+
+2. Queue all files for LLM processing (intensive — use when you need full codebase intelligence):
+   ```
+   scan_all(min_importance: 3)
    ```
 
 3. View auto-generated metadata for a file:
    ```
-   get_file_importance(filepath: "/path/to/project/src/main.ts")
+   get_file_summary(filepath: "/path/to/project/src/main.ts")
    ```
 
-**Sample response** (after LLM pipeline has processed the file):
+**Sample response** (after LLM broker has processed the file):
 ```json
 {
   "path": "/path/to/project/src/main.ts",
@@ -572,14 +559,11 @@ The easiest way to get started is to enable this MCP in your AI client and let t
     "affectedAreas": ["server startup", "route registration", "error handling"],
     "breakingChanges": [],
     "summary": "Central orchestration file — changes here affect all downstream request handling"
-  },
-  "summaryStale": null,
-  "conceptsStale": null,
-  "changeImpactStale": null
+  }
 }
 ```
 
-When staleness fields are `null`, the metadata is current. A non-null value (epoch timestamp) means the file or a dependency changed and the LLM pipeline will regenerate that field.
+When staleness fields appear (e.g., `summaryStale`, `conceptsStale`), the metadata is outdated and the broker will regenerate it. Absent staleness fields mean the metadata is current.
 
 ### Finding Circular Dependencies
 
@@ -592,28 +576,6 @@ When staleness fields are `null`, the metadata is current. A non-null value (epo
 2. Check if a specific file is part of a cycle:
    ```
    get_cycles_for_file(filepath: "/path/to/project/src/moduleA.ts")
-   ```
-
-### Configuring File Watching
-
-1. Check the current file watching status:
-   ```
-   get_file_watching_status()
-   ```
-
-2. Update file watching configuration:
-   ```
-   update_file_watching_config(config: {
-     autoRebuildTree: true,
-     watchForNewFiles: true,
-     watchForDeleted: true,
-     watchForChanged: true
-   })
-   ```
-
-3. Disable watching entirely:
-   ```
-   toggle_file_watching()
    ```
 
 ### Testing
@@ -631,6 +593,7 @@ npm run coverage
 |------|------|----------|
 | `mcp-debug.log` | MCP server mode (disabled by default) | Working directory |
 | `.filescope-daemon.log` | Daemon mode (always on) | Project root |
+| `~/.filescope/broker.log` | Broker process (always on) | Global directory |
 
 **MCP mode:** File logging is disabled by default. To enable it, edit `src/mcp-server.ts` and change `enableFileLogging(false, ...)` to `true`, then rebuild. MCP log messages also go to stderr, which Claude Code captures in its own logs.
 
@@ -639,24 +602,19 @@ npm run coverage
 tail -f /path/to/project/.filescope-daemon.log
 ```
 
+**Broker:** The broker process logs to `~/.filescope/broker.log`. Check here for LLM connection errors, timeout failures, and queue activity.
+
 ### Checking Status via MCP Tools
 
 From your AI assistant, you can query the system state at any time:
 
 ```
-# Is the file watcher running? What events is it tracking?
-get_file_watching_status()
-
-# Is the LLM pipeline running? How many tokens have been used?
-get_llm_status()
-# Returns: { running, budgetExhausted, lifetimeTokensUsed, tokenBudget, maxTokensPerMinute }
-
-# How many files are tracked?
-debug_list_all_files()
+# Broker connection, LLM progress, file watching, and project info — all in one call
+status()
 
 # Check if a specific file has stale metadata
-get_file_importance(filepath: "/path/to/file.ts")
-# Staleness fields: summaryStale, conceptsStale, changeImpactStale (epoch timestamps, null = not stale)
+get_file_summary(filepath: "/path/to/file.ts")
+# Staleness fields (summaryStale, conceptsStale, changeImpactStale) appear when metadata is outdated
 
 # Are there any circular dependency chains?
 detect_cycles()
@@ -667,19 +625,13 @@ detect_cycles()
 The SQLite database is a standard file you can query with any SQLite client:
 
 ```bash
-sqlite3 /path/to/project/.filescope.db
+sqlite3 /path/to/project/.filescope/data.db
 
 # How many files are tracked?
 SELECT COUNT(*) FROM files WHERE is_directory = 0;
 
 # Which files have LLM-generated summaries?
 SELECT path, LENGTH(summary) as summary_len FROM files WHERE summary IS NOT NULL AND is_directory = 0;
-
-# What LLM jobs are pending?
-SELECT * FROM llm_jobs WHERE status = 'pending' ORDER BY priority, created_at;
-
-# Check lifetime token usage
-SELECT * FROM llm_runtime_state;
 
 # Which files have stale metadata?
 SELECT path, summary_stale, concepts_stale, change_impact_stale FROM files WHERE summary_stale IS NOT NULL OR concepts_stale IS NOT NULL OR change_impact_stale IS NOT NULL;
@@ -689,13 +641,13 @@ SELECT path, summary_stale, concepts_stale, change_impact_stale FROM files WHERE
 
 ```bash
 # Check if a daemon is running for a project
-cat /path/to/project/.filescope.pid
+cat /path/to/project/.filescope/instance.pid
 
 # Check if that PID is alive
-kill -0 $(cat /path/to/project/.filescope.pid) 2>/dev/null && echo "Running" || echo "Not running"
+kill -0 $(cat /path/to/project/.filescope/instance.pid) 2>/dev/null && echo "Running" || echo "Not running"
 
 # Graceful shutdown
-kill $(cat /path/to/project/.filescope.pid)
+kill $(cat /path/to/project/.filescope/instance.pid)
 
 # Start daemon
 node /path/to/FileScopeMCP/dist/mcp-server.js --daemon --base-dir=/path/to/project
@@ -703,8 +655,9 @@ node /path/to/FileScopeMCP/dist/mcp-server.js --daemon --base-dir=/path/to/proje
 
 ## Troubleshooting
 
-### "Project path not set" error
-Every tool except `set_project_path` requires initialization first. Call `set_project_path(path: "/your/project")` or ensure you're using `--base-dir` when starting the server.
+### Project not initializing correctly
+
+The server auto-initializes to the current working directory on startup. If you need to analyze a different directory, call `set_base_directory(path: "/your/project")`. If running with Cursor AI or daemon mode, pass `--base-dir=/your/project` as a startup argument.
 
 ### MCP server not appearing in Claude Code
 1. Run `claude mcp list` to check registration.
@@ -718,53 +671,59 @@ Every tool except `set_project_path` requires initialization first. Call `set_pr
 - **macOS:** `xcode-select --install`
 - **Windows:** Install Visual Studio Build Tools with C++ workload
 
-### LLM pipeline not generating metadata
-1. Check `get_llm_status()` — is `running` true?
-2. If `budgetExhausted` is true, the lifetime token budget has been reached. Increase `tokenBudget` in `config.json` or set to `0` for unlimited.
+### LLM broker not generating metadata
+1. Check `status()` — is `broker.brokerConnected` true?
+2. Check `~/.filescope/broker.log` for connection errors or LLM timeout failures.
 3. If using Ollama, confirm it's running: `curl http://localhost:11434/v1/models`
-4. Check for errors in the log file (daemon mode) or stderr (MCP mode).
+4. Check `~/.filescope/broker.json` — ensure `baseURL` points to your LLM endpoint and `model` is correct.
 5. Run `./setup-llm.sh --status` to verify Ollama and model installation.
 
 ### "FileScopeMCP daemon already running" error
 A PID file exists for this project. Either another daemon is running, or a previous one crashed without cleanup:
 ```bash
 # Check if the PID is actually alive
-cat /path/to/project/.filescope.pid
+cat /path/to/project/.filescope/instance.pid
 kill -0 <PID> 2>/dev/null && echo "Still running" || echo "Stale PID file"
 
 # If stale, remove it
-rm /path/to/project/.filescope.pid
+rm /path/to/project/.filescope/instance.pid
 ```
 
 ### Database seems corrupted or out of date
 The SQLite database uses WAL mode for crash safety, but if something goes wrong:
 ```bash
 # Delete the database — it will be rebuilt on next startup
-rm /path/to/project/.filescope.db
-rm -f /path/to/project/.filescope.db-wal
-rm -f /path/to/project/.filescope.db-shm
+rm /path/to/project/.filescope/data.db
+rm -f /path/to/project/.filescope/data.db-wal
+rm -f /path/to/project/.filescope/data.db-shm
 ```
-On the next `set_project_path` call, the system rescans the project and rebuilds the database from scratch. If legacy JSON tree files exist, they'll be auto-imported.
-
-### High token usage / runaway LLM costs
-1. Check `get_llm_status()` for `lifetimeTokensUsed`.
-2. Set a `tokenBudget` in `config.json` to cap total usage.
-3. Reduce `maxTokensPerMinute` to slow the pipeline down.
-4. The cascade engine's depth cap (10 levels) and body-only-change optimization already prevent most unnecessary calls.
+On the next startup, the system rescans the project and rebuilds the database from scratch.
 
 ## Generated Files Reference
 
-Files created by FileScopeMCP in your project directory:
+### Per-repo files (inside `.filescope/` in your project)
 
 | File | Purpose | Gitignore? |
 |------|---------|------------|
-| `.filescope.db` | SQLite database (all metadata, jobs, state) | Yes |
-| `.filescope.db-wal` | SQLite write-ahead log | Yes |
-| `.filescope.db-shm` | SQLite shared memory file | Yes |
-| `.filescope.pid` | Daemon PID lock file | Yes |
+| `.filescope/config.json` | Server configuration (exclude patterns, file watching, LLM on/off) | Optional |
+| `.filescope/data.db` | SQLite database (all metadata) | Yes |
+| `.filescope/data.db-wal` | SQLite write-ahead log | Yes |
+| `.filescope/data.db-shm` | SQLite shared memory file | Yes |
+| `.filescope/instance.pid` | Daemon PID lock file | Yes |
 | `.filescope-daemon.log` | Daemon log output | Yes |
 | `mcp-debug.log` | MCP server debug log (when enabled) | Yes |
-| `config.json` | Server configuration (exclude patterns, file watching, LLM settings) | Optional |
+
+Add `.filescope/` to your `.gitignore` to exclude all runtime artifacts at once.
+
+### Global files (in `~/.filescope/`, shared across all projects)
+
+| File | Purpose |
+|------|---------|
+| `~/.filescope/broker.json` | LLM broker configuration |
+| `~/.filescope/broker.sock` | Unix domain socket (broker IPC) |
+| `~/.filescope/broker.pid` | Broker PID file |
+| `~/.filescope/broker.log` | Broker log output |
+| `~/.filescope/stats.json` | Per-repo token usage statistics |
 
 ## License
 
