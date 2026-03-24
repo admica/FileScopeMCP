@@ -380,6 +380,35 @@ export function getStaleness(filePath: string): {
 }
 
 /**
+ * Returns aggregate LLM processing progress across all non-directory files.
+ */
+export function getLlmProgress(): {
+  totalFiles: number;
+  withSummary: number;
+  withConcepts: number;
+  pendingSummary: number;
+  pendingConcepts: number;
+} {
+  const sqlite = getSqlite();
+  const row = sqlite.prepare(
+    `SELECT
+       COUNT(*) as total,
+       SUM(CASE WHEN summary IS NOT NULL AND summary <> '' THEN 1 ELSE 0 END) as with_summary,
+       SUM(CASE WHEN concepts IS NOT NULL AND concepts <> '' THEN 1 ELSE 0 END) as with_concepts,
+       SUM(CASE WHEN summary_stale_since IS NOT NULL THEN 1 ELSE 0 END) as pending_summary,
+       SUM(CASE WHEN concepts_stale_since IS NOT NULL THEN 1 ELSE 0 END) as pending_concepts
+     FROM files WHERE is_directory = 0`
+  ).get() as { total: number; with_summary: number; with_concepts: number; pending_summary: number; pending_concepts: number };
+  return {
+    totalFiles: row.total,
+    withSummary: row.with_summary,
+    withConcepts: row.with_concepts,
+    pendingSummary: row.pending_summary,
+    pendingConcepts: row.pending_concepts,
+  };
+}
+
+/**
  * Marks all 3 staleness columns to `timestamp` for every file in `filePaths`.
  * Uses a raw prepared statement inside a transaction for atomicity and speed.
  * If a path doesn't exist in the DB, the UPDATE silently matches 0 rows (no throw).
@@ -397,6 +426,26 @@ export function markStale(filePaths: string[], timestamp: number): void {
     }
   });
   tx();
+}
+
+/**
+ * Marks all non-directory files at or above minImportance as stale.
+ * Returns the number of files marked.
+ */
+export function markAllStale(timestamp: number, minImportance: number = 1): number {
+  const sqlite = getSqlite();
+  const result = sqlite.prepare(
+    `UPDATE files
+     SET summary_stale_since = ?,
+         concepts_stale_since = ?,
+         change_impact_stale_since = ?
+     WHERE is_directory = 0
+       AND importance >= ?
+       AND (summary_stale_since IS NULL
+         OR concepts_stale_since IS NULL
+         OR change_impact_stale_since IS NULL)`
+  ).run(timestamp, timestamp, timestamp, minImportance);
+  return result.changes;
 }
 
 

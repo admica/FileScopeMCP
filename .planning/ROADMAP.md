@@ -127,4 +127,4 @@ Plans:
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 19. Observability | 2/2 | Complete   | 2026-03-23 | - |
+| 19. Observability | 2/2 | Complete    | 2026-03-23 | - |

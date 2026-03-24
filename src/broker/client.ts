@@ -1,7 +1,7 @@
 // src/broker/client.ts
 // Broker client module for FileScopeMCP instances.
 // Manages the connection lifecycle to the shared LLM broker over a Unix domain socket.
-// Exports: connect, disconnect, submitJob, isConnected, requestStatus
+// Exports: connect, disconnect, submitJob, isConnected, requestStatus, resubmitStaleFiles
 import * as net from 'node:net';
 import * as readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
@@ -214,7 +214,7 @@ function handleBrokerMessage(msg: BrokerMessage): void {
  * Queries for stale files and resubmits each stale job to the broker.
  * Called after every successful connection.
  */
-function resubmitStaleFiles(): void {
+export function resubmitStaleFiles(): void {
   try {
     const sqlite = getSqlite();
     const rows = sqlite

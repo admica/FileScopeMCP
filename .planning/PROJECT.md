@@ -77,9 +77,9 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - [ ] Stale socket/PID cleanup on broker startup
 - [x] Startup resubmission batching (stale files by importance on reconnect) — v1.2 Phase 17
 - [x] Config migration: LLM model config moved to broker, instance has enabled-only — v1.2 Phase 17
-- [ ] Broker status reporting via MCP get_llm_status tool
-- [ ] Remove llm_jobs and llm_runtime_state tables from local DBs
-- [ ] Remove TokenBudgetGuard budget gating (Phase 18 cleanup)
+- [x] Broker status reporting via MCP get_llm_status tool — v1.2 Phase 19
+- [x] Remove llm_jobs and llm_runtime_state tables from local DBs — v1.2 Phase 18
+- [x] Remove TokenBudgetGuard budget gating — v1.2 Phase 18
 
 ### Out of Scope
 
@@ -101,7 +101,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 Shipped v1.0 (9 phases, 9,515 LOC) and v1.1 (6 phases, hardening + language support). 250+ tests passing. The system is a complete autonomous file intelligence platform.
 
-v1.2 progress: Phase 16 built the standalone broker (socket server, priority queue, worker, PID guard). Phase 17 wired instances to use the broker client — all LLM job submission now goes through `submitJob()` over Unix socket, coordinator lifecycle uses `connectBroker()`/`disconnectBroker()`, and LLMConfig simplified to `enabled` boolean. Phases 18-19 remain for cleanup and observability.
+v1.2 progress: Phase 16 built the standalone broker (socket server, priority queue, worker, PID guard). Phase 17 wired instances to use the broker client — all LLM job submission now goes through `submitJob()` over Unix socket, coordinator lifecycle uses `connectBroker()`/`disconnectBroker()`, and LLMConfig simplified to `enabled` boolean. Phase 18 cleaned up all legacy local job queue infrastructure — dropped llm_jobs/llm_runtime_state tables, deleted pipeline.ts/rate-limiter.ts/adapter.ts, removed 9 dead CRUD functions, and eliminated isExhausted parameter threading. Phase 19 added observability — stats.ts persists per-repo token totals, requestStatus() queries live broker state, and get_llm_status MCP tool returns broker connection, queue depth, and token usage.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -133,4 +133,4 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | No dual-mode fallback | Broker or no LLM — single code path, no complexity | ✓ Good |
 
 ---
-*Last updated: 2026-03-22 after Phase 17 complete*
+*Last updated: 2026-03-22 after Phase 19 complete*

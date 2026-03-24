@@ -9,8 +9,7 @@ import {
   FileTreeConfig,
 } from "./types.js";
 import { normalizePath, excludeAndRemoveFile } from "./file-utils.js";
-import { setConfig, getConfig } from './global-state.js';
-import { saveConfig } from './config-utils.js';
+import { getConfig } from './global-state.js';
 import { log, enableFileLogging, enableDaemonFileLogging } from './logger.js';
 import {
   getFile,
@@ -19,8 +18,11 @@ import {
   getDependencies,
   getDependents,
   getStaleness,
-  getAllLocalImportEdges
+  getAllLocalImportEdges,
+  markAllStale,
+  getLlmProgress,
 } from './db/repository.js';
+import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
 import { detectCycles } from './cycle-detection.js';
 import { getSqlite } from './db/db.js';
 import { ServerCoordinator } from './coordinator.js';
@@ -315,43 +317,37 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     }
   });
 
-  server.tool("toggle_llm", "Enable or disable broker LLM processing", {
-    enabled: z.boolean().describe("true to connect to broker, false to disconnect"),
-  }, async ({ enabled }) => {
-    if (!coordinator.isInitialized()) {
-      return { content: [{ type: "text", text: "Error: Project not initialized. Call set_base_directory first." }], isError: true };
+  server.tool("scan_all", "Queue all files for LLM summarization. Intensive — use when you need full codebase intelligence.", {
+    min_importance: z.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
+  }, async ({ min_importance }) => {
+    if (!coordinator.isInitialized()) return projectPathNotSetError;
+    if (!brokerIsConnected()) {
+      return { content: [{ type: "text", text: "Error: Broker not connected. Check LLM config in .filescope/config.json (llm.enabled must be true)." }], isError: true };
     }
-    try {
-      const config = getConfig();
-      if (config) {
-        if (!config.llm) config.llm = {};
-        config.llm.enabled = enabled;
-        setConfig(config);
-        await saveConfig(config);
-      }
-      if (enabled) {
-        await coordinator.connectBroker();
-      } else {
-        coordinator.disconnectBroker();
-      }
-      return { content: [{ type: "text", text: `Broker LLM ${enabled ? 'connected' : 'disconnected'}. Setting persisted to config.` }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: `Error toggling broker: ${err}` }], isError: true };
-    }
+    const marked = markAllStale(Date.now(), min_importance);
+    resubmitStaleFiles();
+    return createMcpResponse({ queued: marked, min_importance, message: marked > 0 ? `Queued ${marked} files for LLM processing.` : "All files already queued or processed." });
   });
 
-  server.tool("status", "System health: broker connection, queue depth, token usage, file watching, and project info", {}, async () => {
+  server.tool("status", "System health: broker connection, queue depth, LLM processing progress, file watching, and project info", {}, async () => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
     const broker = await coordinator.getBrokerStatus();
     const config = coordinator.getCurrentConfig();
     const appConfig = getConfig();
     const fileCount = getAllFiles().length;
+    const llmProgress = getLlmProgress();
     return createMcpResponse({
       project: {
         root: coordinator.getProjectRoot(),
         baseDirectory: config?.baseDirectory ?? null,
         totalFiles: fileCount,
         lastUpdated: config?.lastUpdated ?? null,
+      },
+      llm: {
+        summarized: `${llmProgress.withSummary}/${llmProgress.totalFiles}`,
+        conceptsExtracted: `${llmProgress.withConcepts}/${llmProgress.totalFiles}`,
+        pendingSummary: llmProgress.pendingSummary,
+        pendingConcepts: llmProgress.pendingConcepts,
       },
       broker,
       fileWatching: {

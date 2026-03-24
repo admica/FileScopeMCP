@@ -222,6 +222,10 @@ export class ServerCoordinator {
     // Initialize ChangeDetector for semantic change classification (Phase 3)
     this.changeDetector = new ChangeDetector(projectRoot);
 
+    // Ensure .filescope/ directory exists before anything writes into it
+    const filescopeDir = path.join(projectRoot, FILESCOPE_DIR);
+    fsSync.mkdirSync(filescopeDir, { recursive: true });
+
     // Acquire PID file guard — prevents concurrent daemons from corrupting the DB
     await this.acquirePidFile(projectRoot);
 
@@ -239,8 +243,6 @@ export class ServerCoordinator {
     };
 
     // Open the SQLite database for this project (coordinator owns the lifecycle)
-    const filescopeDir = path.join(projectRoot, FILESCOPE_DIR);
-    fsSync.mkdirSync(filescopeDir, { recursive: true });
     const dbPath = path.join(filescopeDir, 'data.db');
     openDatabase(dbPath);
     log(`Opened SQLite database at: ${dbPath}`);

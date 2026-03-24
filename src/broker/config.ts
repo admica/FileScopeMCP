@@ -5,6 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
@@ -56,5 +57,30 @@ export async function loadBrokerConfig(): Promise<BrokerConfig> {
     console.error(`Invalid broker config at ${CONFIG_PATH}:\n${result.error.message}`);
     process.exit(1);
   }
-  return result.data;
+
+  // Resolve wsl-host placeholder to the actual Windows host IP
+  const config = result.data;
+  if (config.llm.baseURL?.includes('wsl-host')) {
+    const hostIp = resolveWslHostIp();
+    if (hostIp) {
+      config.llm.baseURL = config.llm.baseURL.replace('wsl-host', hostIp);
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Resolves the Windows host IP from inside WSL2.
+ * Returns null if not running in WSL or if detection fails.
+ */
+function resolveWslHostIp(): string | null {
+  try {
+    // ip route is the most reliable method — gateway is always the Windows host
+    const out = execSync('ip route show default', { encoding: 'utf-8', timeout: 2000 });
+    const match = out.match(/via\s+([\d.]+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }

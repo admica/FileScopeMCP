@@ -249,24 +249,16 @@ describe('COMPAT-01: MCP tool names and schemas remain identical', () => {
 
     const expectedTools = [
       'set_base_directory',
-      'list_saved_trees',
-      'delete_file_tree',
-      'create_file_tree',
-      'select_file_tree',
       'list_files',
-      'get_file_importance',
       'find_important_files',
       'get_file_summary',
       'set_file_summary',
-      'read_file_content',
       'set_file_importance',
-      'recalculate_importance',
-      'toggle_file_watching',
-      'get_file_watching_status',
-      'update_file_watching_config',
-      'debug_list_all_files',
-      'toggle_llm',
+      'scan_all',
+      'status',
       'exclude_and_remove',
+      'detect_cycles',
+      'get_cycles_for_file',
     ];
 
     for (const toolName of expectedTools) {
