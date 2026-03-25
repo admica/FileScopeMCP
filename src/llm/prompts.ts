@@ -4,6 +4,14 @@
 // baked into the FileScopeMCP-brain Ollama model. Per-request prompts only identify the
 // task type and provide the input content.
 
+// ~16k tokens of source code ≈ 64KB. 7B models degrade on longer contexts.
+const MAX_CONTENT_BYTES = 64 * 1024;
+
+function truncateContent(content: string): string {
+  if (content.length <= MAX_CONTENT_BYTES) return content;
+  return content.slice(0, MAX_CONTENT_BYTES) + '\n... [truncated]';
+}
+
 /**
  * Builds a prompt for generating a plain-text file summary (LLM-01).
  */
@@ -12,7 +20,7 @@ export function buildSummaryPrompt(filePath: string, fileContent: string): strin
 FILE: ${filePath}
 
 \`\`\`
-${fileContent}
+${truncateContent(fileContent)}
 \`\`\``;
 }
 
@@ -24,7 +32,7 @@ export function buildConceptsPrompt(filePath: string, fileContent: string): stri
 FILE: ${filePath}
 
 \`\`\`
-${fileContent}
+${truncateContent(fileContent)}
 \`\`\``;
 }
 

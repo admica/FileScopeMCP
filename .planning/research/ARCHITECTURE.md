@@ -1,335 +1,68 @@
 # Architecture Research
 
-**Domain:** LLM Broker — standalone broker process integrated into FileScopeMCP v1.2
-**Researched:** 2026-03-21
-**Confidence:** HIGH (direct codebase audit of all affected source files)
+**Domain:** Centralized observability service (Nexus) integrated with existing FileScopeMCP daemon ecosystem
+**Researched:** 2026-03-24
+**Confidence:** HIGH — based on direct reading of existing source code (broker/client.ts, coordinator.ts, broker/main.ts, broker/server.ts, broker/config.ts, broker/stats.ts, package.json) and the fully-designed NEXUS-PLAN.md
 
 ---
 
-## Context: What Ships Today (v1.1 Baseline)
+## Standard Architecture
 
-Reading the live code establishes the precise integration surface. Key facts:
-
-- `ServerCoordinator` (coordinator.ts) owns the full lifecycle: DB open, FileWatcher, LLMPipeline start/stop, PID guard.
-- `LLMPipeline` (llm/pipeline.ts) polls `llm_jobs` in the local `.filescope.db` via `dequeueNextJob()`. It holds the `LanguageModel` instance (from `adapter.ts`) and `TokenBudgetGuard` (rate-limiter.ts).
-- `adapter.ts` calls `createAnthropic` or `createOpenAICompatible` from the Vercel AI SDK. Returns a `LanguageModel`.
-- `prompts.ts` builds string prompts for `summary`, `concepts`, and `change_impact` job types.
-- `types.ts` (llm/types.ts) holds `LLMConfig`, `LLMConfigSchema`, `ConceptsSchema`, `ChangeImpactSchema`.
-- `cascade-engine.ts` and `llm-diff-fallback.ts` call `insertLlmJobIfNotPending()` from `db/repository.ts` to enqueue jobs into the local `llm_jobs` table.
-- `coordinator.ts` calls `isLlmBudgetExhausted()` which delegates to `TokenBudgetGuard.isExhausted()` — this `isExhausted` callback is threaded into `cascadeStale` and `markSelfStale` as a circuit breaker.
-- esbuild bundles everything via a single entry point list into `dist/`. There is no separate entry point today.
-- Build command: `esbuild src/...all files... --format=esm --target=es2020 --outdir=dist --platform=node`
-
----
-
-## System Overview — v1.2 Broker Architecture
+### System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  INSTANCE PROCESSES  (one per repo, same as today)                               │
-│                                                                                   │
-│  ┌──────────────────────────────────┐  ┌──────────────────────────────────────┐  │
-│  │  Coordinator (repo A)             │  │  Coordinator (repo B)                 │  │
-│  │  FileWatcher, scan, MCP tools     │  │  FileWatcher, scan, MCP tools         │  │
-│  │                                   │  │                                       │  │
-│  │  cascade-engine.ts                │  │  cascade-engine.ts                    │  │
-│  │  llm-diff-fallback.ts             │  │  llm-diff-fallback.ts                 │  │
-│  │       │ submitJob()               │  │       │ submitJob()                   │  │
-│  │       ▼                           │  │       ▼                               │  │
-│  │  broker-client.ts ──────────────► │  │  broker-client.ts ──────────────────► │  │
-│  │  (reconnect, dedup, fallback)     │  │  (reconnect, dedup, fallback)         │  │
-│  └──────────────────────────────────┘  └──────────────────────────────────────┘  │
-└─────────────────────────────────┬───────────────────────────────────────────────┘
-                                   │  Unix domain socket: ~/.filescope/broker.sock
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  BROKER PROCESS  (src/broker/main.ts → dist/broker.js)                           │
-│                                                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │  Socket Server (net.createServer)                                        │    │
-│  │  Accepts connections from instances                                      │    │
-│  │  Protocol: newline-delimited JSON                                        │    │
-│  └────────────────────────────────┬────────────────────────────────────────┘    │
-│                                    │                                              │
-│  ┌─────────────────────────────────▼──────────────────────────────────────┐     │
-│  │  In-Memory Priority Queue                                                │     │
-│  │  Map<jobId, Job> sorted by (importance DESC, created_at ASC)            │     │
-│  │  One pending job per (file_path + job_type + repo_path) — dedup at      │     │
-│  │  insert time (latest content wins)                                       │     │
-│  └─────────────────────────────────┬──────────────────────────────────────┘     │
-│                                    │                                              │
-│  ┌─────────────────────────────────▼──────────────────────────────────────┐     │
-│  │  Worker Loop (single, sequential)                                        │     │
-│  │  Dequeues highest-importance pending job                                 │     │
-│  │  Reads file content (fs.readFile)                                        │     │
-│  │  Builds prompt (prompts.ts — shared code)                                │     │
-│  │  Calls Ollama (adapter.ts — shared code)                                 │     │
-│  │  Sends result back to instance via socket                                │     │
-│  │  Job timeout: 120s (in-flight Ollama call)                               │     │
-│  └─────────────────────────────────┬──────────────────────────────────────┘     │
-│                                    │                                              │
-│  ┌─────────────────────────────────▼──────────────────────────────────────┐     │
-│  │  Token Stats (~/.filescope/stats.json)                                   │     │
-│  │  Per-repo lifetime token usage, written after each job                   │     │
-│  └─────────────────────────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
-                          ┌──────────────────┐
-                          │  Ollama (GPU)     │
-                          │  Single process   │
-                          │  Single GPU       │
-                          └──────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        Claude Code (AI Agent)                             │
+│          (one Claude session per repo, spawns MCP as stdio child)         │
+└───────────────────────────┬──────────────────────────────────────────────┘
+                            │ stdio (JSON-RPC / MCP protocol)
+┌───────────────────────────▼──────────────────────────────────────────────┐
+│                   MCP Instance (per-repo process)                         │
+│                       src/mcp-server.ts                                   │
+│                                                                           │
+│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────────┐    │
+│  │  coordinator.ts │   │ broker/client.ts │   │  nexus/client.ts    │    │
+│  │  (lifecycle,    │   │  (LLM job sub-  │   │  (event emitter,    │    │
+│  │   file watcher, │   │   mission, re-  │   │   fire-and-forget,  │    │
+│  │   cascade)      │   │   connect)      │   │   reconnect)        │    │
+│  └────────┬────────┘   └────────┬────────┘   └────────┬────────────┘    │
+│           │                     │                      │                  │
+│  .filescope/data.db    NDJSON over sock        NDJSON over sock          │
+│  (per-repo SQLite)                                                        │
+└───────────────────────────────────────────────────────────────────────────┘
+           │                     │                       │
+           │          ┌──────────▼────────┐   ┌─────────▼──────────────┐
+           │          │    LLM Broker     │   │    Nexus Service        │
+           │          │  ~/.filescope/    │   │  ~/.filescope/         │
+           │          │  broker.sock      │   │  nexus.sock            │
+           │          │  broker.pid       │   │  nexus.pid             │
+           │          │  broker.log       │   │  nexus.log             │
+           │          │  broker.json      │   │  nexus.db              │
+           │          │                   │   │                        │
+           │          │  PriorityQueue    │   │  Connection map        │
+           │          │  BrokerWorker     │   │  Activity batch queue  │
+           │          │  Ollama calls     │   │  Ring buffer           │
+           │          └───────────────────┘   └────────────────────────┘
+           │
+     SQLite per repo
+     .filescope/data.db
 ```
 
----
+**Key structural fact:** The Nexus is a pure event sink — it mirrors the broker's lifecycle patterns (PID guard, Unix socket, auto-spawn, NDJSON, reconnect) but data flows in only one direction. The broker processes work. The Nexus observes work.
 
-## Component Boundaries: New vs Modified
+### Component Responsibilities
 
-### New Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `broker/main.ts` | `src/broker/main.ts` → `dist/broker.js` | Broker process entry point. Starts socket server, worker loop, signal handlers. Loads LLM config from `~/.filescope/broker-config.json` or falls back to local `config.json`. |
-| `broker/server.ts` | `src/broker/server.ts` | Socket server using Node.js `net` module. Accepts connections from instances, parses newline-delimited JSON messages, dispatches `submit`, `cancel`, `status` requests. |
-| `broker/queue.ts` | `src/broker/queue.ts` | In-memory priority queue. Holds `Map<jobId, PendingJob>`. Dedup logic: if a pending job exists for same `(file_path, job_type, repo_path)`, replace its payload and reset created_at (latest content wins). Priority: importance DESC, created_at ASC. |
-| `broker/worker.ts` | `src/broker/worker.ts` | Sequential worker loop. Polls the queue, claims one job, reads file content, calls adapter/prompts (shared code), sends result to the waiting instance connection, updates token stats. |
-| `llm/broker-client.ts` | `src/llm/broker-client.ts` | Instance-side client. Connects to `~/.filescope/broker.sock`. Exposes `submitJob(job): Promise<JobResult>`. Handles: reconnection with exponential backoff, timeout, graceful degradation to direct mode if broker is not available. |
-
-### Modified Components
-
-| Component | File | What Changes |
-|-----------|------|-------------|
-| `pipeline.ts` | `src/llm/pipeline.ts` | Dual-mode: if `BrokerClient.isConnected()` then submit job to broker and await result; else fall through to direct Ollama (existing behavior). The dequeue loop becomes a broker-response listener or stays as polling in direct mode. Remove `TokenBudgetGuard` gating. |
-| `cascade-engine.ts` | `src/cascade/cascade-engine.ts` | Replace `insertLlmJobIfNotPending(filePath, type, tier)` with `submitJob(filePath, type, payload)`. Remove `isExhausted` parameter from `cascadeStale` and `markSelfStale`. |
-| `llm-diff-fallback.ts` | `src/change-detector/llm-diff-fallback.ts` | Replace `insertLlmJobIfNotPending` with `submitJob`. |
-| `coordinator.ts` | `src/coordinator.ts` | Wire `BrokerClient` lifecycle: connect on init, disconnect on shutdown. Remove budget guard persistence. Remove `isLlmBudgetExhausted()` / `getLlmLifetimeTokensUsed()` methods that feed into cascade. |
-| `db/repository.ts` | `src/db/repository.ts` | Remove: `insertLlmJob`, `insertLlmJobIfNotPending`, `dequeueNextJob`, `markJobInProgress`, `markJobDone`, `markJobFailed`, `recoverOrphanedJobs`, `loadLlmRuntimeState`, `saveLlmRuntimeState`. Retain: `writeLlmResult`, `clearStaleness`, `markStale`. |
-| `db/schema.ts` | `src/db/schema.ts` | Remove `llm_jobs` and `llm_runtime_state` table definitions. Coordinator drops them at init. |
-| `mcp-server.ts` | `src/mcp-server.ts` | Update `get_llm_status` tool to read broker status via `BrokerClient.getStatus()` (pending count, in_progress, per-repo token stats). |
-| `rate-limiter.ts` | `src/llm/rate-limiter.ts` | Simplify to a stats-only token counter. Remove `canConsume()`, `isExhausted()`, `exhausted` circuit-breaker flag. Keep `recordActual()`, `getLifetimeTokensUsed()`. Broker has no per-instance rate limiting. |
-| `esbuild command` | `package.json` | Add `src/broker/main.ts` as a second entry point. Output: `dist/broker.js`. |
-
-### Unchanged Components
-
-| Component | Why Unchanged |
-|-----------|--------------|
-| `adapter.ts` | Shared by both broker and instances. Broker imports it directly. No changes needed — it is already provider-agnostic. |
-| `prompts.ts` | Shared by broker. Broker builds prompts for all three job types. Pure functions, no state. No changes. |
-| `llm/types.ts` | `LLMConfig`, `ConceptsSchema`, `ChangeImpactSchema` are shared. Broker reads `LLMConfig` from a config file; instances no longer use it for pipeline construction. |
-| `cascade-engine.ts` BFS logic | The BFS walk, `visited` Set, depth cap, and `buildDependentPayload` all stay. Only the job insertion call changes (`submitJob` instead of `insertLlmJobIfNotPending`). |
-| `writeLlmResult`, `clearStaleness`, `markStale` | These write results back to the local `.filescope.db`. The broker sends result text over the socket; the instance's pipeline receives it and calls these functions as before. |
-| FileWatcher, scan, dependency parsing | Entirely unaffected by the broker. |
-| MCP tool surface (all tools except `get_llm_status`) | No changes. |
-
----
-
-## Shared Code Strategy
-
-The critical question: which modules can be safely imported by both the broker process (`dist/broker.js`) and instance processes (`dist/mcp-server.js`, `dist/coordinator.js`) without creating circular dependencies or inappropriate coupling?
-
-### Tier 1: Safe to share — pure functions, no process state
-
-| Module | Shared By | Notes |
-|--------|-----------|-------|
-| `llm/adapter.ts` | Broker (creates `LanguageModel`), instances (if direct fallback) | Pure factory function. Creates a new `LanguageModel` per call. No singleton, no module-level state beyond imports. Safe. |
-| `llm/prompts.ts` | Broker (builds prompts for all job types) | Pure string-builder functions. No imports from other project modules. No state. Trivially safe. |
-| `llm/types.ts` | Broker reads `LLMConfig`; instances pass job type strings | Type definitions and Zod schemas. No runtime state. Safe. |
-| `types.ts` | Both use `FileNode` etc. | Type definitions. No runtime state. Safe. |
-| `logger.ts` | Both write to stderr | Stateless function. Both processes use separate stderr streams. Safe. |
-
-### Tier 2: Safe to share — but broker reads, instances write
-
-| Module | Used By Broker | Used By Instances | Risk |
-|--------|---------------|-------------------|------|
-| `db/repository.ts` | Broker does NOT import it | Instances write results via `writeLlmResult`, `clearStaleness` | No risk — broker has no SQLite dependency at all. Broker speaks over the socket, not to the DB. |
-
-### Tier 3: Instance-only — must NOT be imported by broker
-
-| Module | Reason |
-|--------|--------|
-| `db/db.ts`, `db/repository.ts`, `db/schema.ts` | Broker has no local `.filescope.db`. Would create a spurious DB connection. |
-| `coordinator.ts` | Orchestrates instance lifecycle. Broker has its own simpler lifecycle. |
-| `mcp-server.ts` | MCP transport is instance-only. |
-| `file-utils.ts`, `file-watcher.ts` | File system monitoring is instance-only. |
-| `cascade/cascade-engine.ts` | Staleness propagation is instance-only. |
-
-### Tier 4: Broker-only — must NOT be imported by instances (except broker-client.ts)
-
-| Module | Reason |
-|--------|--------|
-| `broker/server.ts` | Socket server. Instances only need the client. |
-| `broker/queue.ts` | In-memory queue lives in the broker process. |
-| `broker/worker.ts` | Worker loop runs in broker. |
-
-**Key constraint:** `broker-client.ts` is the only broker-related module that instances import. It has no dependency on any broker-side modules. Circular dependency risk is zero by this design.
-
----
-
-## IPC Protocol
-
-The broker uses a Unix domain socket (`~/.filescope/broker.sock`) with newline-delimited JSON framing. This is the simplest possible wire format for Node.js `net.Socket` and avoids HTTP overhead.
-
-### Message Types (instance → broker)
-
-```typescript
-// Submit a job
-{ type: 'submit', jobId: string, repoPath: string, filePath: string, jobType: 'summary'|'concepts'|'change_impact', importance: number, payload?: string }
-
-// Cancel a pending job (e.g., file deleted before processing)
-{ type: 'cancel', jobId: string }
-
-// Query broker status
-{ type: 'status' }
-```
-
-### Message Types (broker → instance)
-
-```typescript
-// Job result (sent to the instance that submitted the job)
-{ type: 'result', jobId: string, success: true, text: string, totalTokens: number }
-{ type: 'result', jobId: string, success: false, error: string }
-
-// Status response
-{ type: 'status', pendingCount: number, inProgress: boolean, repoStats: Record<string, number> }
-```
-
-### Connection Lifecycle
-
-- Instance connects to broker socket on coordinator init. If socket does not exist, broker is unavailable — fallback to direct mode.
-- Connection is persistent. The broker associates each connection with the `repoPath` sent in the first `submit` message.
-- If the connection drops (broker restart, crash), `broker-client.ts` retries with exponential backoff (1s, 2s, 4s... up to 30s cap).
-- The broker does NOT attempt to reconnect to instances — instances reconnect.
-
-### Job Timeout
-
-Broker starts a 120s timer when a job goes `in_progress`. If Ollama does not respond within 120s, the broker cancels the job, sends `{ type: 'result', success: false, error: 'timeout' }` to the waiting instance, and continues to the next job.
-
----
-
-## Dual-Mode Pipeline (broker vs direct)
-
-`pipeline.ts` supports two modes. The mode is determined at runtime by whether `BrokerClient.isConnected()` returns true.
-
-### Broker Mode (primary)
-
-```
-cascade-engine / llm-diff-fallback
-  → submitJob(filePath, jobType, payload)  [broker-client.ts]
-  → socket message to broker
-  → broker reads file, builds prompt, calls Ollama
-  → broker sends result back via socket
-  → pipeline receives result
-  → writeLlmResult(filePath, jobType, text)  [repository.ts]
-  → clearStaleness(filePath, jobType)
-```
-
-The pipeline's `dequeueLoop` is replaced by a response listener registered on `BrokerClient`. When a result arrives for a job the instance submitted, the callback runs `writeLlmResult` and `clearStaleness`. The instance never builds prompts or calls Ollama directly.
-
-### Direct Mode (fallback when broker unavailable)
-
-The existing dequeue loop is kept as-is. `dequeueNextJob()` polls the local `llm_jobs` table. If the broker is down or was never started, the instance processes jobs directly via `adapter.ts` + `prompts.ts`, exactly as in v1.1.
-
-**Implementation note:** Direct fallback requires `llm_jobs` to still exist in local DB when the broker is unavailable. The schema removal only happens if the project explicitly drops the table (Phase plan must clarify: either keep the table for fallback, or accept that direct fallback only works before the table is dropped).
-
-**Recommendation:** Keep the `llm_jobs` table and `insertLlmJobIfNotPending` for the fallback path in Phase 1. Drop them only after broker mode is validated in Phase 2.
-
----
-
-## Build System Changes
-
-Current esbuild command builds all source files into `dist/` as individual files (not a bundle). Adding the broker requires:
-
-1. Adding `src/broker/main.ts` to the entry point list.
-2. No structural change — esbuild handles multiple entry points in the same command.
-
-```bash
-# Add to existing esbuild command:
-src/broker/main.ts src/broker/server.ts src/broker/queue.ts src/broker/worker.ts src/llm/broker-client.ts
-```
-
-`dist/broker.js` is the broker entry point. `dist/mcp-server.js` remains the instance entry point. Both reference the shared `dist/llm/adapter.js`, `dist/llm/prompts.js`, `dist/llm/types.js` as they already exist in `dist/`.
-
----
-
-## Data Flow
-
-### Job Submission Flow (broker mode)
-
-```
-[File change detected by FileWatcher]
-     │
-     ▼
-[ChangeDetector.classify(filePath)]
-     │
-     ├─► [cascadeStale(filePath, opts)]  ← no isExhausted check
-     │       │
-     │       └─► submitJob(filePath, 'summary', importance)
-     │           submitJob(filePath, 'concepts', importance)
-     │           submitJob(filePath, 'change_impact', importance, payload)
-     │                │
-     │                └─► broker-client.ts
-     │                         │ newline-delimited JSON over Unix socket
-     │                         ▼
-     │                    broker/server.ts
-     │                         │
-     │                         ▼
-     │                    broker/queue.ts  ← dedup: one pending per file+type+repo
-     │
-     └─► [writeLlmResult / clearStaleness called on result callback]
-```
-
-### Job Processing Flow (broker)
-
-```
-[broker/worker.ts: dequeue loop]
-     │
-     ▼
-[peek highest importance pending job from queue]
-     │
-     ▼
-[fs.readFile(job.filePath)]
-     │
-     ▼
-[prompts.buildSummaryPrompt / buildConceptsPrompt / buildChangeImpactPrompt]
-     │
-     ▼
-[generateText({ model, prompt })]  ← via Vercel AI SDK, calls Ollama
-     │
-     ├─ success → { text, totalTokens }
-     │   │
-     │   ├─► send { type: 'result', jobId, success: true, text, totalTokens }
-     │   │         back to the waiting instance connection
-     │   │
-     │   └─► updateStats(repoPath, totalTokens) → ~/.filescope/stats.json
-     │
-     └─ error/timeout → { type: 'result', jobId, success: false, error }
-```
-
-### Graceful Degradation Flow (broker unavailable)
-
-```
-[coordinator.init()]
-     │
-     ▼
-[broker-client.connect('~/.filescope/broker.sock')]
-     │
-     ├─ socket exists, connection succeeds → broker mode
-     │       pipeline.ts registers result listener
-     │       cascade-engine calls submitJob → socket
-     │
-     └─ socket missing, ENOENT → direct mode
-             pipeline.ts starts dequeueLoop (existing behavior)
-             cascade-engine calls insertLlmJobIfNotPending (fallback)
-```
-
----
-
-## Startup / Discovery / Stale Socket Recovery
-
-The broker writes its PID to `~/.filescope/broker.pid` on startup. On startup, the broker checks if the socket path exists and if the PID in the PID file corresponds to a live process. If the process is not alive, the broker deletes the stale socket and starts fresh.
-
-Instances perform discovery identically: check if `broker.sock` exists, attempt `net.connect()`. If connect fails with `ECONNREFUSED` or `ENOENT`, the instance is in direct mode. The `broker-client.ts` retries on a timer so that if the broker starts after the instance, the instance will eventually connect and switch to broker mode.
+| Component | Responsibility | Lives In |
+|-----------|---------------|----------|
+| `coordinator.ts` | Init/shutdown lifecycle, file watcher, cascade, calls nexusConnect/nexusDisconnect | Per MCP instance |
+| `broker/client.ts` | LLM job submission to broker, result handling, resubmit on reconnect | Per MCP instance |
+| `nexus/client.ts` (NEW) | Fire-and-forget event emission to Nexus, auto-spawn, reconnect, progress debounce | Per MCP instance |
+| `mcp-server.ts` | MCP tool handlers, timing wrappers for tool:called events | Per MCP instance |
+| `nexus/main.ts` (NEW) | Nexus entry point: PID guard, signal handlers, startup | Nexus daemon |
+| `nexus/server.ts` (NEW) | NexusServer class: socket accept, NDJSON parse, connection tracking, event routing | Nexus daemon |
+| `nexus/store.ts` (NEW) | SQLite schema, write batching, log file append, rotation | Nexus daemon |
+| `nexus/types.ts` (NEW) | NexusEvent union type, RepoConnection interface — shared by client and server | Shared |
+| `broker/stats.ts` (MODIFIED) | Still writes stats.json during Phase 1 transition; removed after stats migration | Broker (transitional) |
 
 ---
 
@@ -337,213 +70,449 @@ Instances perform discovery identically: check if `broker.sock` exists, attempt 
 
 ```
 src/
-├── broker/                 # Broker process (new)
-│   ├── main.ts             # Entry point: starts server, worker, signal handlers
-│   ├── server.ts           # Unix socket server, message dispatch
-│   ├── queue.ts            # In-memory priority queue, dedup logic
-│   └── worker.ts           # Sequential Ollama worker loop
-├── llm/
-│   ├── adapter.ts          # Shared: Vercel AI SDK LanguageModel factory
-│   ├── broker-client.ts    # NEW: instance-side broker socket client
-│   ├── pipeline.ts         # MODIFIED: dual-mode (broker vs direct)
-│   ├── prompts.ts          # Shared: prompt builders for all job types
-│   ├── rate-limiter.ts     # SIMPLIFIED: stats-only token counter
-│   └── types.ts            # Shared: LLMConfig, schemas
-├── cascade/
-│   └── cascade-engine.ts   # MODIFIED: calls submitJob instead of insertLlmJobIfNotPending
-├── change-detector/
-│   └── llm-diff-fallback.ts # MODIFIED: calls submitJob
-├── db/
-│   ├── repository.ts       # MODIFIED: job-related functions removed
-│   └── schema.ts           # MODIFIED: llm_jobs, llm_runtime_state removed
-└── coordinator.ts          # MODIFIED: broker-client lifecycle, budget guard removed
+├── nexus/                    # NEW — all Nexus code isolated here
+│   ├── types.ts              # NexusEvent union, RepoConnection, NexusQuery types
+│   ├── store.ts              # SQLite schema, write batching, log append, rotation
+│   ├── server.ts             # NexusServer class — socket + connection management
+│   ├── client.ts             # nexusConnect/nexusDisconnect/emit — MCP instance side
+│   └── main.ts               # Entry point, PID guard, signal handlers
+├── broker/                   # EXISTING — unchanged except stats.ts migration later
+│   ├── client.ts             # MODIFIED: add nexus emit calls (job:submitted, job:completed, job:error)
+│   ├── stats.ts              # MODIFIED (Phase 5): removed after Nexus owns token tracking
+│   └── ...                   # queue, worker, server, config, types — no changes
+├── coordinator.ts            # MODIFIED: add nexusConnect/nexusDisconnect/emit calls
+├── mcp-server.ts             # MODIFIED: add timing wrappers for tool:called events
+└── ...                       # all other files — no changes
 ```
+
+### Structure Rationale
+
+- **nexus/ is self-contained:** All new code lives in one directory. No imports flow from nexus/ into broker/ — broker/client.ts imports nexus/client.ts for emit, not the reverse. coordinator.ts imports from both.
+- **types.ts first:** Shared between client.ts and server.ts. Must not import from either — it is the protocol definition layer.
+- **store.ts separate from server.ts:** SQLite logic is testable in isolation. server.ts composes store.ts. Mirrors broker's separation of queue.ts from server.ts.
 
 ---
 
 ## Architectural Patterns
 
-### Pattern 1: Broker as a Protocol Boundary, Not a Dependency
+### Pattern 1: Module-Level Socket State (Fire-and-Forget Client)
 
-**What:** The broker and instances share `adapter.ts`, `prompts.ts`, and `types.ts` at the source level. They do NOT share runtime state. The broker builds prompts and calls Ollama; instances only submit jobs and receive results. The division is strictly functional: job submission (instance side) vs job execution (broker side).
+**What:** The client module holds module-level socket state (not class-level). Public functions operate against that state. This makes imports side-effect-free at import time but stateful once `nexusConnect()` is called.
 
-**When to use:** When shared code is pure (no side effects, no process-local state). When the same logic must run in two contexts without one context depending on the other's infrastructure.
+**When to use:** When multiple call sites across a module tree need to emit to the same service without passing a handle everywhere.
 
-**Trade-offs:** Requires the shared modules to be truly stateless. `adapter.ts` creates a `LanguageModel` per call (no module-level singleton) — this is already the case and must be maintained.
+**Trade-offs:** Simple call sites (`emit(event)` anywhere), but no per-instance isolation. Appropriate here — one Nexus connection per process.
 
----
-
-### Pattern 2: Socket Client with Transparent Fallback
-
-**What:** `broker-client.ts` presents a single `submitJob()` interface to callers. Internally, it either sends the job over the socket (broker mode) or calls `insertLlmJobIfNotPending()` directly (direct mode). Callers — `cascade-engine.ts`, `llm-diff-fallback.ts` — see no difference.
-
-**When to use:** When adding a new transport layer to an existing system without changing all call sites. The client absorbs the complexity of mode-switching.
-
-**Trade-offs:** The fallback path keeps the local `llm_jobs` table alive. This is intentional for v1.2 — removing the table is a separate, later cleanup step. The dual code paths in `broker-client.ts` must be explicitly tested for both modes.
-
+**Example (mirrors broker/client.ts exactly):**
 ```typescript
-// broker-client.ts — the only interface callers see
-export async function submitJob(
-  filePath: string,
-  jobType: JobType,
-  importance: number,
-  payload?: string
-): Promise<void> {
-  if (isConnected()) {
-    sendSocketMessage({ type: 'submit', jobId: crypto.randomUUID(), repoPath, filePath, jobType, importance, payload });
-  } else {
-    // Fallback: local queue
-    insertLlmJobIfNotPending(filePath, jobType, 2, payload);
+// src/nexus/client.ts
+let socket: net.Socket | null = null;
+let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+let repoPath: string = '';
+let _intentionalDisconnect = false;
+
+export function isNexusConnected(): boolean {
+  return socket !== null && !socket.destroyed;
+}
+
+export async function nexusConnect(repo: string): Promise<void> {
+  repoPath = repo;
+  _intentionalDisconnect = false;
+  await spawnNexusIfNeeded();
+  await attemptConnect();
+}
+
+export function emit(event: NexusEvent): void {
+  if (!isNexusConnected()) return;  // silent no-op — never throws
+  try {
+    socket!.write(JSON.stringify(event) + '\n');
+  } catch { /* socket error — ignore */ }
+}
+```
+
+### Pattern 2: PID Guard + Stale Socket Cleanup
+
+**What:** On daemon startup: check PID file, signal(0) to test liveness, clean up stale files, write new PID. Same logic in both broker/main.ts and the new nexus/main.ts.
+
+**When to use:** Every standalone daemon that uses a socket file for IPC.
+
+**Trade-offs:** Minor TOCTOU window between checking and writing — acceptable for local daemons where the window is microseconds and the consequence is a second process that exits(0).
+
+**Example (mirrors broker/main.ts exactly):**
+```typescript
+// src/nexus/main.ts — PID guard (same structure as broker/main.ts)
+function checkPidGuard(): void {
+  if (fs.existsSync(PID_PATH)) {
+    const pid = parseInt(fs.readFileSync(PID_PATH, 'utf-8').trim(), 10);
+    if (!isNaN(pid) && isPidRunning(pid)) {
+      log(`Nexus already running (PID ${pid})`);
+      process.exit(0);  // race loser exits cleanly
+    }
+    fs.rmSync(SOCK_PATH, { force: true });
+    fs.rmSync(PID_PATH, { force: true });
+  } else if (fs.existsSync(SOCK_PATH)) {
+    fs.rmSync(SOCK_PATH, { force: true });
   }
 }
 ```
 
----
+### Pattern 3: Write Batching for High-Volume Inserts
 
-### Pattern 3: In-Memory Queue over Shared SQLite
+**What:** Activity events accumulate in an in-memory array and flush to SQLite either every 500ms or every 50 events (whichever comes first). Immediate state (repos table, in-memory ring buffer) updates synchronously. Only the append-only log is batched.
 
-**What:** The broker holds all pending jobs in memory (`Map<string, PendingJob>`). There is no shared SQLite queue. Jobs are transient: they exist only while in the broker's memory. Persistence is NOT needed — if the broker restarts, instances resubmit on the next file change. The only durable state is `stats.json` (token counts).
+**When to use:** When individual writes are cheap but the sheer count would cause I/O thrashing. SQLite WAL handles concurrent reads but batching reduces write amplification.
 
-**When to use:** When jobs are fire-and-forget, short-lived, and can be reconstructed on broker restart. When the queue lifetime equals the broker process lifetime.
+**Trade-offs:** Up to 500ms of lost events on hard crash. Acceptable — the Nexus is observability infrastructure, not the authoritative record.
 
-**Trade-offs:** Jobs are lost on broker restart/crash. Instances must resubmit. This is acceptable because: (a) instances resubmit on the next file event anyway, (b) startup resubmission logic sends the top-N pending jobs from `markStale` records, (c) the alternative (shared SQLite queue) has multi-writer WAL complexity with uncertain benefit for a local-only system.
+**Example:**
+```typescript
+// src/nexus/store.ts
+private activityBatch: ActivityRow[] = [];
+private flushTimer: NodeJS.Timeout | null = null;
 
-This is a deliberate deviation from the Phase 16 shared SQLite queue design (PLAN.md). Reasoning: the broker pattern centralizes all LLM access, so the coordination problem that required a shared SQLite queue (multiple processes dequeuing independently) does not exist. The broker is the single dequeuer.
+enqueue(row: ActivityRow): void {
+  this.activityBatch.push(row);
+  if (this.activityBatch.length >= 50) {
+    this.flush();
+  } else if (!this.flushTimer) {
+    this.flushTimer = setTimeout(() => this.flush(), 500).unref();
+  }
+}
 
----
-
-### Pattern 4: Coordinator as Single Lifecycle Owner (Extended)
-
-**What:** `coordinator.ts` continues to own all lifecycle, including `BrokerClient`. `brokerClient.connect()` is called during `init()`, after the DB is open and before the LLM pipeline starts. `brokerClient.disconnect()` is called during `shutdown()`, before the DB closes.
-
-**When to use:** Consistent with the existing pattern (FileWatcher, LLMPipeline already follow this). Ensures shutdown order is deterministic.
-
-**Trade-offs:** `coordinator.ts` grows, but private methods keep `init()` readable as a sequence of steps.
-
----
-
-## Build Order (Dependency-Constrained)
-
-```
-Phase 1: broker-client.ts with transparent fallback
-   - New: src/llm/broker-client.ts
-   - submitJob() wraps both socket path and fallback path
-   - Modify: cascade-engine.ts, llm-diff-fallback.ts to call submitJob()
-   - No broker process yet — all traffic goes through fallback
-   - All existing tests must pass
-   Rationale: The client is the integration seam. Building it first, with fallback,
-   allows modifying callers before the broker exists. Zero behavior change initially.
-
-Phase 2: broker process (main, server, queue, worker)
-   - New: src/broker/main.ts, server.ts, queue.ts, worker.ts
-   - Add broker/main.ts to esbuild entry points
-   - broker-client.ts switches to socket path when broker is running
-   Rationale: The broker can be tested end-to-end once the client is wired.
-
-Phase 3: pipeline.ts dual-mode refactor
-   - Modify: pipeline.ts dequeue loop → broker response listener
-   - Modify: rate-limiter.ts → stats-only counter
-   - Modify: coordinator.ts → remove budget guard persistence, add broker lifecycle
-   Rationale: Depends on Phase 2 (broker must exist to test broker response path).
-
-Phase 4: schema cleanup
-   - Modify: coordinator.ts → DROP TABLE llm_jobs, llm_runtime_state on init
-   - Modify: db/repository.ts → remove job CRUD functions
-   - Modify: db/schema.ts → remove table definitions
-   Rationale: Final cleanup. Do last, after broker mode is validated, so fallback
-   path is still available during Phase 2–3 testing.
-
-Phase 5: mcp-server.ts get_llm_status update
-   - Modify: get_llm_status to call BrokerClient.getStatus() and read stats.json
-   Rationale: Independent of phases 1–4, but needs broker to be running for
-   meaningful output. Placed last to avoid testing a tool before the broker exists.
+private flush(): void {
+  if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+  if (this.activityBatch.length === 0) return;
+  const rows = this.activityBatch.splice(0);
+  this.insertActivityBatch(rows);  // single SQLite transaction
+}
 ```
 
+### Pattern 4: First-Message Identity Protocol
+
+**What:** Unlike the broker (which has no per-client identity), the Nexus requires `repo:init` as the first NDJSON message on any new connection. Until that message arrives, events from an unidentified socket are dropped with a warning. This lets the server maintain a `Map<Socket, RepoConnection>` for cleanup on disconnect.
+
+**When to use:** When server needs to associate a persistent connection with a logical entity (here: a repo) without a prior handshake mechanism.
+
+**Trade-offs:** Client must always send `repo:init` first, even on reconnect. Slight complexity in client state machine — worth it for clean server-side tracking.
+
 ---
 
-## Integration Points
+## Data Flow
 
-### External Services
+### Event Emission Flow (Happy Path)
 
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| Ollama | `createOpenAICompatible` via Vercel AI SDK — unchanged | Broker calls Ollama; instances do not (in broker mode). One call at a time. 120s timeout per job. |
-| Unix domain socket | `net.createServer` / `net.createConnection` (Node.js built-in) | `~/.filescope/broker.sock`. Created by broker; connected by instances. |
+```
+coordinator.init() completes
+    │
+    ├── nexusConnect(repoPath)
+    │       │
+    │       ├── spawnNexusIfNeeded()   [if nexus.sock missing]
+    │       │       └── spawn('node', [nexusBin], { detached: true }).unref()
+    │       │
+    │       └── attemptConnect()
+    │               └── net.createConnection(NEXUS_SOCK_PATH)
+    │                       └── on 'connect': send repo:init as first message
+    │
+    └── emit({ type: 'repo:init', repoPath, repoName, totalFiles, ... })
+            └── socket.write(JSON.stringify(event) + '\n')
+                    └── Nexus server receives line
+                            ├── parse NDJSON
+                            ├── identify socket → RepoConnection
+                            ├── update repos table immediately
+                            ├── update in-memory ring buffer
+                            ├── append to log file (batched)
+                            └── enqueue into activity batch
+```
 
-### Internal Boundaries
+### LLM Job Event Flow
 
-| Boundary | Communication | Notes |
-|----------|---------------|-------|
-| cascade-engine.ts → broker-client.ts | Direct function call: `submitJob(filePath, type, payload)` | Replaces `insertLlmJobIfNotPending`. No async await needed — submit is fire-and-forget from cascade's perspective. |
-| broker-client.ts → broker/server.ts | Newline-delimited JSON over Unix domain socket | Request/response matched by `jobId`. Client maintains a `Map<jobId, resolver>` for pending responses. |
-| broker/worker.ts → adapter.ts, prompts.ts | Direct import — shared modules | Worker imports the same `createLLMModel` and `build*Prompt` functions used by the old pipeline. |
-| broker/worker.ts → instance connection | Socket write via the connection object stored at job submission time | Broker must track which socket connection submitted each job to send the result back. |
-| coordinator.ts → broker-client.ts | Lifecycle calls: `connect()` at init, `disconnect()` at shutdown | Broker client owned by coordinator, same pattern as LLMPipeline. |
-| pipeline.ts → broker-client.ts | Result listener: `brokerClient.onResult(callback)` | In broker mode, the pipeline's response handler is triggered by incoming socket messages, not by polling. |
+```
+broker/client.ts::submitJob()
+    │
+    ├── socket.write(submitMsg)                              [to broker]
+    └── emit({ type: 'job:submitted', ... })                 [to nexus, skip during resubmitStaleFiles bulk]
 
-### No Changes Needed
+broker/client.ts::handleBrokerMessage() result path
+    │
+    ├── writeLlmResult(...)                                  [to per-repo SQLite]
+    ├── clearStaleness(...)                                  [to per-repo SQLite]
+    ├── emit({ type: 'job:completed', totalTokens, durationMs })   [to nexus]
+    └── incrementCompletionCounter()                         [nexus client-side debounce]
+            └── if counter % 10 == 0 OR 60s elapsed:
+                    emit({ type: 'progress:update', ... })
 
-| Component | Why Unchanged |
-|-----------|--------------|
-| `writeLlmResult`, `clearStaleness`, `markStale` | Still write to local `.filescope.db`. Result text arrives via socket; instance calls these identically to before. |
-| `getFile`, `upsertFile`, `getDependencies` | File metadata queries are per-instance. No broker involvement. |
-| FileWatcher, scan, dependency parsing | Broker has no file watching. File discovery is instance-only. |
-| All MCP tools except `get_llm_status` | No change in behavior. |
+broker/client.ts::handleBrokerMessage() error path
+    └── emit({ type: 'job:error', errorCode, errorMessage })
+```
+
+### Stats Query Flow (Phase 5 — bidirectional exception)
+
+```
+mcp-server.ts::status tool handler
+    │
+    └── coordinator.getBrokerStatus()
+            └── nexusRequestStats()              [new: query nexus, not broker]
+                    │
+                    ├── socket.write({ type: 'query:stats', id })
+                    └── await response (2s timeout)
+                            │
+                            Nexus reads repos.total_tokens from nexus.db
+                            └── socket.write({ type: 'stats_response', id, repoTokens })
+```
+
+This is the **single exception** to the fire-and-forget model. The Nexus is otherwise a pure sink.
+
+### Stats Migration Flow (Phase 5)
+
+```
+Nexus startup (first run, nexus.db has no token rows):
+    └── if stats.json exists AND repos.total_tokens all zero:
+            read stats.json
+            UPDATE repos SET total_tokens = imported_value WHERE repo_path = key
+            log "Migrated token stats from stats.json"
+
+Phase 5 cutover:
+    Broker stops writing stats.json (remove accumulateTokens calls from server.ts)
+    Status tool reads from Nexus via query:stats
+    broker/stats.ts removed
+    stats.json file deleted
+```
+
+### Shutdown Flow
+
+```
+coordinator.shutdown()
+    │
+    ├── [clear debounce timers]
+    ├── [stop file watcher]
+    ├── [drain treeMutex]
+    │
+    ├── emit({ type: 'repo:disconnect', repoPath, repoName })
+    ├── nexusDisconnect()          [intentional close, clears reconnect timer]
+    │
+    ├── brokerDisconnect()
+    └── closeDatabase()
+```
+
+Order matters: emit `repo:disconnect` before closing socket, so Nexus logs the clean disconnect.
+
+---
+
+## Integration Points: New vs Modified
+
+### New Files (no prior code to conflict with)
+
+| File | What It Does | Key Exports |
+|------|-------------|-------------|
+| `src/nexus/types.ts` | Event union type, RepoConnection, path constants | `NexusEvent`, `RepoConnection`, `NEXUS_SOCK_PATH`, `NEXUS_PID_PATH`, `NEXUS_LOG_PATH`, `NEXUS_DB_PATH` |
+| `src/nexus/store.ts` | SQLite schema init, activity batching, log append, log rotation | `NexusStore` class |
+| `src/nexus/server.ts` | Unix socket server, connection tracking, event dispatch | `NexusServer` class |
+| `src/nexus/client.ts` | Module-level socket state, emit, auto-spawn, reconnect, progress debounce | `nexusConnect`, `nexusDisconnect`, `emit`, `isNexusConnected`, `nexusRequestStats` |
+| `src/nexus/main.ts` | Entry point, PID guard, signal handlers | (executable, no exports) |
+
+### Modified Files (surgical additions only)
+
+| File | What Changes | Risk |
+|------|-------------|------|
+| `src/coordinator.ts` | Add `nexusConnect` call after `brokerConnect` in `init()`. Add `nexusDisconnect` + `repo:disconnect` emit in `shutdown()`. Add `files:changed` emit in `handleFileEvent()` after cascade. | LOW — additive only, no existing logic touched |
+| `src/broker/client.ts` | Add `emit()` calls at 3 spots: after `socket.write()` in `submitJob()` (with bulk-skip flag), in `handleBrokerMessage()` result path, in `handleBrokerMessage()` error path. Add `_bulkResubmit` flag to suppress `job:submitted` during `resubmitStaleFiles`. | LOW — additive only |
+| `src/mcp-server.ts` | Wrap tool handler execution in `Date.now()` timing, call `emit({ type: 'tool:called', ... })` after each handler returns. | LOW — wrapper pattern, no handler logic changes |
+| `src/broker/stats.ts` | Phase 5 only: remove `accumulateTokens` calls from `broker/server.ts`, then delete file when Nexus is authoritative. | MEDIUM — coordinate with stats migration |
+| `package.json` | Add `src/nexus/main.ts` and nexus sub-modules to the esbuild command. | LOW |
+
+### Internal Module Boundaries
+
+| Boundary | Communication | Constraint |
+|----------|---------------|-----------|
+| `nexus/client.ts` ↔ `nexus/server.ts` | Unix domain socket, NDJSON | No direct import between them — protocol only |
+| `nexus/client.ts` ↔ `broker/client.ts` | None (broker/client.ts imports nexus/client.ts emit only) | These two must NOT have circular imports. broker/client.ts → nexus/client.ts → nexus/types.ts is the allowed direction. |
+| `nexus/server.ts` → `nexus/store.ts` | Direct method calls | store.ts has no knowledge of server.ts |
+| `coordinator.ts` → `nexus/client.ts` | Direct import | coordinator owns the nexus connection lifecycle |
+| `broker/client.ts` → `nexus/client.ts` | Direct import (emit only) | broker/client.ts calls emit for job events but does not call nexusConnect/Disconnect |
+| `mcp-server.ts` → `nexus/client.ts` | Direct import (emit only) | mcp-server calls emit for tool:called events only |
+
+**Critical constraint:** `broker/client.ts` imports from `nexus/client.ts` for `emit()` only. It does NOT control the nexus connection lifecycle. The coordinator owns that via `nexusConnect` / `nexusDisconnect`.
+
+---
+
+## SQLite Schema (nexus.db)
+
+```sql
+-- Repos registry: one row per repo ever seen, upserted on each repo:init
+CREATE TABLE IF NOT EXISTS repos (
+  repo_path       TEXT PRIMARY KEY,
+  repo_name       TEXT NOT NULL,
+  first_seen      INTEGER NOT NULL,
+  last_seen       INTEGER NOT NULL,
+  total_files     INTEGER,
+  total_tokens    INTEGER DEFAULT 0,
+  last_progress   TEXT                   -- JSON: most recent progress:update payload
+);
+
+-- Append-only event log: batched writes, pruned at 30 days
+CREATE TABLE IF NOT EXISTS activity (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp   INTEGER NOT NULL,
+  event_type  TEXT NOT NULL,
+  repo_path   TEXT NOT NULL,
+  file_path   TEXT,                      -- null for repo-level events
+  job_type    TEXT,                      -- null for non-job events
+  tokens      INTEGER,                   -- null for non-completion events
+  duration_ms INTEGER,                   -- null for non-completion events
+  error_code  TEXT,                      -- null for non-error events
+  detail      TEXT,                      -- JSON blob for event-specific extras
+  FOREIGN KEY (repo_path) REFERENCES repos(repo_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_repo ON activity(repo_path, timestamp);
+CREATE INDEX IF NOT EXISTS idx_activity_type ON activity(event_type, timestamp);
+CREATE INDEX IF NOT EXISTS idx_activity_time ON activity(timestamp);
+```
+
+**Write pattern:** `repos` table and in-memory state update immediately on event receipt. `activity` inserts accumulate in a batch array, flushed every 500ms or 50 events. The flush uses a single SQLite transaction for all accumulated rows.
+
+**Pruning:** On Nexus startup and daily at midnight via `setTimeout`, delete rows from `activity` where `timestamp < Date.now() - 30 * 24 * 60 * 60 * 1000`.
+
+---
+
+## Build Configuration Change
+
+The existing esbuild command in `package.json` lists every source file explicitly. Add nexus files alongside the existing broker entries:
+
+```
+# Existing broker entries in build command:
+src/broker/types.ts src/broker/config.ts src/broker/queue.ts
+src/broker/worker.ts src/broker/server.ts src/broker/stats.ts
+src/broker/client.ts src/broker/main.ts
+
+# Add nexus entries (same pattern):
+src/nexus/types.ts src/nexus/store.ts src/nexus/server.ts
+src/nexus/client.ts src/nexus/main.ts
+```
+
+The Nexus binary path in `nexus/client.ts` resolves identically to how `broker/client.ts` resolves the broker binary:
+```typescript
+const distNexusDir = path.dirname(fileURLToPath(import.meta.url));
+const nexusBin = path.resolve(distNexusDir, 'main.js');
+// At runtime: dist/nexus/main.js — esbuild mirrors src/ structure into dist/
+```
+
+---
+
+## Suggested Build Order (Phase Dependencies)
+
+### Phase 1: nexus/types.ts + nexus/store.ts
+
+**Dependencies:** none (better-sqlite3 already a project dependency)
+**Output:** Testable in isolation — unit tests can instantiate NexusStore, write events, verify DB state and log output
+**Why first:** types.ts is the protocol contract that all subsequent phases depend on. store.ts tests the SQLite schema and batching logic without needing a running server.
+
+### Phase 2: nexus/server.ts + nexus/main.ts
+
+**Dependencies:** Phase 1 complete (types.ts, store.ts)
+**Output:** Runnable Nexus daemon — accepts connections, parses NDJSON, routes to store and log
+**Test approach:** Spawn Nexus process, connect a raw net.Socket, send hand-crafted NDJSON events, verify nexus.db and nexus.log contents
+
+### Phase 3: nexus/client.ts
+
+**Dependencies:** Phase 1 (types.ts), Phase 2 (server runnable for integration tests)
+**Output:** Client module with emit, auto-spawn, reconnect, progress debounce
+**Test approach:** Integration test — start Nexus server, call nexusConnect(), emit events, verify they arrive. Test graceful degradation: kill Nexus mid-test, emit events, verify silent no-ops, restart Nexus, verify reconnect and repo:init re-sent.
+
+### Phase 4: MCP integration (coordinator.ts + broker/client.ts + mcp-server.ts)
+
+**Dependencies:** Phase 3 (client.ts API finalized)
+**Output:** Events flowing from real MCP usage
+**Changes are additive and surgical** — each file gets minimal additions, no existing logic modified
+**Order within Phase 4:** coordinator.ts first (lifecycle hooks), then broker/client.ts (job events), then mcp-server.ts (tool timing)
+
+### Phase 5: Stats migration
+
+**Dependencies:** Phase 4 live and verified (Nexus receiving job:completed events with tokens)
+**Steps:**
+1. On Nexus startup: one-time import of stats.json into repos.total_tokens
+2. Add query:stats request/response to Nexus protocol (the bidirectional exception)
+3. Update coordinator.getBrokerStatus() to query Nexus for tokens instead of reading stats.json
+4. Remove accumulateTokens calls from broker/server.ts
+5. Remove stats.json read from coordinator.ts
+6. Delete src/broker/stats.ts
+
+### Phase 6: End-to-end verification
+
+**Dependencies:** All phases complete
+**Activities:** Start 2+ MCP instances (different repos), tail nexus.log, verify event ordering, kill Nexus mid-operation and verify zero impact on MCP functionality, restart Nexus and verify reconnect + state recovery via progress:update
 
 ---
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Broker Reads from Instance SQLite
+### Anti-Pattern 1: Nexus in the Critical Path
 
-**What people do:** Give the broker the path to each instance's `.filescope.db` so it can look up file content, importance, and staleness.
+**What people do:** Make broker/client.ts or coordinator.ts `await` the nexus emit call, or buffer/retry events when Nexus is down.
 
-**Why it's wrong:** Creates a cross-process SQLite access pattern where two processes (instance and broker) read/write the same file concurrently. better-sqlite3 is synchronous and single-connection — while WAL mode allows concurrent reads, writes from two processes without proper locking create corruption risk. More fundamentally, it couples the broker to instance data structure, preventing the broker from running independently.
+**Why it's wrong:** The entire design contract is that Nexus failure is invisible to core functionality. Any await or retry loop makes Nexus failures propagate into LLM job latency or startup delay.
 
-**Do this instead:** Instances read file content and look up importance before submitting a job to the broker. The job message includes all data the broker needs (file content or file path to read, importance, payload). The broker never touches instance DBs.
+**Do this instead:** `emit()` is synchronous and returns void. If `!isNexusConnected()`, it returns immediately. No async, no buffer, no retry. Lost events during disconnect are acceptable — the `progress:update` on reconnect provides state recovery.
+
+### Anti-Pattern 2: Circular Import Between nexus/ and broker/
+
+**What people do:** Import broker state or types from nexus/client.ts while broker/client.ts imports nexus/client.ts.
+
+**Why it's wrong:** Creates a circular dependency that Node.js ESM may partially resolve at runtime, producing undefined imports at the point of use.
+
+**Do this instead:** nexus/client.ts imports nothing from broker/. broker/client.ts imports only the `emit` function from nexus/client.ts. The dependency graph is one direction: `broker/client.ts → nexus/client.ts → nexus/types.ts`.
+
+### Anti-Pattern 3: Per-Line Log File Writes
+
+**What people do:** Call `fs.appendFileSync()` for every event as it arrives.
+
+**Why it's wrong:** During scan_all on a large repo, hundreds of job:completed events arrive in bursts. Per-line sync writes in the hot path cause measurable I/O pressure on the Nexus process.
+
+**Do this instead:** Batch log writes alongside the activity batch. The log file append is grouped into the same 500ms / 50-event flush cycle. Log rotation check (at 10MB) happens at flush time, not per-line.
+
+### Anti-Pattern 4: Tracking Connection Identity by Socket Address
+
+**What people do:** Use `socket.remoteAddress` as the repo key in a `Map<string, RepoConnection>`.
+
+**Why it's wrong:** Unix domain sockets do not have a meaningful remote address. Multiple sockets from the same process (reconnect) or same repo (two Claude sessions) would collide if keyed by address.
+
+**Do this instead:** `Map<net.Socket, RepoConnection>` — keyed by the socket object reference. Socket reference is unique per connection. `repoPath` is stored inside RepoConnection for lookup when needed. Multiple sockets may share the same repoPath — that is fine and expected.
+
+### Anti-Pattern 5: Blocking Nexus Startup on Broker Availability
+
+**What people do:** Have nexus/main.ts check whether the broker is running or wait for it before binding.
+
+**Why it's wrong:** The Nexus and broker are independent services. Coupling startup sequences creates a hidden dependency that can cascade into startup deadlock if both services are starting simultaneously.
+
+**Do this instead:** Nexus starts, binds socket, begins accepting connections. Broker status is irrelevant to Nexus startup. A future "Broker Tap" feature would connect lazily after startup, not as a startup gate.
 
 ---
 
-### Anti-Pattern 2: Broker Builds a Shared SQLite Queue
+## Scaling Considerations
 
-**What people do:** Create `~/.filescope/queue.db` as the coordination mechanism (Phase 16 plan).
+This system runs locally on a single developer machine. "Scale" means multiple repos open simultaneously, not user count. The serial Ollama worker in the broker is the natural rate limiter for job:completed events.
 
-**Why it's wrong for v1.2:** The shared SQLite queue approach was designed for a world where each instance has its own dequeue loop (multiple consumers). With a dedicated broker process, there is exactly one consumer. An in-memory queue in the broker is simpler, faster, and has no multi-writer complexity. SQLite WAL + busy_timeout machinery is needed only when multiple processes compete to write and read the same table — the broker eliminates that competition.
-
-**Do this instead:** Broker holds jobs in memory. The only shared file is `stats.json` (append-only, write-rarely), which is safe to write from one process (the broker).
-
----
-
-### Anti-Pattern 3: Instance-Side Prompt Building
-
-**What people do:** Build the prompt in the instance (using the file content and job type) before sending it to the broker.
-
-**Why it's wrong:** Prompts can be large (16KB+ for `change_impact` jobs). Serializing and transmitting a built prompt over the socket doubles the data on the wire compared to transmitting just the file path and job type. More importantly, it couples prompt construction to the instance — if prompts change, all instances must be updated.
-
-**Do this instead:** Broker reads the file and builds the prompt. The socket message contains `(filePath, jobType, importance, payload?)` — small, structured data. The broker owns all LLM interaction including prompt construction.
-
----
-
-### Anti-Pattern 4: Broker as a Singleton Module Import
-
-**What people do:** Implement the broker as a module that instances import directly (no separate process), calling `brokerModule.submit(job)` in-process.
-
-**Why it's wrong:** Defeats the entire purpose of the broker. If the broker runs in the same Node.js process as the instance, it still competes on the same Ollama connection and provides no cross-repo coordination. The broker's value is as a process boundary.
-
-**Do this instead:** Separate OS process, separate esbuild entry point, Unix socket IPC. The `broker-client.ts` is the only broker-facing module that instances import, and it communicates over a socket.
+| Concern | At 5 repos | At 20 repos | Notes |
+|---------|------------|-------------|-------|
+| Event throughput | Trivial | Light — serial Ollama limits job:completed rate | Ollama processes one job at a time; completions cannot flood the Nexus |
+| nexus.db write volume | ~1500 rows/day | ~6000 rows/day | SQLite handles millions of rows; no concern |
+| In-memory ring buffer | 1000 events — negligible | 1000 events — still negligible | Ring buffer is capped by count, not repo count |
+| Log file size | ~1MB/day at heavy use | ~4MB/day | 10MB rotation keeps it bounded; 3 generations = 30MB max |
+| SQLite activity table | 30-day retention auto-prune | Same | Even at 20 repos scanning daily, stays well under 200k rows |
 
 ---
 
 ## Sources
 
-- Direct codebase audit of `src/coordinator.ts`, `src/llm/pipeline.ts`, `src/llm/adapter.ts`, `src/llm/prompts.ts`, `src/llm/types.ts`, `src/llm/rate-limiter.ts`, `src/cascade/cascade-engine.ts`, `src/change-detector/llm-diff-fallback.ts`, `src/db/repository.ts`, `src/db/schema.ts`, `package.json` — HIGH confidence
-- `.planning/PROJECT.md` — v1.2 milestone requirements and key decisions (HIGH confidence)
-- `.planning/phases/16-shared-llm-queue/PLAN.md` — prior shared-SQLite-queue design; superseded by broker pattern (HIGH confidence — this is the baseline the broker replaces)
-- Node.js `net` module docs: https://nodejs.org/api/net.html — Unix domain socket server/client API (HIGH confidence — Node.js 22 built-in)
-- Vercel AI SDK `generateText`: https://sdk.vercel.ai/docs/reference/ai-sdk-core/generate-text — confirmed broker can call `generateText` same as instances (HIGH confidence — existing usage in pipeline.ts)
-- Newline-delimited JSON (NDJSON) framing: https://github.com/ndjson/ndjson-spec — standard framing for socket streams (HIGH confidence — established Node.js IPC pattern)
+- `/home/autopcap/FileScopeMCP/NEXUS-PLAN.md` — authoritative design document, written by project owner (HIGH confidence)
+- `/home/autopcap/FileScopeMCP/src/broker/client.ts` — reference implementation for client module pattern (HIGH)
+- `/home/autopcap/FileScopeMCP/src/broker/main.ts` — reference implementation for PID guard + signal handling (HIGH)
+- `/home/autopcap/FileScopeMCP/src/broker/server.ts` — reference implementation for server class structure (HIGH)
+- `/home/autopcap/FileScopeMCP/src/coordinator.ts` — integration point analysis for coordinator lifecycle hooks (HIGH)
+- `/home/autopcap/FileScopeMCP/src/broker/stats.ts` — stats migration source of truth (HIGH)
+- `/home/autopcap/FileScopeMCP/package.json` — esbuild command structure for build config additions (HIGH)
 
 ---
 
-*Architecture research for: FileScopeMCP v1.2 LLM Broker milestone*
-*Researched: 2026-03-21*
+*Architecture research for: FileScopeMCP v1.3 Nexus observability service integration*
+*Researched: 2026-03-24*

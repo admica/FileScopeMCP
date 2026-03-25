@@ -8,19 +8,20 @@ A fully autonomous file intelligence system that watches project directories and
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
-## Current Milestone: v1.2 LLM Broker
+## Current Milestone: v1.3 Nexus
 
-**Goal:** Standalone broker process that coordinates LLM access across multiple FileScopeMCP instances through importance-based priority ordering.
+**Goal:** Centralized observability service that collects events from all MCP instances, persists activity history, and provides live cross-repo monitoring via log file and SQLite database.
 
 **Target features:**
-- Standalone broker process with in-memory priority queue
-- Unix domain socket communication between instances and broker
-- Cross-repo importance-based job prioritization
-- Instance-side broker client with auto-discovery and reconnection
-- No broker = no LLM (single code path, no dual-mode fallback)
-- Job dedup, timeout, and stale socket/PID recovery
-- Broker status reporting via MCP tools
-- Remove legacy local job queue infrastructure
+- Nexus daemon process (PID guard, Unix socket, graceful shutdown)
+- Event collection from all MCP instances (fire-and-forget NDJSON)
+- Connection & identity model (repo:init handshake, socket-to-repo mapping)
+- SQLite persistent storage (repos table, activity log, write batching)
+- Human-readable log file (tail -f interface with formatted output)
+- Nexus client module in MCP instances (auto-spawn, reconnect, emit)
+- Integration with coordinator, broker client, and MCP tool handlers
+- Stats migration from broker's stats.json to Nexus-owned token tracking
+- Graceful degradation (Nexus down = zero impact on core functionality)
 
 ## Requirements
 
@@ -62,24 +63,24 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - ✓ mtime-based lazy validation replacing polling integrity sweep — v1.1
 - ✓ Cycle detection (Tarjan's SCC) via MCP tools — v1.1
 - ✓ Code quality consolidation (fs imports, canonicalizePath, dead code removal) — v1.1
+- ✓ Standalone broker process with in-memory priority queue and Ollama processing — v1.2
+- ✓ Unix domain socket IPC at ~/.filescope/broker.sock — v1.2
+- ✓ Broker builds prompts and handles structured output fallback — v1.2
+- ✓ Cross-repo importance-based job prioritization (importance DESC, created_at ASC) — v1.2
+- ✓ Instance-side broker client with auto-discovery and reconnection — v1.2
+- ✓ Job dedup (one pending job per file+type per repo, latest content wins) — v1.2
+- ✓ Job timeout (120s) for hung Ollama calls — v1.2
+- ✓ Stale socket/PID cleanup on broker startup — v1.2
+- ✓ Startup resubmission batching (stale files by importance on reconnect) — v1.2
+- ✓ Config migration: LLM model config moved to broker, instance has enabled-only — v1.2
+- ✓ Broker status reporting via MCP tool — v1.2
+- ✓ Remove legacy llm_jobs/llm_runtime_state tables and local job queue — v1.2
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-- [ ] Standalone broker process with in-memory priority queue and Ollama processing
-- [ ] Unix domain socket IPC at ~/.filescope/broker.sock
-- [ ] Broker builds prompts and handles structured output fallback
-- [ ] Cross-repo importance-based job prioritization (importance DESC, created_at ASC)
-- [x] Instance-side broker client with auto-discovery and reconnection — v1.2 Phase 17
-- [ ] Job dedup (one pending job per file+type per repo, latest content wins)
-- [ ] Job timeout (120s) for hung Ollama calls
-- [ ] Stale socket/PID cleanup on broker startup
-- [x] Startup resubmission batching (stale files by importance on reconnect) — v1.2 Phase 17
-- [x] Config migration: LLM model config moved to broker, instance has enabled-only — v1.2 Phase 17
-- [x] Broker status reporting via MCP get_llm_status tool — v1.2 Phase 19
-- [x] Remove llm_jobs and llm_runtime_state tables from local DBs — v1.2 Phase 18
-- [x] Remove TokenBudgetGuard budget gating — v1.2 Phase 18
+(Defined in REQUIREMENTS.md during milestone setup)
 
 ### Out of Scope
 
@@ -99,9 +100,9 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Context
 
-Shipped v1.0 (9 phases, 9,515 LOC) and v1.1 (6 phases, hardening + language support). 250+ tests passing. The system is a complete autonomous file intelligence platform.
+Shipped v1.0 (9 phases, 9,515 LOC), v1.1 (6 phases, hardening + language support), and v1.2 (4 phases, LLM broker). 250+ tests passing. The system is a complete autonomous file intelligence platform with a standalone LLM broker coordinating all Ollama access.
 
-v1.2 progress: Phase 16 built the standalone broker (socket server, priority queue, worker, PID guard). Phase 17 wired instances to use the broker client — all LLM job submission now goes through `submitJob()` over Unix socket, coordinator lifecycle uses `connectBroker()`/`disconnectBroker()`, and LLMConfig simplified to `enabled` boolean. Phase 18 cleaned up all legacy local job queue infrastructure — dropped llm_jobs/llm_runtime_state tables, deleted pipeline.ts/rate-limiter.ts/adapter.ts, removed 9 dead CRUD functions, and eliminated isExhausted parameter threading. Phase 19 added observability — stats.ts persists per-repo token totals, requestStatus() queries live broker state, and get_llm_status MCP tool returns broker connection, queue depth, and token usage.
+v1.3 builds the Nexus — a centralized observability service that collects events from all running MCP instances. Architecture fully designed in NEXUS-PLAN.md. Mirrors broker patterns (PID guard, Unix socket, auto-spawn, reconnect). Foundation for a future web frontend with visual project exploration (dark mode, Three.js-style visualization — future milestone).
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -132,5 +133,22 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | Broker builds prompts | Avoids Zod schema serialization; centralizes LLM interaction | ✓ Good |
 | No dual-mode fallback | Broker or no LLM — single code path, no complexity | ✓ Good |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd:transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd:complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-03-22 after Phase 19 complete*
+*Last updated: 2026-03-24 after milestone v1.3 started*

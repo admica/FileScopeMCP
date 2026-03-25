@@ -226,8 +226,10 @@ export class ServerCoordinator {
     const filescopeDir = path.join(projectRoot, FILESCOPE_DIR);
     fsSync.mkdirSync(filescopeDir, { recursive: true });
 
-    // Acquire PID file guard — prevents concurrent daemons from corrupting the DB
-    await this.acquirePidFile(projectRoot);
+    // Write PID file (informational — multiple MCP instances per repo are normal
+    // since each Claude Code session spawns its own stdio child process).
+    // SQLite WAL mode + busy_timeout handle concurrent DB access safely.
+    fsSync.writeFileSync(path.join(filescopeDir, 'instance.pid'), String(process.pid), 'utf-8');
 
     // Reload config from disk so runtime edits (e.g. adding llm block) take effect
     const freshConfig = await loadConfig();
@@ -351,9 +353,10 @@ export class ServerCoordinator {
     this._initialized = false;
     log('ServerCoordinator shutdown complete.');
 
-    // Release PID file last — after DB is closed
+    // Clean up PID file on shutdown (best-effort)
     if (this._projectRoot) {
-      this.releasePidFile(this._projectRoot);
+      const pidPath = path.join(this._projectRoot, FILESCOPE_DIR, 'instance.pid');
+      try { fsSync.unlinkSync(pidPath); } catch { /* already gone */ }
     }
   }
 
@@ -385,45 +388,6 @@ export class ServerCoordinator {
 
   private _errorResponse(text: string): ToolResponse {
     return { content: [{ type: 'text', text }], isError: true };
-  }
-
-  /**
-   * Acquire the PID file guard. Throws if another live daemon is already running
-   * for this project. Overwrites stale PID files (process no longer running).
-   */
-  private async acquirePidFile(projectRoot: string): Promise<void> {
-    const pidPath = path.join(projectRoot, FILESCOPE_DIR, 'instance.pid');
-    try {
-      const existing = fsSync.readFileSync(pidPath, 'utf-8');
-      const existingPid = parseInt(existing.trim(), 10);
-      if (!isNaN(existingPid)) {
-        if (existingPid === process.pid) {
-          log(`PID file belongs to current process (${existingPid}). Re-initializing.`);
-        } else {
-          try {
-            process.kill(existingPid, 0); // throws ESRCH if not running
-            throw new Error(
-              `FileScopeMCP daemon already running (PID ${existingPid}). ` +
-              `Stop it first or delete ${pidPath}.`
-            );
-          } catch (e: any) {
-            if (e.code !== 'ESRCH') throw e;
-            log(`Stale PID file found (PID ${existingPid} not running). Overwriting.`);
-          }
-        }
-      }
-    } catch (e: any) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-    fsSync.writeFileSync(pidPath, String(process.pid), 'utf-8');
-  }
-
-  /**
-   * Release the PID file. Called as the final step of shutdown().
-   */
-  private releasePidFile(projectRoot: string): void {
-    const pidPath = path.join(projectRoot, FILESCOPE_DIR, 'instance.pid');
-    try { fsSync.unlinkSync(pidPath); } catch { /* already gone */ }
   }
 
   /**

@@ -63,7 +63,7 @@ describe('ServerCoordinator', () => {
 
     await coordinator.init(tmpDir);
 
-    const pidPath = path.join(tmpDir, '.filescope.pid');
+    const pidPath = path.join(tmpDir, '.filescope', 'instance.pid');
     expect(fs.existsSync(pidPath)).toBe(true);
     expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe(String(process.pid));
   });
@@ -75,7 +75,7 @@ describe('ServerCoordinator', () => {
 
     await coordinator.init(tmpDir);
 
-    const pidPath = path.join(tmpDir, '.filescope.pid');
+    const pidPath = path.join(tmpDir, '.filescope', 'instance.pid');
     expect(fs.existsSync(pidPath)).toBe(true);
 
     await coordinator.shutdown();
@@ -89,7 +89,8 @@ describe('ServerCoordinator', () => {
     tmpDir = makeTmpProject();
 
     // Write a stale PID that is almost certainly not running
-    const pidPath = path.join(tmpDir, '.filescope.pid');
+    fs.mkdirSync(path.join(tmpDir, '.filescope'), { recursive: true });
+    const pidPath = path.join(tmpDir, '.filescope', 'instance.pid');
     fs.writeFileSync(pidPath, '99999999', 'utf-8');
 
     await coordinator.init(tmpDir);
@@ -99,29 +100,24 @@ describe('ServerCoordinator', () => {
     expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe(String(process.pid));
   });
 
-  // ─── Test 9: Live PID refuses start ────────────────────────────────────────
+  // ─── Test 9: Multiple instances allowed ──────────────────────────────────
 
-  it('init throws "already running" error when PID file contains a live PID', async () => {
+  it('init succeeds even when PID file contains a live PID (multi-instance)', async () => {
     tmpDir = makeTmpProject();
 
     // Write the current process PID — this process IS running
-    const pidPath = path.join(tmpDir, '.filescope.pid');
+    const pidPath = path.join(tmpDir, '.filescope', 'instance.pid');
+    fs.mkdirSync(path.join(tmpDir, '.filescope'), { recursive: true });
     fs.writeFileSync(pidPath, String(process.pid), 'utf-8');
 
     const coordinator2 = new ServerCoordinator();
-    let threw = false;
-    try {
-      await coordinator2.init(tmpDir);
-    } catch (err: any) {
-      threw = true;
-      expect(err.message).toContain('already running');
-    }
-    expect(threw).toBe(true);
+    await coordinator2.init(tmpDir);
 
-    // Cleanup coordinator2 manually
-    try { closeDatabase(); } catch { /* ignore */ }
-    // Restore PID file so afterEach cleanup works
-    fs.writeFileSync(pidPath, String(process.pid), 'utf-8');
+    // PID file should now contain our process PID (overwritten)
+    expect(fs.readFileSync(pidPath, 'utf-8').trim()).toBe(String(process.pid));
+
+    // Cleanup coordinator2
+    await coordinator2.shutdown();
   });
 
   // ─── Test 10: Daemon mode without MCP transport ────────────────────────────

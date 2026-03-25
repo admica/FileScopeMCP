@@ -1,510 +1,509 @@
 # Pitfalls Research
 
-**Domain:** Adding Unix domain socket IPC broker to an existing single-process Node.js system
-**Researched:** 2026-03-21
-**Confidence:** HIGH (codebase audit + Node.js official docs + verified external sources)
+**Domain:** Adding a centralized observability daemon (Nexus) to an existing multi-process Node.js system with a live LLM broker
+**Researched:** 2026-03-24
+**Confidence:** HIGH (codebase audit + broker implementation post-mortem + Node.js official docs + SQLite WAL official docs)
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Stale Socket File Causes EADDRINUSE Loop on Broker Restart
+### Pitfall 1: Nexus Becomes Critical Path When Graceful Degradation Is Implemented Incorrectly
 
 **What goes wrong:**
-The broker writes its Unix socket to `~/.filescope/broker.sock`. When the broker process crashes (SIGKILL, OOM, power loss) the socket file is NOT removed — Node.js only auto-unlinks sockets created via `net.createServer()` when `server.close()` is explicitly called. On next startup, `server.listen(SOCK_PATH)` throws `EADDRINUSE`. The broker fails to start. All instances fall back to direct mode silently. The broker never comes back up, even after the user manually relaunches it.
-
-The subtler failure is the "blind delete" trap: if broker startup unconditionally deletes the socket file before listening, a second broker instance that starts at the same time will silently steal the socket from the first — both call `fs.unlinkSync()` then `server.listen()` and whichever wins the race becomes the broker while the other instance's clients are permanently orphaned.
-
-**Why it happens:**
-Developers assume Node.js cleans up socket files the same way it handles TCP port release. It does not. The socket file is a filesystem artifact that persists until explicitly unlinked.
-
-**How to avoid:**
-On broker startup, probe the socket before touching it:
+The design requirement is "Nexus down = zero impact on core functionality." But the client code does something like:
 
 ```typescript
-async function acquireSocket(sockPath: string): Promise<void> {
+// Coordinator init()
+await nexusConnect(repoPath);         // spawns Nexus, waits for connect
+await emit({ type: 'repo:init', ... }); // fire-and-forget, but...
+```
+
+If `nexusConnect` throws (permission denied writing `~/.filescope/nexus.pid`, disk full, Nexus binary missing), and the error propagates up through `coordinator.init()`, the MCP instance fails to start — because of the observability layer. The user's Claude session is broken by a daemon whose entire purpose is to be optional.
+
+The second failure mode is subtler: the Nexus client blocks coordinator startup while waiting for the Nexus to bind its socket. With the broker client, a 500ms sleep was added after spawn. If the Nexus is slow to start (cold filesystem, large repos counting files for `repo:init`), that sleep is too short and the first `emit()` drops silently — but startup time has increased by 500ms on every session. If the sleep is made longer, it compounds when BOTH broker and Nexus are spawned.
+
+**Why it happens:**
+The broker was also supposed to be optional, but its `connect()` is `async` and the coordinator does `await brokerConnect()`. Developers copy this pattern for the Nexus. The `await` is fine for broker because the broker has a direct impact on whether LLM jobs run. For the Nexus, there is no reason to await anything.
+
+**How to avoid:**
+The Nexus client must NEVER be awaited in any path that blocks coordinator init. The correct pattern:
+
+```typescript
+// coordinator.init():
+brokerConnect(repoPath).catch(() => {}); // still awaited — LLM depends on it
+nexusConnect(repoPath);                   // fire-and-don't-await — intentionally not awaited
+                                          // also not .catch() suppressed — no error to suppress
+                                          // because nexusConnect never throws
+```
+
+`nexusConnect` must be implemented as a fully synchronous kick-off that swallows all errors internally:
+
+```typescript
+export function nexusConnect(repoPath: string): void {
+  _repoPath = repoPath;
+  _intentionalDisconnect = false;
+  spawnNexusIfNeeded().catch(() => {}); // spawn errors are silent
+  scheduleConnect();                     // connect attempt is scheduled, not awaited
+}
+```
+
+The 500ms post-spawn sleep must be replaced with a connect-retry loop (same pattern as the broker client's reconnect timer). The Nexus client should attempt to connect immediately, and retry every 10 seconds if it fails — never blocking coordinator init.
+
+**Warning signs:**
+- MCP tool calls fail when Nexus binary is not present in `dist/`
+- `coordinator.init()` takes noticeably longer when Nexus is cold-starting
+- Any log line saying "waiting for nexus" in coordinator init
+
+**Phase to address:** Nexus client phase (Phase 3). Write the `nexusConnect()` function as fire-and-forget-and-never-throws before wiring any emit calls. Verify by deleting `dist/nexus/main.js` and confirming coordinator still starts clean.
+
+---
+
+### Pitfall 2: Multi-Instance Spawn Race Produces Duplicate Nexus Daemons
+
+**What goes wrong:**
+Three MCP instances start simultaneously (three Claude sessions opening three repos). All three call `spawnNexusIfNeeded()`. All three check `existsSync(SOCK_PATH)` — the file does not exist yet. All three spawn the Nexus binary with `spawn(..., { detached: true }).unref()`. Three Nexus processes are now running. They all race to call `server.listen(SOCK_PATH)`. Two get `EADDRINUSE` and crash. The winner survives. But the two losers already wrote their PIDs to `nexus.pid` (or one of them won the PID file write race), so the PID file may point to a dead process. All three MCP clients now try to connect to the socket — which works because the winner is listening. But on the next session start, `checkPidGuard()` reads a PID that may belong to a terminated process (the loser), concludes the Nexus is not running, and spawns another daemon.
+
+**Why it happens:**
+The `existsSync(SOCK_PATH)` check is not atomic with the spawn. Between the check and the spawn completing, another instance can pass the same check. The broker had this same race — the documented solution was `checkPidGuard()` checking both the PID file and the socket. But with three instances racing simultaneously, the PID file and socket checks are both window-raced.
+
+**How to avoid:**
+The Nexus main.ts must implement the same two-stage guard the broker uses, but both losers must exit via `process.exit(0)` (not crash) when they lose the `server.listen` race:
+
+```typescript
+// nexus/main.ts
+function checkPidGuard(): void {
+  if (fs.existsSync(PID_PATH)) {
+    const pid = parseInt(fs.readFileSync(PID_PATH, 'utf-8').trim(), 10);
+    if (!isNaN(pid) && isPidRunning(pid)) {
+      process.exit(0); // already running — silent exit, not error
+    }
+    // Stale PID — clean up and continue
+    fs.rmSync(SOCK_PATH, { force: true });
+    fs.rmSync(PID_PATH, { force: true });
+  } else if (fs.existsSync(SOCK_PATH)) {
+    fs.rmSync(SOCK_PATH, { force: true });
+  }
+}
+```
+
+Additionally, the `server.listen()` error handler must treat `EADDRINUSE` as "another instance won the race, exit cleanly":
+
+```typescript
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    log('Nexus already running (lost bind race) — exiting');
+    process.exit(0); // not an error — another instance won
+  }
+  throw err; // real errors still propagate
+});
+```
+
+The MCP client side must NOT retry spawning if the socket appears after a failed connect. Check `existsSync(SOCK_PATH)` before spawning, not just at the start of `nexusConnect()`.
+
+**Warning signs:**
+- `ps aux | grep nexus` shows multiple nexus processes
+- `nexus.pid` contains a PID that does not match the running nexus process
+- Nexus log shows "Error: EADDRINUSE" followed by crash (exit code 1) rather than clean exit
+
+**Phase to address:** Nexus server phase (Phase 2). The PID guard and EADDRINUSE handler must be the first things written in `nexus/main.ts`, before any socket logic.
+
+---
+
+### Pitfall 3: SQLite WAL Mode Write Batching Flushes on Process Exit, Losing the Last Batch
+
+**What goes wrong:**
+The Nexus accumulates activity inserts in a buffer and flushes every 500ms or 50 events. When the Nexus receives SIGTERM (e.g., machine shutdown, user `kill`), the shutdown handler closes the database immediately. Any events accumulated since the last flush — potentially the last 499ms of activity — are lost. This includes `repo:disconnect` events from all connected MCP instances, which are emitted during their own shutdown sequences and arrive in the final seconds before the Nexus exits.
+
+The WAL-specific failure: even if you flush the in-memory buffer before closing, `better-sqlite3` requires an explicit `db.pragma('wal_checkpoint(TRUNCATE)')` call to ensure the WAL file is fully checkpointed. If the process exits after `db.close()` but before the checkpoint completes (which is asynchronous at the kernel level), the WAL file may not be fully applied to the main database file. On the next startup, WAL recovery runs automatically — but if the WAL file is partially written (disk full mid-write), recovery may fail, leaving the database inaccessible.
+
+**Why it happens:**
+Developers implement the happy path: buffer flushes on timer. Shutdown path is added later and calls `db.close()` without draining the buffer or checkpointing WAL.
+
+**How to avoid:**
+The shutdown sequence for `NexusServer` must explicitly flush before closing:
+
+```typescript
+async shutdown(): Promise<void> {
+  // 1. Stop accepting connections — no new events
+  await new Promise<void>(resolve => this.server.close(() => resolve()));
+  // 2. Destroy all client sockets — no more event emissions
+  for (const socket of this.connections.keys()) socket.destroy();
+  // 3. Flush pending batch before closing DB
+  this.store.flushPendingBatch(); // synchronous better-sqlite3 call
+  // 4. Checkpoint WAL to consolidate into main file
+  this.store.checkpoint(); // db.pragma('wal_checkpoint(TRUNCATE)')
+  // 5. Close database
+  this.store.close();
+}
+```
+
+The `flushPendingBatch()` method must be synchronous (better-sqlite3 is synchronous by design) and must be called BEFORE `db.close()`. Do not call it after `db.close()`.
+
+For WAL corruption protection: set `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL` (not FULL). NORMAL provides crash safety with acceptable write latency. FULL doubles write time for minimal additional safety benefit in this use case.
+
+**Warning signs:**
+- Last few events before Nexus shutdown are missing from `nexus.db`
+- `repo:disconnect` events never appear in the activity log even when MCP instances shut down cleanly
+- On startup, Nexus logs WAL recovery messages more than once per week
+- `nexus.db-wal` file persists on disk after Nexus exits (indicates WAL not checkpointed)
+
+**Phase to address:** Nexus store phase (Phase 1). Implement `flushPendingBatch()` and `checkpoint()` in `store.ts`. Make shutdown sequence in `main.ts` call them in the correct order. Test by sending 40 events then sending SIGTERM — verify all 40 appear in `nexus.db`.
+
+---
+
+### Pitfall 4: Write Batching Timer Accumulates Unboundedly During High-Volume Scan
+
+**What goes wrong:**
+The design specifies "flush every 500ms or 50 events." During a `scan_all` on a large repo, hundreds of `job:submitted` events arrive in rapid succession. With a 50-event threshold, each batch flushes after 50 events — but the timer fires every 500ms regardless. If the timer fires while a batch is mid-flush (though better-sqlite3 is synchronous, so this can't overlap in the same process), the timer accumulates. The real problem is different: if each flush takes 10ms (50 inserts in a transaction), and events arrive at 200/second, the flush loop runs 4 times per second — but the setTimeout is set for 500ms. The timer is rescheduled after each flush, not cancelled between flushes.
+
+Result: after a 30-second scan_all with 1000 events, there are 60 pending timer callbacks that all want to flush an empty buffer. Each callback acquires the database (no-op in better-sqlite3), checks the buffer length (0), and exits. No data loss, but 60 unnecessary SQLite lock acquisitions per scan — visible as CPU spikes after heavy scans.
+
+More critically: if the design uses `setInterval` instead of a rescheduled `setTimeout`, multiple flushes can be "queued up" in the event loop. Since better-sqlite3 is synchronous, they serialize — but each blocks the event loop for ~10ms, creating perceptible latency for incoming socket events during heavy flush cycles.
+
+**Why it happens:**
+The batching design sounds simple but has three moving parts (timer, count threshold, shutdown flush) that must be coordinated. Using `setInterval` is the first instinct; it is the wrong choice for a threshold-based flusher.
+
+**How to avoid:**
+Use a self-rescheduling `setTimeout` pattern, not `setInterval`. Reset the timer on every flush (whether triggered by count or timer):
+
+```typescript
+class ActivityBatcher {
+  private buffer: ActivityRow[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  append(row: ActivityRow): void {
+    this.buffer.push(row);
+    if (this.buffer.length >= 50) {
+      this.flush(); // triggers reset of timer
+    } else if (this.timer === null) {
+      this.scheduleFlush(); // start timer only if not already running
+    }
+  }
+
+  private scheduleFlush(): void {
+    this.timer = setTimeout(() => this.flush(), 500);
+    this.timer.unref(); // don't prevent process exit
+  }
+
+  flush(): void {
+    if (this.buffer.length === 0) return;
+    const rows = this.buffer.splice(0); // drain atomically
+    this.timer && clearTimeout(this.timer);
+    this.timer = null;
+    // single transaction for all rows
+    this.db.transaction(() => {
+      for (const row of rows) insertActivity.run(row);
+    })();
+    // reschedule only if more work arrived during flush
+    if (this.buffer.length > 0) this.scheduleFlush();
+  }
+}
+```
+
+The `unref()` call on the timer is critical: without it, the Nexus process will not exit when all connections close because the timer holds the event loop open.
+
+**Warning signs:**
+- CPU usage spikes ~1-2 seconds after a heavy scan completes, then drops
+- `nexus.log` shows "Flushed 0 events" log lines (if you log empty flushes)
+- Event loop latency (measurable via `process.hrtime`) spikes during flush cycles
+
+**Phase to address:** Nexus store phase (Phase 1). Write a unit test that sends 200 events rapidly and verifies the timer fires at most once per 500ms window and that no events are duplicated or lost.
+
+---
+
+### Pitfall 5: `repo:init` Required-First-Message Contract Broken by Reconnect Edge Cases
+
+**What goes wrong:**
+The Nexus design requires that the first message on any new connection is `repo:init`. The server maps `Socket → RepoConnection` only after receiving this message. Events received before `repo:init` are orphaned — the server can't associate them with a repo. The Nexus design acknowledges this: "On malformed message: log warning, skip (don't kill the connection)."
+
+The edge case is reconnection. When an MCP instance reconnects after a Nexus restart (or a network blip), the broker client in `src/broker/client.ts` calls `resubmitStaleFiles()` immediately after `connect`. The nexus client pattern mirrors this: it calls `emit({ type: 'repo:init', ... })` immediately after connect. But the emit is fire-and-forget via `socket.write()`. If the `connect` event fires and both `repo:init` and `job:submitted` emissions are queued in the same event loop tick, they arrive at the Nexus in order — but if the nexus client has a bug where `emit()` is called before the `connect` event fires (e.g., from a `progress:update` timer that ticked while the socket was connecting), the `progress:update` may arrive before `repo:init`.
+
+The deeper issue: if the Nexus drops the connection because it received a non-`repo:init` message first, and the MCP client doesn't detect this drop (because it only checks `socket.destroyed`, not a Nexus-level acknowledgment), the client thinks it's connected and keeps emitting into the void.
+
+**Why it happens:**
+Fire-and-forget is designed to not care about delivery. But the "first message must be `repo:init`" contract creates a hidden ordering dependency that is violated when timing is just right.
+
+**How to avoid:**
+Two rules enforced in the Nexus server:
+
+1. Never drop connections on bad first message — log the warning and simply wait. The next message might be `repo:init`. Do NOT implement any protocol enforcement that closes the socket.
+
+2. The Nexus server must treat any `repo:init` message (even mid-stream) as a re-registration, not just as the first message. The `Map<Socket, RepoConnection>` update must happen whenever `repo:init` arrives, not only on first message.
+
+```typescript
+// nexus/server.ts — dispatch
+private handleMessage(msg: NexusEvent, socket: net.Socket): void {
+  if (msg.type === 'repo:init') {
+    // Always register/update — even on reconnect mid-stream
+    this.registerConnection(socket, msg);
+    return;
+  }
+  const conn = this.connections.get(socket);
+  if (!conn) {
+    // Pre-init event — log and drop, but don't close the connection
+    log(`Event before repo:init (${msg.type}) — skipping`);
+    return;
+  }
+  this.routeEvent(conn, msg);
+}
+```
+
+On the client side: the progress debounce timer must be cancelled and reset on every new connection. `nexusConnect()` must clear any running timers before establishing a new socket.
+
+**Warning signs:**
+- Nexus log shows "Event before repo:init" for `progress:update` events after reconnect
+- Some MCP instances show as "unknown repo" in Nexus logs despite running `repo:init`
+- Reconnect after Nexus restart produces orphaned events in the activity log with null `repo_path`
+
+**Phase to address:** Nexus server phase (Phase 2). Add a test: connect socket, immediately emit `progress:update` before `repo:init`, then emit `repo:init`. Verify the Nexus does not close the socket and correctly routes subsequent events.
+
+---
+
+### Pitfall 6: Stats Migration Race — Broker and Nexus Both Write Token Stats Simultaneously
+
+**What goes wrong:**
+The migration plan has three phases. During Phase 1 (Nexus ships but broker still writes `stats.json`), two processes are writing token stats independently. The broker writes to `~/.filescope/stats.json` after each job via `fs.writeFileSync`. The Nexus writes `total_tokens` to `nexus.db` after each `job:completed` event. These are separate files — no write contention between them.
+
+The problem occurs in Phase 2 (cutover). The Nexus reads `stats.json` on first startup and imports it into `nexus.db` as a one-time migration. Then both systems continue accumulating tokens. If the migration logic uses "import only if nexus.db has no token data," there's a race: the Nexus processes 50 `job:completed` events before the status tool query triggers the import check. The check finds `total_tokens > 0` and skips import. The historical data from `stats.json` is never imported. The user sees a reset token counter.
+
+The second failure: the broker stops writing `stats.json` in Phase 3. But the Nexus may be down (user killed it, disk full). The `status` MCP tool now shows "tokens: unavailable." The token counter that was previously always available is now conditionally available, which feels like a regression.
+
+**Why it happens:**
+Phased migrations with "Phase 1 / Phase 2 / Phase 3" sound clean on paper but create a window where both old and new systems are partially active, and the cutover condition ("first startup with no token data") is fragile.
+
+**How to avoid:**
+Simplify the migration to a single atomic operation. On Nexus startup, always read `stats.json` (if it exists) and merge it into `nexus.db`:
+
+```typescript
+function migrateStatsJson(db: Database): void {
+  const statsPath = path.join(os.homedir(), '.filescope', 'stats.json');
+  if (!fs.existsSync(statsPath)) return;
   try {
-    await fs.access(sockPath);
-    // File exists — is a real broker still using it?
-    await new Promise<void>((resolve, reject) => {
-      const probe = net.connect(sockPath);
-      probe.once('connect', () => {
-        probe.destroy();
-        reject(new Error('BROKER_ALREADY_RUNNING'));
-      });
-      probe.once('error', (err: NodeJS.ErrnoException) => {
-        probe.destroy();
-        if (err.code === 'ECONNREFUSED' || err.code === 'ENOENT') {
-          // Stale socket — safe to remove
-          resolve();
-        } else {
-          reject(err);
-        }
-      });
-    });
-    await fs.unlink(sockPath); // Remove stale socket
-  } catch (err: unknown) {
-    const e = err as NodeJS.ErrnoException;
-    if (e.code !== 'ENOENT' && e.message !== 'BROKER_ALREADY_RUNNING') throw e;
-    if (e.message === 'BROKER_ALREADY_RUNNING') throw e;
-    // ENOENT = file doesn't exist, safe to proceed
+    const data = JSON.parse(fs.readFileSync(statsPath, 'utf-8')) as { repoTokens: Record<string, number> };
+    const merge = db.prepare(`
+      UPDATE repos SET total_tokens = total_tokens + ?
+      WHERE repo_path = ? AND total_tokens < ?
+    `);
+    // Only add stats.json tokens if they're higher (avoid double-counting)
+    db.transaction(() => {
+      for (const [repoPath, tokens] of Object.entries(data.repoTokens)) {
+        // Use MAX semantics: if stats.json has more tokens, use that baseline
+        db.prepare(`INSERT OR IGNORE INTO repos (repo_path, repo_name, first_seen, last_seen, total_tokens)
+                    VALUES (?, ?, ?, ?, ?)`).run(repoPath, path.basename(repoPath), Date.now(), Date.now(), 0);
+        merge.run(Math.max(0, tokens - (getCurrentTokens(db, repoPath))), repoPath, tokens);
+      }
+    })();
+    log(`Migrated token stats from stats.json`);
+  } catch (err) {
+    log(`Warning: stats.json migration failed — ${err}. Continuing without historical data.`);
   }
 }
 ```
 
-Also register cleanup on process exit:
-```typescript
-process.on('SIGTERM', cleanup);
-process.on('SIGINT', cleanup);
-process.on('exit', () => { try { fs.unlinkSync(sockPath); } catch {} });
-```
+Keep `stats.json` in place and do not delete it in Phase 3. The broker can keep writing it as a no-op backup indefinitely. Deleting `stats.json` is not worth the coordination risk.
 
 **Warning signs:**
-- Broker refuses to start after any crash; only recovers after manual `rm ~/.filescope/broker.sock`
-- Instances silently fall back to direct mode with no log noise pointing at IPC
-- Two broker processes running simultaneously (check with `lsof ~/.filescope/broker.sock`)
+- Token counter drops to zero after Nexus ships
+- `status` MCP tool shows different token counts than broker's `stats.json`
+- After Nexus restart, total_tokens is lower than before restart
 
-**Phase to address:** Broker process phase — implement `acquireSocket()` as the first thing broker does before calling `server.listen()`. Do not defer this to hardening.
+**Phase to address:** Stats migration phase (Phase 5). Never delete `stats.json`. Import on every Nexus startup using MAX semantics to avoid double-counting. Test by pre-populating `stats.json` with 10,000 tokens for a repo, starting the Nexus, and verifying `total_tokens` in `nexus.db` reflects the historical data.
 
 ---
 
-### Pitfall 2: NDJSON Framing Breaks on Partial `data` Events
+### Pitfall 7: Log File Rotation Loses Events During Rename Window
 
 **What goes wrong:**
-TCP and Unix domain socket streams do NOT guarantee message boundaries. A single `socket.write('{"type":"submit",...}\n')` call from the client may arrive as two `data` events on the server: `{"type":"sub` and `mit",...}\n`. Similarly, two back-to-back writes may coalesce into one `data` event. Code that does `JSON.parse(chunk.toString())` on every `data` event will throw `SyntaxError` on partial chunks and silently drop the second message when two arrive together.
+The design specifies rotating `nexus.log` at 10MB, keeping 3 files. The implementation opens a file stream, checks size on each write batch, and when size exceeds 10MB, does:
 
-This is the single most common IPC bug in Node.js systems. It will not appear in unit tests (where messages are tiny and arrive atomically) and will appear intermittently in production when job payloads are large (file diffs, long prompts).
+```
+nexus.log.2 → deleted
+nexus.log.1 → nexus.log.2
+nexus.log   → nexus.log.1
+open new nexus.log
+```
+
+If events arrive from MCP clients between the rename of `nexus.log` and the open of the new file, the write fails with `ENOENT` (file has been renamed away) or `EBADF` (file descriptor is now invalid). If the write failure is silently swallowed (common with `stream.write()` which emits `error` events rather than throwing), those log lines are permanently lost. A user doing `tail -f nexus.log` during rotation also loses the tail because the inode changes.
+
+A second issue: the rotation check happens "on each write batch." If the batch flush runs every 500ms and the file is 10MB exactly at flush time, the rotation and the batch write happen in the same synchronous block — in better-sqlite3's execution model, this is safe. But the log file write is NOT better-sqlite3 — it is `fs.appendFileSync` or a writable stream. These two operations must be kept strictly sequential.
 
 **Why it happens:**
-Unix domain sockets are stream-based, not message-based. There is no concept of "one write = one read." The kernel may deliver data in arbitrary chunks depending on buffer sizes, scheduling, and kernel version.
+Log rotation is typically implemented last (it's not needed until the log gets big) and tested never (10MB takes weeks to accumulate in dev). The error path during the rename window is not exercised.
 
 **How to avoid:**
-Use Node's built-in `readline` module to wrap the socket — it handles all buffer accumulation internally and emits exactly one `line` event per `\n`-terminated message:
+Use synchronous file operations for log writing (not a stream) to avoid the EBADF/ENOENT window. The pattern:
 
 ```typescript
-import readline from 'node:readline';
-
-// Server side — per-connection framing
-server.on('connection', (socket) => {
-  const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
-  rl.on('line', (line) => {
-    if (!line.trim()) return;       // skip blank lines between messages
-    try {
-      const msg = JSON.parse(line);
-      handleMessage(socket, msg);
-    } catch (err) {
-      log(`broker: malformed JSON from client — ${err}`);
-      // Do NOT destroy socket on parse error — it may be a version mismatch
-      // Log and skip; the connection is still valid
+function writeLogLine(line: string): void {
+  try {
+    const stat = fs.statSync(LOG_PATH);
+    if (stat.size > LOG_ROTATE_BYTES) {
+      rotateLogs(); // renames synchronously before the next write
     }
-  });
-  rl.on('close', () => handleDisconnect(socket));
-});
-
-// Send side — always terminate with \n
-function send(socket: net.Socket, msg: object): boolean {
-  return socket.write(JSON.stringify(msg) + '\n');
-}
-```
-
-Note: NDJSON is safe for this use case because the JSON spec requires that newline characters WITHIN string values be escaped as `\n` (not literal newlines). A correctly serialized JSON object never contains a literal `\n`, so newline is an unambiguous message delimiter.
-
-**Warning signs:**
-- `SyntaxError: Unexpected token` in broker logs, intermittently
-- Jobs get submitted but broker never processes them (message was silently discarded)
-- Bug only reproduces when payload field contains long content (file diffs > ~4KB)
-
-**Phase to address:** Broker IPC protocol phase — use `readline` from the start, not a manual buffer accumulator. The manual approach has well-known off-by-one bugs at buffer boundaries.
-
----
-
-### Pitfall 3: Broker Startup Race — Instance Connects Before Server Is Listening
-
-**What goes wrong:**
-The coordinator `init()` code starts the LLM pipeline and the broker client in sequence. If the broker process is launching concurrently with the first instance, the instance attempts `net.connect(SOCK_PATH)` before the broker has called `server.listen()`. The connect attempt fails with `ECONNREFUSED`. The instance logs "broker unavailable" and switches to direct mode. It does not retry. The broker finishes starting 50ms later. The instance stays in direct mode for the entire session.
-
-The same race occurs when the user starts three Claude sessions in rapid succession (one per repo). All three instances connect before the broker is ready. All three fall back to direct mode. The broker starts successfully but has no clients.
-
-**Why it happens:**
-Process startup order is not guaranteed. Even if the coordinator spawns the broker, `child_process.spawn()` returns before the child process has called `net.createServer().listen()`.
-
-**How to avoid:**
-The broker client must implement exponential backoff with jitter on initial connect, treating the first `ECONNREFUSED` as a transient startup condition rather than permanent unavailability:
-
-```typescript
-const BASE_DELAY_MS = 100;
-const MAX_DELAY_MS = 10_000;
-const MAX_ATTEMPTS = 8;
-
-async function connectWithBackoff(sockPath: string): Promise<net.Socket> {
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    try {
-      return await tryConnect(sockPath);
-    } catch (err: unknown) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code !== 'ECONNREFUSED' && e.code !== 'ENOENT') throw e;
-      if (attempt === MAX_ATTEMPTS - 1) throw err;
-      const delay = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS)
-                  + Math.random() * BASE_DELAY_MS; // jitter
-      await new Promise(r => setTimeout(r, delay));
-    }
-  }
-  throw new Error('BROKER_UNREACHABLE');
-}
-```
-
-The jitter is critical: without it, all instances that start simultaneously will retry at exactly the same intervals, creating a reconnection storm that spikes CPU on the broker side every N seconds.
-
-**Warning signs:**
-- All instances in direct mode immediately after launch even when broker process is running
-- Broker logs show zero connections despite multiple instances running
-- Direct mode and broker mode running simultaneously in different instances
-
-**Phase to address:** Broker client phase — wire exponential backoff before writing any other client logic. Test with artificial startup delay in broker to verify retry behavior.
-
----
-
-### Pitfall 4: In-Flight Job Lost When Broker Disconnects During Processing
-
-**What goes wrong:**
-An instance submits a job to the broker. The broker dequeues it, starts the Ollama call (which takes 5-30 seconds), and during that call the broker process crashes or the Unix socket disconnects. The instance receives a socket `close` event and switches to direct mode. The job is gone — it was in the broker's in-memory queue, not persisted anywhere. The file stays stale indefinitely. No error is logged at the instance level because the instance does not know the job was in flight at the broker.
-
-**Why it happens:**
-In-memory queue means jobs have no durability. When the broker process dies, all queue state dies with it. The instance only knows it submitted a job; it has no record of which jobs are in-flight at the broker.
-
-**How to avoid:**
-When the broker client detects a disconnect (`socket.on('close', ...)` or `socket.on('error', ...)`), it must re-enqueue all jobs that were submitted but not yet acknowledged with a completion response:
-
-```typescript
-class BrokerClient {
-  private pendingJobs: Map<string, JobRequest> = new Map(); // jobId → original request
-
-  submitJob(job: JobRequest): void {
-    this.pendingJobs.set(job.jobId, job);
-    this.send({ type: 'submit', ...job });
-  }
-
-  onJobComplete(jobId: string): void {
-    this.pendingJobs.delete(jobId); // Only remove on explicit ack
-  }
-
-  onDisconnect(): void {
-    // Re-queue all pending jobs locally
-    const requeue = [...this.pendingJobs.values()];
-    this.pendingJobs.clear();
-    for (const job of requeue) {
-      this.localFallbackQueue.enqueue(job);
-    }
-    this.switchToDirectMode();
+    fs.appendFileSync(LOG_PATH, line + '\n', 'utf-8');
+  } catch (err) {
+    // Log write failure is silent — observability layer must not throw
+    // Optionally: stderr fallback for debugging
   }
 }
+
+function rotateLogs(): void {
+  // Synchronous renames — no window between operations
+  try { fs.rmSync(LOG_PATH + '.2', { force: true }); } catch {}
+  try { fs.renameSync(LOG_PATH + '.1', LOG_PATH + '.2'); } catch {}
+  try { fs.renameSync(LOG_PATH, LOG_PATH + '.1'); } catch {}
+  // New LOG_PATH will be created by first appendFileSync after rotation
+}
 ```
 
-The instance must track "submitted to broker but not yet complete" separately from "in local queue." The set of tracked jobs gives the re-queue list on disconnect.
+Using `appendFileSync` (not a stream) means each log line opens, appends, and closes the file. This is slower than a stream but the Nexus log volume is low enough (one line per event, max ~200 events/minute) that the syscall overhead is negligible. It also means rotation is safe: the old file has been renamed and closed before the next write opens a new file at the same path.
 
 **Warning signs:**
-- Files remain stale after broker crash/restart despite being recently changed
-- LLM pipeline processes no jobs after broker reconnect
-- `get_llm_status` shows 0 pending jobs but files have stale summaries
+- `tail -f nexus.log` shows output stopping mid-session without the Nexus stopping
+- Log lines are missing for the 5-10 second window when the log rotates
+- `nexus.log.1` exists but is smaller than 10MB (rotation triggered too early by a stat() race)
 
-**Phase to address:** Broker client phase — implement the `pendingJobs` map as part of the initial client design, not as a hardening step. It is not optional.
+**Phase to address:** Nexus store phase (Phase 1). Use `appendFileSync` from the start — never use a stream for log writing. Test rotation by setting `LOG_ROTATE_BYTES` to 1000 in tests and verifying all lines are present across the rotation boundary.
 
 ---
 
-### Pitfall 5: Mode-Switch Double-Processing — Same Job Runs in Both Broker and Direct Mode
+### Pitfall 8: Stale Socket Cleanup Race With the PID Guard — Nexus Cleans Its Own Live Socket
 
 **What goes wrong:**
-The broker client switches to direct mode when it detects a connection error. At the same moment, the broker has already dequeued the job and is running the Ollama call. The instance, now in direct mode, sees the file is stale and enqueues the same job locally. Both the broker and the instance call Ollama for the same file concurrently. Both write results back — the instance to its local DB, the broker sending a response over a socket that no longer has a live listener. The result is wasted GPU time and a `write EPIPE` error from the broker.
+The broker's PID guard cleanup sequence (which the Nexus mirrors) has a subtle race on broker startup that is amplified when both broker and Nexus are added:
+
+```
+MCP instance A starts → spawns Nexus → Nexus checks PID (stale) → removes nexus.sock → removes nexus.pid
+MCP instance B starts 50ms later → also sees no nexus.sock → spawns another Nexus process
+```
+
+The race is not just between multiple MCP instances — it can happen between two startup attempts from the SAME instance. If the coordinator crashes mid-init and is restarted by the user immediately, `nexus.sock` was cleaned up by the first Nexus startup (which got to PID guard cleanup), and the new startup then spawns a second Nexus — before the first Nexus has had time to bind.
+
+A worse version: the broker startup cleans up `broker.sock` (documented in the existing PITFALLS.md). It does NOT clean up `nexus.sock`. The Nexus startup cleans up `nexus.sock`. Neither cleans up the other's files. But the timing matters: if both broker and Nexus are spawned simultaneously, and BOTH call `fs.rmSync(SOCK_PATH, { force: true })` on their own sockets, a third process checking for the existence of either socket file may find it absent and spawn yet another daemon.
 
 **Why it happens:**
-The mode switch is not atomic with respect to in-flight jobs. The instance's staleness check runs immediately after the disconnect, before the broker has finished (or failed) the current job.
+The cleanup is done with `fs.rmSync({ force: true })` which silently succeeds even if the file doesn't exist or has already been deleted by another process. There is no lock between "check PID" and "remove socket."
 
 **How to avoid:**
-Two mitigations together solve this:
+The guard must write the PID file BEFORE binding the socket. The sequence in `nexus/main.ts`:
 
-1. The broker MUST send a `complete` or `failed` message back to the instance before processing the next job. This gives the instance a hook to remove the job from its `pendingJobs` map even if the connection is restored.
+```
+1. checkPidGuard()        — read + validate existing PID
+2. writeFileSync(PID_PATH) — claim ownership FIRST
+3. server.listen(SOCK_PATH) — only then bind socket
+4. on EADDRINUSE: remove PID_PATH, exit(0)
+```
 
-2. The instance must check for a result in its local DB before enqueuing a re-queued job. If the broker completed the job and the result was written before the disconnect was detected, there is no work to do:
+If step 3 fails with EADDRINUSE, step 4 must remove the PID file we just wrote. This ensures the PID file is only present when the socket is also present, and the PID is always the process currently holding the socket.
+
+The check in the MCP client's `spawnNexusIfNeeded()` must check BOTH files:
 
 ```typescript
-function shouldReenqueue(job: JobRequest): boolean {
-  const file = getFile(job.filePath); // read local SQLite
-  if (!file) return false;
-  const field = job.jobType === 'summary' ? 'summary_stale' : `${job.jobType}_stale`;
-  return (file as Record<string, unknown>)[field] === 1;
+async function spawnNexusIfNeeded(): Promise<void> {
+  // Only skip spawn if BOTH sock AND pid exist and pid is running
+  if (existsSync(SOCK_PATH) && existsSync(PID_PATH)) {
+    const pid = parseInt(readFileSync(PID_PATH, 'utf-8').trim(), 10);
+    if (!isNaN(pid) && isPidRunning(pid)) return; // definitely running
+  }
+  // Either file missing, or PID stale — let the Nexus sort it out on startup
+  spawn(nexusBin, { detached: true, stdio: 'ignore' }).unref();
+  // No sleep — connect via retry loop, not by waiting for spawn
 }
 ```
 
 **Warning signs:**
-- Duplicate Ollama requests visible in Ollama server logs for the same file within seconds of each other
-- `write EPIPE` errors in broker logs after instance disconnect
-- Token stats showing 2x expected usage for recently-changed files
+- `nexus.pid` points to a dead process but `nexus.sock` is a live socket (PID file not cleaned up on EADDRINUSE)
+- Two Nexus processes running simultaneously (check with `lsof nexus.sock`)
+- MCP client logs "spawning nexus" more than once per session
 
-**Phase to address:** Broker client phase, specifically the mode-switch transition logic. This must be tested with a deliberately slow Ollama mock that takes 10 seconds per job.
-
----
-
-### Pitfall 6: `socket.write()` Backpressure Ignored, Causing Silent Message Loss
-
-**What goes wrong:**
-`socket.write(data)` returns `false` when the socket's internal buffer is full. If the caller ignores the return value and keeps writing (common with fire-and-forget logging patterns), messages are silently dropped. For the broker use case: a single instance that rapidly submits 50 jobs at startup will overflow the socket buffer if the broker is slow to read. Jobs appear to be submitted but the broker never receives them. No error is thrown.
-
-**Why it happens:**
-`socket.write()` is asynchronous and non-blocking — it queues data and returns immediately. The `false` return value is the only signal that the buffer is full, and it is easy to miss when porting from synchronous or HTTP-based communication patterns.
-
-**How to avoid:**
-For a low-throughput broker (job submissions are not high-frequency), the safest approach is to flush each write and wait for `drain` before the next. A simple wrapper:
-
-```typescript
-function writeMessage(socket: net.Socket, msg: object): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify(msg) + '\n';
-    const flushed = socket.write(data, (err) => {
-      if (err) reject(err);
-    });
-    if (flushed) {
-      resolve();
-    } else {
-      socket.once('drain', resolve);
-    }
-  });
-}
-```
-
-For the broker submission rate (one job per file change event, debounced at 2 seconds), true backpressure is unlikely in practice. But the error handler is still needed: an `EPIPE` error from `socket.write()` with no error listener will crash the process with an unhandled exception.
-
-Always attach an error listener to every socket:
-```typescript
-socket.on('error', (err) => {
-  log(`broker client: socket error — ${err.code}`);
-  handleDisconnect();
-});
-```
-
-**Warning signs:**
-- `Error: write EPIPE` crashes the instance process (unhandled error event)
-- Jobs submitted during startup burst never appear in broker queue
-- Broker queue is always empty despite active file watching
-
-**Phase to address:** Broker IPC protocol phase — add error listeners before the first `socket.write()`. Treat missing error listeners as a bug.
+**Phase to address:** Nexus server phase (Phase 2). Test: write a script that starts 5 MCP instances simultaneously, wait 5 seconds, verify only one Nexus process is running and all 5 instances are connected to it.
 
 ---
 
-### Pitfall 7: esbuild Splits broker.ts Into a Separate Entry Point, Duplicating Shared Modules
+### Pitfall 9: Ring Buffer Memory Growth From Large `detail` JSON Payloads
 
 **What goes wrong:**
-The current build command compiles all source files as individual entry points with `--outdir=dist`. Adding `src/broker/broker.ts` as a new entry point means esbuild compiles it independently. Any module imported by both `mcp-server.ts` and `broker.ts` (e.g., `logger.ts`, `config-utils.ts`) gets compiled into BOTH output files. If those shared modules have module-level state (singletons, Maps, initialized objects), each output file gets its own isolated copy. The broker process and the MCP server process each have their own logger state. This is fine at runtime since they are separate processes — but it means the deduplication warning in esbuild's output can be confusing, and shared config changes require rebuilding both files.
-
-The harder failure is if `broker.ts` is mistakenly added to the existing single-entry build command (producing a bundle where the broker server AND the MCP server run in the same process) vs. being a true separate process entry point.
-
-**Why it happens:**
-The existing build compiles all source files individually (not as a single bundle). Adding `broker.ts` to this list works for the shared-library compilation model. But the broker is a standalone process, not a library — it needs its own entry point that bootstraps the process, not just a compiled module.
-
-**How to avoid:**
-Add a separate build script for the broker entry point. Keep `broker.ts` OUT of the main `build` script's file list — it is not a library module consumed by `mcp-server.ts`, it is a standalone server:
-
+The activity table schema has a `detail TEXT` field for "anything else" — the `progress:update` event payload is stored here as JSON. A `progress:update` event looks like:
 ```json
-{
-  "scripts": {
-    "build": "esbuild src/mcp-server.ts [... library files ...] --format=esm --outdir=dist --platform=node",
-    "build:broker": "esbuild src/broker/broker.ts --bundle --format=esm --outdir=dist --platform=node --external:better-sqlite3 --external:tree-sitter"
-  }
+{ "totalFiles": 343, "withSummary": 47, "withConcepts": 12, "pendingSummary": 296, "pendingConcepts": 331 }
+```
+That is ~100 bytes. Harmless. But the design says the in-memory ring buffer holds the "slim post-insert versions." If the implementation accidentally stores the full original event object (including the original `NexusEvent` fields: `type`, `timestamp`, `repoPath`, `repoName`, plus the detail payload) rather than a slim summary object, and the ring buffer cap is 1000 events, memory usage is:
+
+1000 events × (average event size ~200 bytes) = 200KB. Fine.
+
+But if `tool:called` is logged with the full tool args included (the design explicitly says "Tool args are NOT included"), or if `files:changed` accidentally includes the full list of changed file paths (not just `changedCount, staledCount`), event sizes balloon. A `files:changed` event for a 500-file cascade with full paths is ~15KB per event. 1000 events × 15KB = 15MB in the ring buffer. For 10 active repos, that's 150MB of ring buffer — on a machine with 16GB VRAM committed to the GPU.
+
+**Why it happens:**
+The event types are defined in `types.ts` with specific fields. But if the server stores `msg as received` rather than projecting to a slim object, future additions to event payloads automatically bloat the ring buffer without any developer noticing.
+
+**How to avoid:**
+Define a `RingEntry` type that is separate from `NexusEvent` and contains only what's needed for the ring buffer:
+
+```typescript
+interface RingEntry {
+  id: number;           // activity.id from SQLite insert
+  timestamp: number;
+  eventType: string;
+  repoPath: string;
+  summary: string;      // pre-formatted display string, not raw fields
 }
 ```
 
-The `--bundle` flag for the broker entry point matters: it allows esbuild to tree-shake and inline shared utilities, reducing the broker to a single self-contained file. Mark native addons as `--external` so esbuild does not attempt to bundle the `.node` binary.
+The `summary` field is a pre-formatted human-readable string (same as the log line). The ring buffer stores `RingEntry[]`, not `NexusEvent[]`. The raw event fields are stored in SQLite but never held in the ring buffer.
+
+Add a test that measures ring buffer memory after inserting 1000 events with large `detail` payloads and asserts that memory growth per event is under 500 bytes.
 
 **Warning signs:**
-- Broker starts successfully but cannot find `logger.ts` or `config-utils.ts` at runtime
-- `dist/broker/broker.js` imports from relative paths that no longer exist in the broker's working directory
-- Build output shows `better-sqlite3` bundling warnings
+- Nexus process RSS grows steadily over hours during active sessions
+- `process.memoryUsage().heapUsed` increases by >1MB per 100 events received
+- Memory pressure visible when multiple large repos are scanning simultaneously
 
-**Phase to address:** Broker process phase — define the build configuration for `broker.ts` before writing any broker code. Getting the build shape wrong early means refactoring import paths later.
+**Phase to address:** Nexus store phase (Phase 1). Define `RingEntry` before implementing the ring buffer. Never store `NexusEvent` directly in the ring buffer array.
 
 ---
 
-### Pitfall 8: Unix Socket Path Exceeds OS Limit (103 Bytes on macOS)
+### Pitfall 10: `query:stats` Response Protocol Makes Nexus Partially Critical Path for `status` Tool
 
 **What goes wrong:**
-`~/.filescope/broker.sock` expands to `/home/username/.filescope/broker.sock` on Linux. For a typical Linux user this is well under 107 bytes. But on macOS, the limit is 103 bytes, and some Linux distributions use longer usernames or home paths. A path like `/home/very_long_username_here/.filescope/broker.sock` (52 characters) is fine; but `/Users/very_long_username/.filescope/broker.sock` on macOS is also fine at 47 chars. The real risk is CI environments, Docker containers, or systems where `$HOME` is a long path.
+The design states: "This is the ONE case where the Nexus sends a response — it's a simple request/response for the status tool only." The `status` MCP tool currently calls `requestStatus()` on the broker (which has a 2-second timeout returning null on failure). After stats migration, the status tool also calls `queryStats()` on the Nexus.
 
-If the path exceeds the limit, `server.listen(sockPath)` throws `Error: path is too long` at broker startup.
+The problem: the status tool is now making TWO async calls — one to the broker, one to the Nexus — and the user perceives the tool as slow if either has a 2-second timeout. Worse: if the MCP client is not connected to the Nexus (Nexus never spawned because LLM is disabled), `queryStats()` returns null after 2 seconds. The status tool call now takes 2 seconds minimum, even when nothing is wrong. This is a regression from the current behavior where `status` returns instantly when the broker is disconnected.
+
+A second subtlety: the `query:stats` message sent to the Nexus must be handled differently from fire-and-forget events. The Nexus server must send a response back over the socket. This means the Nexus socket protocol now has two modes: fire-and-forget (events from client) and request/response (stats query from client). This asymmetry is a protocol design smell that future developers will not expect and may break.
 
 **Why it happens:**
-`sockaddr_un.sun_path` is a fixed-size C struct field. The limit is baked into the kernel ABI.
+The stats query is added as an afterthought to the fire-and-forget protocol. It "seems simple" but creates a stateful request-tracking requirement on both sides.
 
 **How to avoid:**
-Validate the socket path length on broker startup and fail with a clear error message:
+Two options:
+
+**Option A (preferred):** Keep the Nexus as pure sink. For the status tool, read token totals directly from `nexus.db` using a read-only better-sqlite3 connection opened in the MCP instance:
 
 ```typescript
-const SOCK_PATH = path.join(os.homedir(), '.filescope', 'broker.sock');
-if (Buffer.byteLength(SOCK_PATH, 'utf8') > 103) {
-  // Use 103 as the conservative cross-platform limit
-  throw new Error(
-    `Socket path too long (${SOCK_PATH.length} bytes, max 103): ${SOCK_PATH}. ` +
-    `Set FILESCOPE_SOCK_PATH environment variable to a shorter path.`
-  );
+// In status tool handler — read nexus.db directly if it exists
+function getNexusTokens(repoPath: string): number | null {
+  const dbPath = path.join(os.homedir(), '.filescope', 'nexus.db');
+  if (!existsSync(dbPath)) return null;
+  try {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const row = db.prepare('SELECT total_tokens FROM repos WHERE repo_path = ?').get(repoPath);
+    db.close();
+    return (row as any)?.total_tokens ?? null;
+  } catch { return null; }
 }
 ```
 
-The 103-byte limit is conservative (macOS minimum). Using `Buffer.byteLength` instead of `.length` handles non-ASCII characters in paths correctly.
+This has zero latency (SQLite read is local), no socket round-trip, no timeout, and no protocol complexity. The Nexus remains a pure event sink.
+
+**Option B (if direct DB read is rejected):** Set a 200ms timeout (not 2000ms) for stats queries, and make the status tool display "tokens: (nexus unavailable)" immediately rather than waiting. Never let an observability query block a tool call for more than 200ms.
 
 **Warning signs:**
-- Broker fails to start on macOS CI with `Error: path is too long`
-- Works in dev (short home path) but fails in a specific user's environment
-- Error message from kernel is cryptic: does not mention the 103-byte limit
+- `status` tool call takes >500ms when Nexus is not running
+- Status tool response is slower after v1.3 ships than before
+- Nexus server code has `pendingStatsRequests: Map<string, ...>` — a sign it has become stateful in the request-tracking sense
 
-**Phase to address:** Broker process phase — add the path length check in the broker's startup sequence. Document `FILESCOPE_SOCK_PATH` as the override env var.
-
----
-
-### Pitfall 9: Priority Starvation — Low-Importance Files Never Processed When High-Importance Files Keep Arriving
-
-**What goes wrong:**
-The broker queue is ordered by `importance DESC`. In an active development session where the user is editing high-importance files (importance 7-10) continuously, the in-memory queue always has importance-9 jobs at the front. Low-importance files (importance 1-3) that were enqueued at session start are still pending 30 minutes later. When the session ends, those files have never been summarized.
-
-This is not a theoretical concern: a monorepo where the user edits `src/index.ts` (importance 10) repeatedly will continuously push importance-10 jobs to the front, starving `docs/CHANGELOG.md` (importance 1) indefinitely.
-
-**Why it happens:**
-Pure priority ordering with no aging mechanism is mathematically guaranteed to starve low-priority items when high-priority items arrive faster than they are consumed.
-
-**How to avoid:**
-For the broker's in-memory queue, apply a simple aging mechanism: jobs that have been waiting more than a threshold are promoted. A practical threshold for this use case is 5 minutes (300,000ms). Implementation:
-
-```typescript
-function effectivePriority(job: QueuedJob, nowMs: number): number {
-  const waitMs = nowMs - job.enqueuedAt;
-  const agingBoost = Math.floor(waitMs / 300_000); // +1 per 5 minutes waiting
-  return Math.min(job.importance + agingBoost, 10);
-}
-```
-
-The aging boost is capped at the maximum importance (10) to prevent wrap-around arithmetic bugs. Re-sort the queue using `effectivePriority()` on each dequeue call rather than on insert (so the boost is computed fresh at dequeue time, not stale from insert time).
-
-Note: starvation is less severe in this system than in general scheduling because each instance only submits jobs for its own repo. A session editing importance-10 files does not starve importance-3 jobs from a different repo (those are in a different instance's submission stream). However, within a single repo, the problem applies.
-
-**Warning signs:**
-- `get_llm_status` shows jobs with `created_at` more than 10 minutes ago still pending
-- Low-importance files in the same repo never get summaries in long sessions
-- Queue depth stays non-zero even after 20 minutes of inactivity
-
-**Phase to address:** Broker queue phase — build the aging function into the dequeue logic from the start. Test with a queue loaded with 10 low-importance jobs followed by a stream of high-importance inserts.
-
----
-
-### Pitfall 10: `server.close()` Does Not Close Existing Connections — Broker Hangs on Shutdown
-
-**What goes wrong:**
-`server.close()` stops the broker from accepting new connections but does NOT close existing connections. If instances are connected when the broker shuts down, the `close` event on the server is never emitted (it fires only when all connections are ended). The broker process hangs indefinitely, holding the socket file. Subsequent broker restarts fail with `BROKER_ALREADY_RUNNING` (the probe connects to the hung process, which is still listening on existing connections).
-
-**Why it happens:**
-This is a documented Node.js `net.Server` behavior that surprises most developers. `server.close()` is "close to new connections" not "close everything."
-
-**How to avoid:**
-Track all active client sockets and destroy them during shutdown:
-
-```typescript
-const activeConnections: Set<net.Socket> = new Set();
-
-server.on('connection', (socket) => {
-  activeConnections.add(socket);
-  socket.once('close', () => activeConnections.delete(socket));
-});
-
-async function shutdown(): Promise<void> {
-  // Stop accepting new connections
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  // Close all existing connections
-  for (const socket of activeConnections) {
-    socket.destroy();
-  }
-  // Clean up socket file
-  try { await fs.unlink(SOCK_PATH); } catch {}
-}
-
-process.on('SIGTERM', () => void shutdown());
-process.on('SIGINT', () => void shutdown());
-```
-
-`socket.destroy()` is appropriate here (not `socket.end()`) because shutdown is intentional and immediate. There is no protocol-level "goodbye" message needed — instances detect the socket close and switch to direct mode.
-
-**Warning signs:**
-- Broker process stays alive after SIGTERM; `kill -9` required
-- `lsof ~/.filescope/broker.sock` shows connections still open after broker exit was requested
-- Next broker start reports `BROKER_ALREADY_RUNNING` when the old broker should be gone
-
-**Phase to address:** Broker process phase — wire `activeConnections` tracking into the initial server setup, before any graceful shutdown testing.
-
----
-
-### Pitfall 11: Coordinator Init Race — Shared Queue Opens Before `~/.filescope/` Directory Exists
-
-**What goes wrong:**
-The coordinator's `init()` calls `openSharedQueue()` which attempts to open `~/.filescope/queue.db`. If `~/.filescope/` does not exist (first run on a new machine, or the directory was manually deleted), `better-sqlite3` throws `SQLITE_CANTOPEN: unable to open database file`. The coordinator crashes before it can run any MCP tools. No helpful error message is shown to the user.
-
-**Why it happens:**
-`better-sqlite3` does not create parent directories — it only creates the database file itself. `~/.filescope/` must exist before opening.
-
-**How to avoid:**
-Create the directory with `fs.mkdirSync(dir, { recursive: true })` before opening any SQLite databases in it. The `recursive: true` flag makes this a no-op if the directory already exists:
-
-```typescript
-import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-
-const FILESCOPE_DIR = join(homedir(), '.filescope');
-
-export function openSharedQueue(): Database {
-  mkdirSync(FILESCOPE_DIR, { recursive: true }); // safe to call every time
-  return new Database(join(FILESCOPE_DIR, 'queue.db'));
-}
-```
-
-**Warning signs:**
-- Coordinator fails to start on fresh machines with `SQLITE_CANTOPEN`
-- Works fine in dev (directory exists from previous runs) but fails for new users
-- Error message does not mention the missing directory
-
-**Phase to address:** Shared queue phase — add `mkdirSync` as the first line of `openSharedQueue()`. This is a one-liner that prevents a class of first-run failures.
-
----
-
-### Pitfall 12: `readline.createInterface` Does Not Propagate Socket Errors
-
-**What goes wrong:**
-When a socket emits an `error` event, the `readline.Interface` wrapping it does NOT propagate that error — it only closes. If the only error handler is on the `rl` instance (not on the raw socket), errors like `ECONNRESET` are silently swallowed. The broker loses track of the client, the `pendingJobs` map is never cleaned up, and jobs are never re-queued.
-
-**Why it happens:**
-`readline.Interface` is designed for interactive line reading, not socket error handling. Its `close` event fires on both graceful close AND error, making it impossible to distinguish between them from the `rl` interface alone.
-
-**How to avoid:**
-Always attach error handlers to the raw socket, separate from the `readline` interface:
-
-```typescript
-server.on('connection', (socket) => {
-  // Error handler on RAW socket — required
-  socket.on('error', (err) => {
-    log(`broker: client socket error — ${err.code}`);
-    handleClientDisconnect(socket);
-    socket.destroy();
-  });
-
-  // readline for message framing only
-  const rl = readline.createInterface({ input: socket, crlfDelay: Infinity });
-  rl.on('line', (line) => handleMessage(socket, line));
-  rl.on('close', () => handleClientDisconnect(socket));
-});
-```
-
-The `handleClientDisconnect` function must be idempotent — both `rl.close` and `socket.error` can fire for the same disconnect event.
-
-**Warning signs:**
-- Socket errors (`ECONNRESET`) produce no log output from the broker
-- Pending job maps grow unboundedly because disconnect cleanup never runs
-- Dead clients remain in the broker's client registry indefinitely
-
-**Phase to address:** Broker IPC protocol phase — add socket error handlers in the same commit that adds the `readline` interface. They are inseparable.
+**Phase to address:** Stats migration phase (Phase 5). Decide on Option A or Option B before writing any `query:stats` protocol code. If Option A is chosen, delete the `query:stats` protocol entirely — it adds complexity with no benefit.
 
 ---
 
@@ -512,14 +511,13 @@ The `handleClientDisconnect` function must be idempotent — both `rl.close` and
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Skip exponential backoff, use fixed 1s retry | Simpler reconnect logic | Reconnection storm when broker restarts with multiple instances | Never — jitter is 3 lines of code |
-| Ignore `socket.write()` return value | No async complexity | Silent message loss under load, potential EPIPE crash | Never — attach error listener at minimum |
-| Skip `pendingJobs` tracking in broker client | Simpler client code | Jobs lost on disconnect, files stay stale silently | Never — it is the core correctness guarantee |
-| Blind-delete stale socket without probing | Simpler startup | Kills a live broker if two instances start simultaneously | Never — the probe is 10 lines |
-| Skip aging in priority queue | Simpler dequeue | Low-priority files never processed in active sessions | Acceptable only if single-repo use is the only target |
-| Use `socket.end()` in broker shutdown | "Graceful" close | Server.close() hangs waiting for clients to finish | Never — use `socket.destroy()` for intentional shutdown |
-| Add broker.ts to main build script file list | One build command | broker.ts compiles as a library module, not a standalone process | Never — broker needs `--bundle` flag, main build does not |
-| No path length validation | No startup overhead | Cryptic kernel error on long-path systems, no hint for user | Never — it is a one-liner check |
+| `await nexusConnect()` in coordinator init | Simpler code, mirrors broker | Nexus becomes critical path; MCP fails if Nexus binary missing | Never — nexus client must be fire-and-don't-await |
+| `setInterval` for batch flush timer | Simpler implementation | Timer accumulates after heavy scans; unnecessary DB lock acquisitions | Never — use self-rescheduling setTimeout with unref() |
+| Store `NexusEvent` objects directly in ring buffer | No extra type | Ring buffer grows unboundedly with large event payloads | Never — define RingEntry projection type |
+| Skip batch flush in shutdown sequence | Simpler shutdown code | Last 499ms of events lost on every Nexus stop | Never — flush is 2 lines of synchronous better-sqlite3 |
+| Use writable stream for log file | Faster writes | Events lost during 10MB rotation rename window | Acceptable only if log size is capped below 1MB (never rotates) |
+| Add `query:stats` to Nexus protocol | Avoids direct DB reads | Nexus becomes partially critical path for `status` tool; 2s timeout degrades tool UX | Only if direct DB read is architecturally prohibited |
+| Blind `fs.rmSync` without PID check in spawn guard | Simpler spawn check | Kills live Nexus if two instances start within 100ms | Never — check both PID file and socket, let Nexus handle EADDRINUSE |
 
 ---
 
@@ -527,14 +525,14 @@ The `handleClientDisconnect` function must be idempotent — both `rl.close` and
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `net.createServer()` + Unix socket | Call `server.listen()` and assume socket file is auto-cleaned on crash | Register `process.on('exit')` handler to `fs.unlinkSync(sockPath)` |
-| `readline` + socket | Only attach `rl.on('error')` | Always attach `socket.on('error')` on the raw socket; `readline` does not forward errors |
-| `socket.write()` | Call and ignore return value | Check return value; attach `socket.on('error')` to catch EPIPE |
-| `server.close()` | Expect all connections to be closed | Track `activeConnections`, call `socket.destroy()` on each during shutdown |
-| `better-sqlite3` + `~/.filescope/queue.db` | Open DB directly | Call `mkdirSync(dir, { recursive: true })` first |
-| esbuild + broker entry point | Add `broker.ts` to existing `--outdir` build | Use separate `--bundle` build command with native addons marked `--external` |
-| `net.connect()` to probe stale socket | Assume `ECONNREFUSED` is always stale | Handle both `ECONNREFUSED` (stale) and successful connection (live broker) cases |
-| Priority queue aging | Compute aging boost at insert time | Compute `effectivePriority()` at dequeue time so the boost grows with wait time |
+| Nexus client in coordinator | `await nexusConnect()` mirrors broker pattern | `nexusConnect()` is void, not async — never awaited, never throws |
+| Progress debounce timer | Timer keeps running across reconnects | Cancel and reset timer on every new socket connection |
+| SQLite WAL + shutdown | Call `db.close()` at end of shutdown | Flush batch first, then `wal_checkpoint(TRUNCATE)`, then `db.close()` |
+| Log rotation + appendFileSync | Use writable stream for performance | Use `appendFileSync` — log volume is low, stream's async model creates rotation race |
+| `stats.json` migration | "Import only if nexus.db is empty" | Always import on startup using MAX semantics — idempotent, safe to repeat |
+| Ring buffer storage | Store incoming `NexusEvent` directly | Project to slim `RingEntry` at insert time — decouple buffer size from event size |
+| EADDRINUSE on Nexus startup | Crash (exit code 1) or retry | `process.exit(0)` — another instance won the race, not an error |
+| Better-sqlite3 WAL reads from MCP instance | Open DB with `{ readonly: true }` and read total_tokens directly | Use `{ fileMustExist: true }` to avoid creating empty file if Nexus never ran |
 
 ---
 
@@ -542,10 +540,11 @@ The `handleClientDisconnect` function must be idempotent — both `rl.close` and
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Startup job flood — instance submits ALL stale files at once | Broker queue depth spikes to hundreds; priority ordering is meaningless because all jobs arrive at once | Batch startup submissions: top N by importance (e.g., N=10), then drip-feed as jobs complete | Any repo with >20 stale files at startup |
-| Polling with no backoff when broker is slow | Instance polls for job results every 100ms; CPU spikes while broker runs a 20-second LLM call | Use response-driven flow: broker sends `complete` message back; instance acts on that event | Any repo doing change_impact jobs (slow LLM calls) |
-| Unbounded in-memory queue growth | Broker process memory grows without bound during sustained high-change-rate sessions | Cap queue at MAX_QUEUE_SIZE per repo (e.g., 500 jobs); reject inserts beyond cap with a warning | Repos with pathological file-change rates (test runners that write thousands of files) |
-| `readline` interface not closed when socket is destroyed | Event listeners accumulate; readline's internal buffer leaks memory | Call `rl.close()` explicitly when handling socket disconnect, in addition to `socket.destroy()` | Long-running broker with frequent client connect/disconnect cycles |
+| Batch timer not unref'd | Nexus process won't exit when all connections close | `timer.unref()` on every setTimeout call | Immediately — any session where Nexus is idle |
+| SQLite `PRAGMA synchronous = FULL` for WAL mode | Each write batch takes 2× longer | Use `PRAGMA synchronous = NORMAL` — WAL provides sufficient crash safety | At >100 events/sec on spinning disk |
+| Activity table INSERT without index on repo_path | History queries for a specific repo do full table scans | Index `idx_activity_repo ON activity(repo_path, timestamp)` at table creation | At >10k rows (~1 week of active usage) |
+| 30-day pruning as full table scan at startup | Startup takes 500ms+ on long-running systems | Use `DELETE FROM activity WHERE timestamp < ?` with the index — O(log n) not O(n) | After 30 days of continuous operation |
+| Direct DB reads from MCP instance open new Database() per call | 10ms overhead per status query from SQLite open/close | Cache the read-only DB handle, close lazily | Any status tool call |
 
 ---
 
@@ -553,25 +552,26 @@ The `handleClientDisconnect` function must be idempotent — both `rl.close` and
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| No validation of `type` field in incoming NDJSON messages | Malicious or buggy client sends `type: "../../etc/passwd"` — broker calls wrong handler or crashes | Validate message type against a fixed enum before dispatching; reject unknown types |
-| Socket path written to world-readable location | Another user on the system connects to the broker and submits/steals jobs | Use `~/.filescope/` (user's home dir, mode 700 by default); do not use `/tmp/` |
-| Job `payload` field not size-capped before passing to LLM | A crafted large payload fills GPU VRAM and hangs the broker | Cap payload at the same limit used for file content reads (existing `maxFileSize` config) |
+| Nexus socket world-readable in `/tmp/` | Another local user connects and reads cross-repo token stats | Use `~/.filescope/nexus.sock` (mode 700 home dir), never `/tmp/` |
+| Storing MCP tool args in `tool:called` events | File contents passed to `set_file_summary` end up persisted in nexus.db | Explicitly exclude args — log only `toolName + durationMs`, never args |
+| `nexus.db` readable by other users | Activity log reveals which files are being worked on and their LLM processing patterns | Ensure `~/.filescope/` is created with mode 700; `nexus.db` inherits from directory |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Stale socket cleanup:** Broker restarts cleanly after `kill -9` (not just after SIGTERM) — verify `ECONNREFUSED` probe path works
-- [ ] **NDJSON framing:** Submit a job with a 100KB payload field — verify broker receives exactly one `line` event, not multiple fragments
-- [ ] **Reconnection backoff:** Start 3 instances before the broker; verify all 3 connect within 30 seconds — not just the first one
-- [ ] **In-flight job recovery:** Kill broker mid-Ollama-call; verify instance re-enqueues the job and processes it in direct mode
-- [ ] **Mode-switch double-processing:** With a 10-second LLM mock, disconnect instance during processing — verify Ollama is called exactly once, not twice
-- [ ] **server.close() hang:** Send SIGTERM to broker with 3 connected instances — verify broker exits within 2 seconds, not hanging
-- [ ] **`~/.filescope/` creation:** Delete `~/.filescope/` and restart coordinator — verify clean startup, no SQLITE_CANTOPEN
-- [ ] **Socket path length:** Verify broker startup prints a clear error (not a kernel error) when `SOCK_PATH` exceeds 103 bytes
-- [ ] **Priority aging:** Load queue with 20 low-importance jobs, then add 5 high-importance jobs — verify low-importance jobs are eventually processed within 10 minutes
-- [ ] **esbuild broker build:** `dist/broker.js` is a self-contained file that starts correctly with `node dist/broker.js` — no relative import failures
-- [ ] **Error listener coverage:** Trigger `ECONNRESET` on a connected instance — verify broker logs the error and cleans up client state, does not crash
+- [ ] **Graceful degradation:** Delete `dist/nexus/main.js` — coordinator must start cleanly, all MCP tools must work, zero error logs about nexus
+- [ ] **Graceful degradation:** Start Nexus, then kill it with `kill -9` — MCP instance must continue working, no crashes, reconnect timer fires quietly
+- [ ] **Multi-instance spawn:** Start 5 MCP instances simultaneously — verify exactly one Nexus process after 5 seconds (`ps aux | grep nexus | grep -v grep`)
+- [ ] **Shutdown flush:** Send 40 events, immediately send SIGTERM — verify all 40 appear in `nexus.db` (not just the first 0 or 50)
+- [ ] **WAL checkpoint:** After Nexus shutdown, verify `nexus.db-wal` file is absent or zero bytes
+- [ ] **Log rotation:** Set rotate threshold to 1000 bytes, write 200 log lines — verify `nexus.log.1` exists and all 200 lines are present across `nexus.log` + `nexus.log.1`
+- [ ] **Stats migration:** Pre-populate `stats.json` with 50,000 tokens for a test repo — start Nexus — verify `total_tokens` in `nexus.db` is ≥ 50,000
+- [ ] **Ring buffer size:** Inject 1000 events with 500-byte `detail` payloads — verify Nexus RSS does not grow by more than 5MB
+- [ ] **repo:init ordering:** Connect socket, emit `progress:update` before `repo:init`, then emit `repo:init` — verify connection is not closed, subsequent events are routed correctly
+- [ ] **Timer unref:** Stop all MCP instances (all nexus connections close) — verify Nexus process exits within 60 seconds (batch timer fires, finds nothing, exits cleanly)
+- [ ] **EADDRINUSE exit code:** Two Nexus processes race to bind — verify the loser exits with code 0, not 1 (not counted as error by process supervisor)
+- [ ] **Status tool latency:** With Nexus down, call `status` tool — verify response in <300ms, not 2000ms
 
 ---
 
@@ -579,13 +579,14 @@ The `handleClientDisconnect` function must be idempotent — both `rl.close` and
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Stale socket, broker won't start | LOW | `rm ~/.filescope/broker.sock` then restart broker |
-| Broker crash loses in-flight jobs | MEDIUM | Jobs stay stale until next file change event or next session startup triggers re-enqueue; no data loss, just delayed processing |
-| Mode-switch double-processing discovered in production | LOW | The second result merely overwrites the first in SQLite; no corruption, just wasted GPU time; fix in next deploy |
-| Missing `mkdirSync` causes SQLITE_CANTOPEN on fresh installs | MEDIUM | Hotfix: add `mkdirSync` to `openSharedQueue()`; all existing installs are unaffected (directory already exists) |
-| esbuild broker build missing `--external` for native addons | HIGH | Broker crashes at startup with `Error: The module did not self-register`; fix build config and rebuild |
-| `server.close()` hang blocking supervisor restart | HIGH | `kill -9 <broker_pid>` to force-exit; then fix shutdown logic to call `socket.destroy()` on tracked connections |
-| Socket path too long on user's machine | LOW | Set `FILESCOPE_SOCK_PATH=/tmp/fs-broker.sock` as env var override; add env var support to broker config |
+| Nexus in critical path — MCP won't start | HIGH | Hotfix: change `await nexusConnect()` to `nexusConnect()` (remove await); redeploy |
+| Stale nexus.sock after crash | LOW | `rm ~/.filescope/nexus.sock ~/.filescope/nexus.pid` — Nexus auto-respawns on next MCP init |
+| Last batch lost on SIGTERM | LOW | Restart Nexus; missing events are only the last 499ms before shutdown; no data corruption |
+| stats.json migration skipped (token counter reset) | MEDIUM | Stop Nexus, run manual migration script, restart; historical data is in stats.json |
+| nexus.db corrupted (power loss during WAL write) | MEDIUM | `rm ~/.filescope/nexus.db` — Nexus recreates on startup; historical data lost but service recovers |
+| Log rotation lost events | LOW | Events are in nexus.db; log loss only affects human-readable tail view |
+| Ring buffer memory growth discovered in production | MEDIUM | Restart Nexus to clear buffer; fix RingEntry projection in code; monitor RSS after fix |
+| EADDRINUSE crash (exit code 1) alerting process supervisor | LOW | Change exit code from 1 to 0 in EADDRINUSE handler; redeploy |
 
 ---
 
@@ -593,44 +594,34 @@ The `handleClientDisconnect` function must be idempotent — both `rl.close` and
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Stale socket `EADDRINUSE` on crash | Broker process (Phase 1) | Test: `kill -9` broker, restart — succeeds without manual cleanup |
-| NDJSON framing partial reads | IPC protocol (Phase 1) | Test: send 100KB payload — broker receives exactly one `line` event |
-| Startup race / connect before listen | Broker client (Phase 2) | Test: start 3 instances before broker — all connect within 30s |
-| In-flight job lost on broker disconnect | Broker client (Phase 2) | Test: crash broker mid-job — job re-queued in direct mode |
-| Mode-switch double-processing | Broker client (Phase 2) | Test: 10s LLM mock + disconnect — Ollama called exactly once |
-| Backpressure / EPIPE crash | IPC protocol (Phase 1) | Test: `ECONNRESET` injection — broker logs error, does not crash |
-| esbuild broker build shape | Broker process (Phase 1) | Test: `node dist/broker.js` starts with no import errors |
-| `~/.filescope/` missing on first run | Shared queue (Phase 0) | Test: delete dir, restart coordinator — clean startup |
-| `server.close()` hang on shutdown | Broker process (Phase 1) | Test: SIGTERM with 3 connected instances — exits within 2s |
-| Socket path length limit | Broker process (Phase 1) | Test: set long HOME path — clear error message, not kernel panic |
-| Priority starvation | Broker queue (Phase 1) | Test: 20 low-priority jobs + stream of high-priority — low processed within 10min |
-| `readline` error not propagated | IPC protocol (Phase 1) | Test: `ECONNRESET` — broker logs error and cleans client state |
+| Nexus becomes critical path | Phase 3 (Nexus client) | Test: missing nexus binary — coordinator starts clean |
+| Multi-instance spawn race | Phase 2 (Nexus server) | Test: 5 simultaneous instances — exactly one Nexus process |
+| WAL shutdown loses last batch | Phase 1 (Nexus store) | Test: 40 events then SIGTERM — all 40 in nexus.db |
+| Batch timer accumulation | Phase 1 (Nexus store) | Test: 200 rapid events — no empty flush calls after scan |
+| repo:init ordering violations | Phase 2 (Nexus server) | Test: pre-init event then repo:init — connection stays open |
+| Stats migration race | Phase 5 (Stats migration) | Test: pre-populated stats.json — tokens appear in nexus.db |
+| Log rotation window | Phase 1 (Nexus store) | Test: 1000-byte rotation threshold — all lines present |
+| Socket cleanup race | Phase 2 (Nexus server) | Test: PID written before socket bound — EADDRINUSE path cleans PID |
+| Ring buffer memory growth | Phase 1 (Nexus store) | Test: 1000 large events — RSS growth <5MB |
+| query:stats creates latency | Phase 5 (Stats migration) | Test: Nexus down — status tool responds in <300ms |
 
 ---
 
 ## Sources
 
-- [Node.js `net` module official docs — v24 (current)](https://nodejs.org/api/net.html) — `server.close()` behavior, `EADDRINUSE`, socket file lifecycle, `allowHalfOpen`, backpressure (HIGH confidence — official docs)
-- [Node.js Readline official docs](https://nodejs.org/api/readline.html) — `createInterface`, `line` event, `crlfDelay` (HIGH confidence — official docs)
-- [Node.js Backpressuring in Streams](https://nodejs.org/en/learn/modules/backpressuring-in-streams) — drain event, write() return value (HIGH confidence — official docs)
-- [Node.js net module issue #28947](https://github.com/nodejs/node/issues/28947) — impossible Unix domain socket error edge cases (MEDIUM confidence — issue report verified against official docs)
-- Codebase audit: `/home/autopcap/FileScopeMCP/src/llm/pipeline.ts` — existing dequeue loop pattern, `scheduleNext` with `.unref()`, stop/start lifecycle (HIGH confidence — direct code review)
-- Codebase audit: `/home/autopcap/FileScopeMCP/src/coordinator.ts` — `AsyncMutex`, coordinator init sequence, pipeline wiring (HIGH confidence — direct code review)
-- Codebase audit: `/home/autopcap/FileScopeMCP/package.json` — esbuild build command, `--outdir` multi-entry pattern, native addons (better-sqlite3, tree-sitter) (HIGH confidence — direct code review)
-- [openclaw gateway restart race condition — GitHub issue #26904](https://github.com/openclaw/openclaw/issues/26904) — real-world PID/socket startup race causing log flood (MEDIUM confidence — issue report from March 2025)
-- [esbuild shared code between multiple entrypoints — Issue #2303](https://github.com/evanw/esbuild/issues/2303) — module dedup, code splitting ESM-only constraint (HIGH confidence — esbuild official issue tracker)
-- [esbuild API docs](https://esbuild.github.io/api/) — `--external`, `--bundle`, `--platform=node` flags (HIGH confidence — official docs)
-- [Node.js and esbuild: beware of mixing CJS and ESM](https://dev.to/marcogrcr/nodejs-and-esbuild-beware-of-mixing-cjs-and-esm-493n) — `--format=cjs` with `--bundle` recommendation (MEDIUM confidence — community article, aligned with official docs)
-- [starvation-free-priority-queue GitHub](https://github.com/ori88c/starvation-free-priority-queue) — aging mechanism design (MEDIUM confidence — library docs)
-- [Aging (scheduling) — Wikipedia](https://en.wikipedia.org/wiki/Aging_(scheduling)) — aging definition, +1 per wait threshold (HIGH confidence — canonical reference)
-- [better-sqlite3 distribution issues — GitHub #1367](https://github.com/WiseLibs/better-sqlite3/issues/1367) — external dependency marking in esbuild (MEDIUM confidence — issue report)
-- [NDJSON specification](https://jsonltools.com/ndjson-format-specification) — newline escaping guarantee in JSON strings (HIGH confidence — spec document)
-- [Parsing NDJSON in Node.js — bennadel.com](https://www.bennadel.com/blog/3233-parsing-and-serializing-large-datasets-using-newline-delimited-json-in-node-js.htm) — buffer accumulation pattern (MEDIUM confidence — community article)
-- [Reconnection strategies with exponential backoff — DEV Community](https://dev.to/hexshift/robust-websocket-reconnection-strategies-in-javascript-with-exponential-backoff-40n1) — jitter formula, MAX_ATTEMPTS pattern (MEDIUM confidence — community article)
-- [Better Stack: 16 Common Node.js Errors](https://betterstack.com/community/guides/scaling-nodejs/nodejs-errors/) — ECONNREFUSED, EPIPE handling (MEDIUM confidence — community guide)
-- [Taming the Buffer: Handling Backpressure in Node.js](https://runebook.dev/en/articles/node/net/event-drain) — drain event pattern for `net.Socket` (MEDIUM confidence — community article aligned with official docs)
+- Codebase audit: `/home/autopcap/FileScopeMCP/src/broker/client.ts` — broker connect/reconnect/fire-and-forget patterns, `_intentionalDisconnect` flag, reconnect timer with `unref()` (HIGH confidence — direct code review)
+- Codebase audit: `/home/autopcap/FileScopeMCP/src/broker/main.ts` — PID guard implementation, `isPidRunning()` via `process.kill(pid, 0)`, SIGTERM/SIGINT shutdown sequence (HIGH confidence — direct code review)
+- Codebase audit: `/home/autopcap/FileScopeMCP/src/broker/server.ts` — `activeConnections: Set<net.Socket>`, `server.close()` + `socket.destroy()` shutdown, NDJSON readline pattern (HIGH confidence — direct code review)
+- Codebase audit: `/home/autopcap/FileScopeMCP/src/broker/stats.ts` — `stats.json` read/write/accumulate pattern; migration surface (HIGH confidence — direct code review)
+- Codebase audit: `/home/autopcap/FileScopeMCP/NEXUS-PLAN.md` — full Nexus design including event types, connection model, write batching spec, log rotation spec, stats migration phases (HIGH confidence — authoritative design document)
+- [SQLite WAL mode official docs](https://www.sqlite.org/wal.html) — WAL checkpoint behavior, `wal_checkpoint(TRUNCATE)`, `PRAGMA synchronous` levels, crash safety guarantees (HIGH confidence — official docs)
+- [better-sqlite3 synchronous API docs](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md) — synchronous write semantics, `db.close()`, `db.pragma()`, transaction API (HIGH confidence — official docs)
+- [Node.js `fs.appendFileSync` docs](https://nodejs.org/api/fs.html#fsappendfilesyncpath-data-options) — synchronous append behavior, file creation on first call (HIGH confidence — official docs)
+- [Node.js `net.Server` docs](https://nodejs.org/api/net.html) — `server.close()` semantics (stops new connections, does not close existing), `EADDRINUSE` behavior (HIGH confidence — official docs)
+- [Node.js process memory](https://nodejs.org/api/process.html#processmemoryusage) — `process.memoryUsage().heapUsed` for ring buffer measurement (HIGH confidence — official docs)
+- Previous PITFALLS.md (v1.2 broker) — Pitfall 10 on `server.close()` hang, Pitfall 1 on stale socket, Pitfall 3 on startup race — all patterns directly applicable to Nexus (HIGH confidence — internal research)
 
 ---
 
-*Pitfalls research for: v1.2 LLM Broker — adding Unix domain socket IPC and broker process to FileScopeMCP*
-*Researched: 2026-03-21*
+*Pitfalls research for: v1.3 Nexus — adding centralized observability daemon to FileScopeMCP*
+*Researched: 2026-03-24*
