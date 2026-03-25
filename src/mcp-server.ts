@@ -10,7 +10,7 @@ import {
 } from "./types.js";
 import { normalizePath, excludeAndRemoveFile } from "./file-utils.js";
 import { getConfig } from './global-state.js';
-import { log, enableFileLogging, enableDaemonFileLogging } from './logger.js';
+import { log, enableDaemonFileLogging } from './logger.js';
 import {
   getFile,
   upsertFile,
@@ -27,8 +27,14 @@ import { detectCycles } from './cycle-detection.js';
 import { getSqlite } from './db/db.js';
 import { ServerCoordinator } from './coordinator.js';
 
-// Enable file logging for debugging
-enableFileLogging(false, 'mcp-debug.log');
+// MCP mode: log to file only, never stderr.
+// Flooding stderr crashes the MCP stdio transport when Claude Code
+// can't drain the pipe fast enough during heavy file-watch activity.
+enableDaemonFileLogging(path.join(
+  process.env.HOME || '/tmp',
+  '.filescope',
+  'mcp-server.log',
+));
 
 /**
  * A simple implementation of the Transport interface for stdio
@@ -89,13 +95,6 @@ class StdioTransport implements Transport {
       log(`Message too large: ${serialized.length} bytes`);
       throw new Error('Message exceeds maximum size limit');
     }
-
-    // Only log a summary of the message to stderr, not the full content
-    const isResponse = 'result' in message;
-    const msgType = isResponse ? 'response' : 'request';
-    const msgId = (message as any).id || 'none';
-
-    process.stderr.write(`Sending ${msgType} message (id: ${msgId})\n`);
 
     // Write to stdout without adding an extra newline
     process.stdout.write(serialized);
