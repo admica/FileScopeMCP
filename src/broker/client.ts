@@ -217,14 +217,14 @@ function handleBrokerMessage(msg: BrokerMessage): void {
 export function resubmitStaleFiles(): void {
   try {
     const sqlite = getSqlite();
+    // Only query for summary/concepts staleness — change_impact requires the
+    // original diff text and can only be submitted at change-detection time.
     const rows = sqlite
       .prepare(
-        `SELECT path, importance,
-                summary_stale_since, concepts_stale_since, change_impact_stale_since
+        `SELECT path, importance, summary_stale_since, concepts_stale_since
          FROM files
          WHERE summary_stale_since IS NOT NULL
             OR concepts_stale_since IS NOT NULL
-            OR change_impact_stale_since IS NOT NULL
          ORDER BY importance DESC`
       )
       .all() as Array<{
@@ -232,7 +232,6 @@ export function resubmitStaleFiles(): void {
         importance: number;
         summary_stale_since: number | null;
         concepts_stale_since: number | null;
-        change_impact_stale_since: number | null;
       }>;
 
     let submitted = 0;
@@ -254,10 +253,9 @@ export function resubmitStaleFiles(): void {
         submitJob(row.path, 'concepts', row.importance, fileContent);
         submitted++;
       }
-      if (row.change_impact_stale_since !== null) {
-        submitJob(row.path, 'change_impact', row.importance, fileContent);
-        submitted++;
-      }
+      // change_impact jobs are NOT resubmitted here — they require the original
+      // diff text which is only available at the moment the file changes.
+      // The llm-diff-fallback path handles those at change-detection time.
     }
 
     if (submitted > 0) {
