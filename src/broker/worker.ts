@@ -13,6 +13,11 @@ import { ConceptsSchema, ChangeImpactSchema } from '../llm/types.js';
 import { log } from '../logger.js';
 import type { QueueJob, JobResult } from './types.js';
 import type { PriorityQueue } from './queue.js';
+
+/** Strip ```json ... ``` fences that small models add despite instructions. */
+function stripMarkdownFences(text: string): string {
+  return text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+}
 import type { BrokerConfig } from './config.js';
 
 // ─── LLM model factory ────────────────────────────────────────────────────────
@@ -212,7 +217,7 @@ export class BrokerWorker {
             maxOutputTokens,
             abortSignal: signal,
           });
-          const parsed = JSON.parse(text.trim());
+          const parsed = JSON.parse(stripMarkdownFences(text.trim()));
           return { text: JSON.stringify(parsed), totalTokens: usage?.totalTokens ?? 0 };
         }
       }
@@ -241,7 +246,7 @@ export class BrokerWorker {
             maxOutputTokens,
             abortSignal: signal,
           });
-          const parsed = JSON.parse(text.trim());
+          const parsed = JSON.parse(stripMarkdownFences(text.trim()));
           return { text: JSON.stringify(parsed), totalTokens: usage?.totalTokens ?? 0 };
         }
       }
