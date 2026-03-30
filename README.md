@@ -22,6 +22,10 @@ FileScopeMCP is a fully autonomous file intelligence platform. Once pointed at a
 
 All of this information is exposed to your AI assistant through the Model Context Protocol so it always has accurate, up-to-date context about your codebase structure.
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/admica-filescopemcp).
+
 ## Features
 
 - **File Importance Ranking**
