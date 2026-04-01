@@ -6,10 +6,17 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/config-utils.ts src/coordinator.ts src/cycle-detection.ts src/file-utils.ts src/file-watcher.ts src/global-state.ts src/logger.ts src/mcp-server.ts src/storage-utils.ts src/types.ts src/db/schema.ts src/db/db.ts src/db/repository.ts src/migrate/json-to-sqlite.ts src/cascade/cascade-engine.ts src/change-detector/types.ts src/change-detector/ast-parser.ts src/change-detector/semantic-diff.ts src/change-detector/change-detector.ts src/change-detector/llm-diff-fallback.ts src/change-detector/git-diff.ts src/llm/prompts.ts src/llm/types.ts src/broker/types.ts src/broker/config.ts src/broker/queue.ts src/broker/worker.ts src/broker/server.ts src/broker/stats.ts src/broker/client.ts src/broker/main.ts --format=esm --target=es2020 --outdir=dist --platform=node",
+    "build:nexus-api": "esbuild src/nexus/main.ts src/nexus/server.ts src/nexus/repo-store.ts src/nexus/discover.ts --format=esm --target=es2020 --outdir=dist/nexus --platform=node",
+    "build:nexus-ui": "vite build --config src/nexus/ui/vite.config.ts",
+    "dev:nexus-ui": "vite dev --config src/nexus/ui/vite.config.ts",
+    "nexus": "node dist/nexus/main.js",
     "typecheck": "tsc --noEmit",
     "start": "node dist/mcp-server.js",
     "test": "vitest",
     "coverage": "vitest run --coverage"
+  },
+  "bin": {
+    "filescope-nexus": "dist/nexus/main.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
