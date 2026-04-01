@@ -132,10 +132,10 @@ Plans:
   3. With an existing nexus.json, the server opens each listed repo's data.db read-only; repos whose data.db is missing appear as "offline" tabs (not removed from registry)
   4. GET / returns a Svelte SPA with navbar showing all repo tabs, a System tab, and a Settings tab; clicking a repo tab shows a stats summary card
   5. SIGTERM/SIGINT triggers graceful shutdown: all DB connections closed, HTTP server stopped, process exits cleanly
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 Plans:
-- [ ] 20-01-PLAN.md — Backend: dependencies, discover.ts, repo-store.ts, server.ts, main.ts, build pipeline
-- [ ] 20-02-PLAN.md — Frontend: Svelte 5 SPA with Vite, Tailwind, hash router, Navbar, StatsCard, routes
+- [x] 20-01-PLAN.md — Backend: dependencies, discover.ts, repo-store.ts, server.ts, main.ts, build pipeline
+- [x] 20-02-PLAN.md — Frontend: Svelte 5 SPA with Vite, Tailwind, hash router, Navbar, StatsCard, routes
 - [ ] 20-03-PLAN.md — Integration: build verification, runtime smoke test, visual checkpoint
 
 ### Phase 21: File Tree + Detail Panel
@@ -205,7 +205,7 @@ Plans:
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
-| 20. Server Skeleton + Repo Discovery | v1.3 | 0/3 | Planned | -- |
+| 20. Server Skeleton + Repo Discovery | v1.3 | 2/3 | In Progress|  |
 | 21. File Tree + Detail Panel | v1.3 | 0/? | Pending | -- |
 | 22. Dependency Graph | v1.3 | 0/? | Pending | -- |
 | 23. System View + Live Activity | v1.3 | 0/? | Pending | -- |

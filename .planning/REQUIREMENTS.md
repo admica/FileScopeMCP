@@ -9,29 +9,29 @@ Requirements for the Nexus milestone. Read-only web dashboard that opens existin
 
 ### Server & CLI
 
-- [ ] **NEXUS-01**: Fastify HTTP server binds to 0.0.0.0:1234 by default with --port and --host CLI flag overrides
-- [ ] **NEXUS-02**: `filescope-nexus` CLI entry point registered via package.json bin field
-- [ ] **NEXUS-03**: esbuild builds src/nexus/main.ts → dist/nexus/main.js alongside existing MCP and broker entry points
-- [ ] **NEXUS-04**: Static files (CSS, JS, vendored htmx/D3) served from dist/nexus/static/
+- [x] **NEXUS-01**: Fastify HTTP server binds to 0.0.0.0:1234 by default with --port and --host CLI flag overrides
+- [x] **NEXUS-02**: `filescope-nexus` CLI entry point registered via package.json bin field
+- [x] **NEXUS-03**: esbuild builds src/nexus/main.ts → dist/nexus/main.js alongside existing MCP and broker entry points
+- [x] **NEXUS-04**: Static files (CSS, JS, vendored htmx/D3) served from dist/nexus/static/
 
 ### Repo Discovery
 
-- [ ] **NEXUS-05**: Reads repo list from ~/.filescope/nexus.json on startup
-- [ ] **NEXUS-06**: Auto-discovers repos by scanning ~ children for .filescope/data.db when nexus.json doesn't exist; writes discovered list to nexus.json
-- [ ] **NEXUS-07**: Validates each repo's data.db on startup; missing repos marked "offline" (not removed from registry)
-- [ ] **NEXUS-08**: Periodic recheck (60s) reconnects repos whose data.db becomes available mid-session
+- [x] **NEXUS-05**: Reads repo list from ~/.filescope/nexus.json on startup
+- [x] **NEXUS-06**: Auto-discovers repos by scanning ~ children for .filescope/data.db when nexus.json doesn't exist; writes discovered list to nexus.json
+- [x] **NEXUS-07**: Validates each repo's data.db on startup; missing repos marked "offline" (not removed from registry)
+- [x] **NEXUS-08**: Periodic recheck (60s) reconnects repos whose data.db becomes available mid-session
 
 ### Database Access
 
-- [ ] **NEXUS-09**: Opens each repo's .filescope/data.db read-only via better-sqlite3 with WAL mode
-- [ ] **NEXUS-10**: Re-queries SQLite on every HTTP request — no caching layer
-- [ ] **NEXUS-11**: DB connections are long-lived (opened once on startup, closed on shutdown)
+- [x] **NEXUS-09**: Opens each repo's .filescope/data.db read-only via better-sqlite3 with WAL mode
+- [x] **NEXUS-10**: Re-queries SQLite on every HTTP request — no caching layer
+- [x] **NEXUS-11**: DB connections are long-lived (opened once on startup, closed on shutdown)
 
 ### Page Shell & Routing
 
-- [ ] **NEXUS-12**: HTML shell page with top navbar (per-repo project tabs, System tab, Settings gear), htmx and D3 script tags
-- [ ] **NEXUS-13**: Route structure: GET / (shell), GET /project/:repoName, GET /system, GET /settings, plus htmx partial endpoints
-- [ ] **NEXUS-14**: Graceful shutdown on SIGTERM/SIGINT: close DB connections, stop log tailers, close SSE connections, stop HTTP server
+- [x] **NEXUS-12**: HTML shell page with top navbar (per-repo project tabs, System tab, Settings gear), htmx and D3 script tags
+- [x] **NEXUS-13**: Route structure: GET / (shell), GET /project/:repoName, GET /system, GET /settings, plus htmx partial endpoints
+- [x] **NEXUS-14**: Graceful shutdown on SIGTERM/SIGINT: close DB connections, stop log tailers, close SSE connections, stop HTTP server
 
 ### File Tree & Detail Panel
 
@@ -119,20 +119,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| NEXUS-01 | Phase 20 | Pending |
-| NEXUS-02 | Phase 20 | Pending |
-| NEXUS-03 | Phase 20 | Pending |
-| NEXUS-04 | Phase 20 | Pending |
-| NEXUS-05 | Phase 20 | Pending |
-| NEXUS-06 | Phase 20 | Pending |
-| NEXUS-07 | Phase 20 | Pending |
-| NEXUS-08 | Phase 20 | Pending |
-| NEXUS-09 | Phase 20 | Pending |
-| NEXUS-10 | Phase 20 | Pending |
-| NEXUS-11 | Phase 20 | Pending |
-| NEXUS-12 | Phase 20 | Pending |
-| NEXUS-13 | Phase 20 | Pending |
-| NEXUS-14 | Phase 20 | Pending |
+| NEXUS-01 | Phase 20 | Complete |
+| NEXUS-02 | Phase 20 | Complete |
+| NEXUS-03 | Phase 20 | Complete |
+| NEXUS-04 | Phase 20 | Complete |
+| NEXUS-05 | Phase 20 | Complete |
+| NEXUS-06 | Phase 20 | Complete |
+| NEXUS-07 | Phase 20 | Complete |
+| NEXUS-08 | Phase 20 | Complete |
+| NEXUS-09 | Phase 20 | Complete |
+| NEXUS-10 | Phase 20 | Complete |
+| NEXUS-11 | Phase 20 | Complete |
+| NEXUS-12 | Phase 20 | Complete |
+| NEXUS-13 | Phase 20 | Complete |
+| NEXUS-14 | Phase 20 | Complete |
 | NEXUS-15 | Phase 21 | Pending |
 | NEXUS-16 | Phase 21 | Pending |
 | NEXUS-17 | Phase 21 | Pending |
