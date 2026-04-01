@@ -14,11 +14,13 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
     "@ai-sdk/openai-compatible": "^2.0.35",
+    "@fastify/static": "^9.0.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "ai": "^6.0.116",
     "better-sqlite3": "^12.6.2",
     "chokidar": "^3.6.0",
     "drizzle-orm": "^0.45.1",
+    "fastify": "^5.8.4",
     "ignore": "^7.0.5",
     "tree-sitter": "^0.25.0",
     "tree-sitter-javascript": "^0.25.0",
@@ -26,12 +28,17 @@
     "zod": "^3.25.28"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@tailwindcss/vite": "^4.2.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.21",
     "@vitest/coverage-v8": "^3.1.4",
     "drizzle-kit": "^0.31.9",
     "esbuild": "^0.27.3",
+    "svelte": "^5.55.1",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.8.3",
+    "vite": "^8.0.3",
     "vitest": "^3.1.4"
   }
 }
