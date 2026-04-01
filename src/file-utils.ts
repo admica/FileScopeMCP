@@ -81,9 +81,14 @@ const RUBY_IMPORT_RE = /(require_relative|require)\s*\(?\s*['"]([^'"]+)['"]\s*\)
 // All other languages continue to use the regex patterns below.
 export const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.py': /(?:import\s+[\w.]+|from\s+[\w.]+\s+import\s+[\w*]+)/g,
-  '.c': /#include\s+["<][^">]+[">]/g,
-  '.cpp': /#include\s+["<][^">]+[">]/g,
-  '.h': /#include\s+["<][^">]+[">]/g,
+  '.c': /#include\s+["<]([^">]+)[">]/g,
+  '.cpp': /#include\s+["<]([^">]+)[">]/g,
+  '.cc': /#include\s+["<]([^">]+)[">]/g,
+  '.cxx': /#include\s+["<]([^">]+)[">]/g,
+  '.h': /#include\s+["<]([^">]+)[">]/g,
+  '.hpp': /#include\s+["<]([^">]+)[">]/g,
+  '.hh': /#include\s+["<]([^">]+)[">]/g,
+  '.hxx': /#include\s+["<]([^">]+)[">]/g,
   '.rs': /use\s+[\w:]+|mod\s+\w+/g,
   '.lua': /require\s*\(['"][^'"]+['"]\)/g,
   '.zig': /@import\s*\(['"][^'"]+['"]\)|const\s+[\w\s,{}]+\s*=\s*@import\s*\(['"][^'"]+['"]\)/g,
@@ -333,6 +338,16 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
     case '.rb':
       importance += 2;
       break;
+    case '.c':
+    case '.cpp':
+    case '.cc':
+    case '.cxx':
+    case '.h':
+    case '.hpp':
+    case '.hh':
+    case '.hxx':
+      importance += 2;
+      break;
     default:
       importance += 0;
   }
@@ -353,7 +368,8 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
   const significantNames = [
     'index', 'main', 'server', 'app', 'config', 'types', 'utils',
     'kernel', 'provider', 'middleware', 'service', 'repository',
-    'controller', 'model', 'layout', 'master'
+    'controller', 'model', 'layout', 'master',
+    'platformio', 'CMakeLists', 'Makefile'
   ];
   if (significantNames.includes(fileName.toLowerCase())) {
     importance += 2;
@@ -900,15 +916,15 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
   } else {
     const pattern = IMPORT_PATTERNS[ext];
     if (pattern) {
+       const cppExts = new Set(['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hh', '.hxx']);
+       const isCppFile = cppExts.has(ext);
        try {
          const content = await fsPromises.readFile(filePath, 'utf-8');
          let match;
          while ((match = pattern.exec(content)) !== null) {
-           const importPath = match[1] || match[2] || match[3]; // Adjust indices based on specific regex
+           const importPath = match[1] || match[2] || match[3];
            if (importPath) {
-              // Skip if the importPath looks like an unresolved template literal
               if (isUnresolvedTemplateLiteral(importPath)) {
-                log(`[analyzeNewFile] Skipping unresolved template literal: ${importPath}`);
                 continue;
               }
 
@@ -916,8 +932,12 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
                   const resolvedPath = path.resolve(path.dirname(filePath), importPath);
                   const normalizedResolvedPath = normalizePath(resolvedPath);
 
-                  // Check if it's a package dependency (heuristic: includes node_modules or doesn't start with . or /)
-                  if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
+                  // C/C++: "quoted" includes are local files, <angled> are system/library headers.
+                  // Other languages: non-relative, non-absolute imports are package deps.
+                  const isPackageDep = normalizedResolvedPath.includes('node_modules')
+                    || (isCppFile && match[0].includes('<'))
+                    || (!isCppFile && !importPath.startsWith('.') && !importPath.startsWith('/'));
+                  if (isPackageDep) {
                       const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
 
                       // Skip if the package name is a template literal
