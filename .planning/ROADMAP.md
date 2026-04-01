@@ -58,9 +58,9 @@ See: ROADMAP.md Phase Details below for full phase details (not yet archived).
 
 **Design document:** `NEXUS-PLAN.md`
 
-- [ ] **Phase 20: Server Skeleton + Repo Discovery** — Fastify server, CLI entry point, dashboard.json registry, auto-discovery, per-repo read-only DB connections, HTML shell with navbar, basic route structure, static file serving, graceful shutdown
-- [ ] **Phase 21: File Tree + Detail Panel** — Collapsible directory tree with htmx partial swaps, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel
-- [ ] **Phase 22: Dependency Graph** — D3.js force-directed graph of local imports, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree↔graph toggle
+- [ ] **Phase 20: Server Skeleton + Repo Discovery** (3 plans) — Fastify server, CLI entry point, nexus.json registry, auto-discovery, per-repo read-only DB connections, Svelte 5 SPA with navbar, hash routing, stats card, static file serving, graceful shutdown
+- [ ] **Phase 21: File Tree + Detail Panel** — Collapsible directory tree with lazy loading, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel
+- [ ] **Phase 22: Dependency Graph** — Cytoscape.js interactive dependency map, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree/graph toggle
 - [ ] **Phase 23: System View + Live Activity** — Broker status polling via broker.sock, token usage from stats.json, SSE log tailing (fs.watch + ring buffer), log line parsing
 - [ ] **Phase 24: Polish** — Importance heat colors, staleness icons, tab status indicators, settings page (add/remove repos), responsive layout
 
@@ -122,16 +122,21 @@ Plans:
 - [x] 19-02-PLAN.md — Client requestStatus(), coordinator getBrokerStatus(), MCP tool update
 
 ### Phase 20: Server Skeleton + Repo Discovery
-**Goal**: Running `filescope-nexus` starts a Fastify HTTP server that discovers all FileScopeMCP repos, opens their databases read-only, and serves a navigable shell page with per-repo tabs
+**Goal**: Running `filescope-nexus` starts a Fastify HTTP server that discovers all FileScopeMCP repos, opens their databases read-only, and serves a Svelte 5 SPA with per-repo tabs and stats summary cards
 **Depends on**: Phase 19
 **Requirements**: NEXUS-01, NEXUS-02, NEXUS-03, NEXUS-04, NEXUS-05, NEXUS-06, NEXUS-07, NEXUS-08, NEXUS-09, NEXUS-10, NEXUS-11, NEXUS-12, NEXUS-13, NEXUS-14
 **Canonical refs**: `NEXUS-PLAN.md` (Architecture, Repo Discovery, Data Access, Lifecycle sections)
 **Success Criteria** (what must be TRUE):
   1. `npm run nexus` (or `node dist/nexus/main.js`) starts a Fastify server on 0.0.0.0:1234; `--port` and `--host` flags override defaults
-  2. With no ~/.filescope/dashboard.json, the server scans ~ for .filescope/data.db directories, writes the discovered list to dashboard.json, and serves tabs for each discovered repo
-  3. With an existing dashboard.json, the server opens each listed repo's data.db read-only; repos whose data.db is missing appear as "offline" tabs (not removed from registry)
-  4. GET / returns an HTML shell with navbar showing all repo tabs, a System tab, and a Settings tab; clicking a repo tab loads GET /project/:repoName
+  2. With no ~/.filescope/nexus.json, the server scans ~ 2 levels deep for .filescope/data.db directories, writes the discovered list to nexus.json, and serves tabs for each discovered repo
+  3. With an existing nexus.json, the server opens each listed repo's data.db read-only; repos whose data.db is missing appear as "offline" tabs (not removed from registry)
+  4. GET / returns a Svelte SPA with navbar showing all repo tabs, a System tab, and a Settings tab; clicking a repo tab shows a stats summary card
   5. SIGTERM/SIGINT triggers graceful shutdown: all DB connections closed, HTTP server stopped, process exits cleanly
+**Plans:** 3 plans
+Plans:
+- [ ] 20-01-PLAN.md — Backend: dependencies, discover.ts, repo-store.ts, server.ts, main.ts, build pipeline
+- [ ] 20-02-PLAN.md — Frontend: Svelte 5 SPA with Vite, Tailwind, hash router, Navbar, StatsCard, routes
+- [ ] 20-03-PLAN.md — Integration: build verification, runtime smoke test, visual checkpoint
 
 ### Phase 21: File Tree + Detail Panel
 **Goal**: Clicking a repo tab shows a two-panel layout — a collapsible file tree on the left, and a metadata detail panel on the right that populates when you click a file or directory
@@ -145,13 +150,13 @@ Plans:
   4. Tree expand/collapse is lazy — child nodes load via htmx when a directory is clicked, not all at once on page load
 
 ### Phase 22: Dependency Graph
-**Goal**: A toggle switches the left panel from directory tree to a D3.js force-directed dependency graph where files are nodes and imports are edges — interactive, filterable, and linked to the detail panel
+**Goal**: A toggle switches the left panel from directory tree to a Cytoscape.js interactive dependency graph where files are nodes and imports are edges — interactive, filterable, and linked to the detail panel
 **Depends on**: Phase 21
 **Requirements**: NEXUS-19, NEXUS-20, NEXUS-21, NEXUS-22, NEXUS-23, NEXUS-24
 **Canonical refs**: `NEXUS-PLAN.md` (Dependency Graph View section), `src/db/schema.ts` (file_dependencies table)
 **Success Criteria** (what must be TRUE):
   1. GET /api/project/:repoName/graph returns JSON { nodes, edges } built from file_dependencies WHERE dependency_type = 'local_import'
-  2. Toggling Tree ↔ Graph in the left panel renders a D3 force-directed graph with nodes sized by importance and colored by directory
+  2. Toggling Tree / Graph in the left panel renders a Cytoscape.js graph with nodes sized by importance and colored by directory
   3. Hovering a node highlights its direct dependencies and dependents; clicking a node loads its detail panel
   4. Graph supports zoom, pan, and drag-to-rearrange; a directory filter dropdown limits visible nodes to a subtree plus its external deps
 
@@ -172,7 +177,7 @@ Plans:
 **Requirements**: NEXUS-31, NEXUS-32, NEXUS-33, NEXUS-34, NEXUS-35
 **Canonical refs**: `NEXUS-PLAN.md` (Navigation, File Tree, UI Layout sections)
 **Success Criteria** (what must be TRUE):
-  1. File tree entries show importance as a heat-colored indicator (gray→blue→green→yellow→red scaling 0→10) and staleness as an icon (⟳ stale, ✓ fresh)
+  1. File tree entries show importance as a heat-colored indicator (gray/blue/green/yellow/red scaling 0-10) and staleness as an icon (stale or fresh)
   2. Navbar tabs show a status dot: green (MCP instance connected per broker), gray (no active instance), orange (repo has stale files)
   3. GET /settings renders a page where users can add a repo by path and remove existing repos; changes take effect immediately (DB opened/closed, tab appears/disappears) without server restart
   4. Layout remains usable at viewport widths from 1024px to 2560px
@@ -200,8 +205,8 @@ Plans:
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
-| 20. Server Skeleton + Repo Discovery | v1.3 | 0/? | Pending | — |
-| 21. File Tree + Detail Panel | v1.3 | 0/? | Pending | — |
-| 22. Dependency Graph | v1.3 | 0/? | Pending | — |
-| 23. System View + Live Activity | v1.3 | 0/? | Pending | — |
-| 24. Polish | v1.3 | 0/? | Pending | — |
+| 20. Server Skeleton + Repo Discovery | v1.3 | 0/3 | Planned | -- |
+| 21. File Tree + Detail Panel | v1.3 | 0/? | Pending | -- |
+| 22. Dependency Graph | v1.3 | 0/? | Pending | -- |
+| 23. System View + Live Activity | v1.3 | 0/? | Pending | -- |
+| 24. Polish | v1.3 | 0/? | Pending | -- |
