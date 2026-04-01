@@ -1,75 +1,90 @@
-# Requirements: FileScopeMCP v1.2
+# Requirements: FileScopeMCP v1.3
 
-**Defined:** 2026-03-21
+**Defined:** 2026-04-01
 **Core Value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
-## v1.2 Requirements
+## v1.3 Requirements
 
-Requirements for the LLM Broker milestone. Each maps to roadmap phases.
+Requirements for the Nexus milestone. Read-only web dashboard that opens existing per-repo databases and log files — cross-repo observability without a new daemon or protocol. Each requirement maps to roadmap phases.
 
-### Broker Core
+### Server & CLI
 
-- [x] **BROKER-01**: Broker process listens on Unix domain socket at ~/.filescope/broker.sock
-- [x] **BROKER-02**: Broker creates ~/.filescope/ directory on first run if it doesn't exist
-- [x] **BROKER-03**: Broker reads LLM config (provider, model, baseURL) from ~/.filescope/broker.json
-- [x] **BROKER-04**: Broker writes PID file at ~/.filescope/broker.pid and cleans up stale socket/PID on startup
-- [x] **BROKER-05**: Broker maintains in-memory priority queue ordered by importance DESC, created_at ASC
-- [x] **BROKER-06**: Broker deduplicates pending jobs per (repoPath, filePath, jobType) — latest submission replaces older
-- [x] **BROKER-07**: Broker builds prompts from file content and calls Ollama with structured output fallback
-- [x] **BROKER-08**: Broker processes one job at a time (serialized Ollama access)
-- [x] **BROKER-09**: Broker enforces 120s timeout per job to protect against hung Ollama calls
-- [x] **BROKER-10**: Broker performs graceful shutdown on SIGTERM/SIGINT — finish current job, close connections, remove socket and PID files
-- [x] **BROKER-11**: Broker drops pending jobs for a connection when that connection closes
-- [x] **BROKER-12**: Broker built as separate esbuild entry point (src/broker/main.ts -> dist/broker.js)
+- [ ] **NEXUS-01**: Fastify HTTP server binds to 0.0.0.0:1234 by default with --port and --host CLI flag overrides
+- [ ] **NEXUS-02**: `filescope-nexus` CLI entry point registered via package.json bin field
+- [ ] **NEXUS-03**: esbuild builds src/nexus/main.ts → dist/nexus/main.js alongside existing MCP and broker entry points
+- [ ] **NEXUS-04**: Static files (CSS, JS, vendored htmx/D3) served from dist/nexus/static/
 
-### Instance Client
+### Repo Discovery
 
-- [x] **CLIENT-01**: Instance auto-discovers broker by connecting to ~/.filescope/broker.sock
-- [x] **CLIENT-02**: Instance submits jobs to broker with file content, importance score, and job type
-- [x] **CLIENT-03**: Instance receives async results from broker and writes to local .filescope.db via writeLlmResult/clearStaleness
-- [x] **CLIENT-04**: Instance reconnects to broker on disconnect with fixed-interval retry (10s)
-- [x] **CLIENT-05**: Instance scans local DB for stale files on connect/reconnect and resubmits all to broker
+- [ ] **NEXUS-05**: Reads repo list from ~/.filescope/nexus.json on startup
+- [ ] **NEXUS-06**: Auto-discovers repos by scanning ~ children for .filescope/data.db when nexus.json doesn't exist; writes discovered list to nexus.json
+- [ ] **NEXUS-07**: Validates each repo's data.db on startup; missing repos marked "offline" (not removed from registry)
+- [ ] **NEXUS-08**: Periodic recheck (60s) reconnects repos whose data.db becomes available mid-session
 
-### Pipeline
+### Database Access
 
-- [x] **PIPE-01**: submitJob() replaces insertLlmJobIfNotPending() as the single entry point for all LLM job creation (cascade engine, diff fallback)
+- [ ] **NEXUS-09**: Opens each repo's .filescope/data.db read-only via better-sqlite3 with WAL mode
+- [ ] **NEXUS-10**: Re-queries SQLite on every HTTP request — no caching layer
+- [ ] **NEXUS-11**: DB connections are long-lived (opened once on startup, closed on shutdown)
 
-### Config Migration
+### Page Shell & Routing
 
-- [x] **CONF-01**: LLM model/provider/baseURL config removed from instance config.json — broker owns model config
-- [x] **CONF-02**: Instance config.json retains only a broker connection toggle (llm.enabled means "connect to broker")
-- [x] **CONF-03**: toggle_llm MCP tool connects/disconnects from broker instead of starting/stopping local pipeline
+- [ ] **NEXUS-12**: HTML shell page with top navbar (per-repo project tabs, System tab, Settings gear), htmx and D3 script tags
+- [ ] **NEXUS-13**: Route structure: GET / (shell), GET /project/:repoName, GET /system, GET /settings, plus htmx partial endpoints
+- [ ] **NEXUS-14**: Graceful shutdown on SIGTERM/SIGINT: close DB connections, stop log tailers, close SSE connections, stop HTTP server
 
-### Cleanup
+### File Tree & Detail Panel
 
-- [x] **CLEAN-01**: llm_jobs and llm_runtime_state tables dropped from local .filescope.db on init
-- [x] **CLEAN-02**: TokenBudgetGuard module (rate-limiter.ts) deleted entirely
-- [x] **CLEAN-03**: pipeline.ts deleted — broker client replaces it
-- [x] **CLEAN-04**: Dead job CRUD functions removed from repository.ts (insertLlmJob, insertLlmJobIfNotPending, dequeueNextJob, markJobInProgress, markJobDone, markJobFailed, recoverOrphanedJobs, loadLlmRuntimeState, saveLlmRuntimeState)
-- [x] **CLEAN-05**: isExhausted parameter threading removed from cascade engine and coordinator
+- [ ] **NEXUS-15**: Collapsible directory tree in left panel — directories first, then files alphabetically, lazy-load on expand
+- [ ] **NEXUS-16**: htmx partial swaps for tree expand/collapse and detail panel loading (no full-page reloads)
+- [ ] **NEXUS-17**: File detail panel renders: summary (or "Pending..."), importance score, ConceptsResult (purpose + tag groups for functions/classes/interfaces/exports), ChangeImpactResult (risk badge + summary + lists), dependencies (clickable), dependents (clickable), package dependencies with versions, per-field staleness, ExportSnapshot (name, kind, signature)
+- [ ] **NEXUS-18**: Directory detail panel renders: total files, average importance, % with summaries, % stale, top files by importance (clickable)
 
-### Observability
+### Dependency Graph
 
-- [x] **OBS-01**: get_llm_status MCP tool reports broker connection status, queue depth, and per-repo token totals
-- [x] **OBS-02**: Broker responds to status requests with pending count, in-progress job, connected client count, and per-repo breakdown
+- [ ] **NEXUS-19**: D3.js force-directed graph visualization of file_dependencies WHERE dependency_type = 'local_import'
+- [ ] **NEXUS-20**: Graph nodes sized by importance, colored by directory or file type
+- [ ] **NEXUS-21**: Hover a node highlights its direct dependencies and dependents; click opens file detail panel
+- [ ] **NEXUS-22**: Zoom, pan, and drag-to-rearrange interactions on the graph canvas
+- [ ] **NEXUS-23**: Directory subtree filter (e.g., show only src/broker/ and its external deps) to manage node count
+- [ ] **NEXUS-24**: Tree ↔ Graph toggle switches left panel between directory tree and dependency graph
+
+### System View & Live Activity
+
+- [ ] **NEXUS-25**: System view displays broker status from broker.sock: pending count, in-progress job, connected clients, per-repo token totals
+- [ ] **NEXUS-26**: Broker status polled every 5s; shows "Broker: offline" when broker.sock unreachable (not an error state)
+- [ ] **NEXUS-27**: Per-repo token usage from ~/.filescope/stats.json with totals
+- [ ] **NEXUS-28**: SSE streams for broker.log and mcp-server.log via fs.watch() + byte offset tracking; handles log rotation (size shrink → reset offset)
+- [ ] **NEXUS-29**: Ring buffer of last 500 log lines in memory; new SSE clients receive recent history immediately on connect
+- [ ] **NEXUS-30**: Log lines parsed via regex: extract ISO timestamp and [PREFIX], display remainder as-is
+
+### Navigation & Settings (Polish)
+
+- [ ] **NEXUS-31**: Importance displayed as heat-colored indicator on file tree entries (gray→blue→green→yellow→red for 0→10)
+- [ ] **NEXUS-32**: Per-file staleness icon in tree (⟳ stale, ✓ fresh)
+- [ ] **NEXUS-33**: Tab status indicators on navbar: green dot (MCP instance connected), gray dot (no active instance), orange dot (stale files pending)
+- [ ] **NEXUS-34**: Settings page: add repo (POST /api/repos {path, name?}), remove repo (DELETE /api/repos/:repoName), updates nexus.json and opens/closes DB connections immediately
+- [ ] **NEXUS-35**: Responsive layout adapting to different screen widths
 
 ## Future Requirements
 
 Deferred to future milestones. Tracked but not in current roadmap.
 
-### Scaling
+### Nexus Read-Write Extensions
 
-- **SCALE-01**: Broker supports configurable maxConcurrent workers for multi-GPU setups
-- **SCALE-02**: Priority aging prevents low-importance job starvation under sustained high load
+- **NRW-01**: File content viewer — show actual source code alongside metadata (read from disk)
+- **NRW-02**: Importance editor — inline click-to-edit importance scores, write back to data.db
+- **NRW-03**: Scan trigger — button to trigger re-scan via broker or MCP instance
+- **NRW-04**: Search — full-text search across summaries and concepts
 
-### Resilience
+### Nexus Visualization
 
-- **RESIL-01**: Version handshake on connect — broker rejects incompatible client versions
-- **RESIL-02**: Persistent token stats across broker restarts
+- **NVIS-01**: Cycle visualization — highlight circular dependencies in graph view (data available via detect_cycles)
+- **NVIS-02**: Dark mode — CSS variable-based theme switching
 
-### Config
+### Nexus Infrastructure
 
-- **CONF-04**: Broker hot-reload of config without restart
+- **NINF-01**: Broker tap — subscribe to broker events directly for richer live data (replaces log tailing)
 
 ### Language Support (carried from v1.1)
 
@@ -77,17 +92,26 @@ Deferred to future milestones. Tracked but not in current roadmap.
 - **LANG-04**: Python relative imports and importlib
 - **LANG-05**: Rust mod declarations
 
+### Scaling (carried from v1.2)
+
+- **SCALE-01**: Broker supports configurable maxConcurrent workers for multi-GPU setups
+- **SCALE-02**: Priority aging prevents low-importance job starvation under sustained high load
+
+### Resilience (carried from v1.2)
+
+- **RESIL-01**: Version handshake on connect — broker rejects incompatible client versions
+- **RESIL-02**: Persistent token stats across broker restarts
+
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Shared database for job queue | Broker is a process, not a database — in-memory queue is simpler and faster |
-| Direct Ollama fallback mode | One code path: broker or no LLM. Eliminates dual-mode testing burden |
-| Leader election | Adds failover complexity for no real benefit — just run the broker |
-| TCP/HTTP protocol | Unix socket is local-only, faster, no port conflicts |
-| "accepted" acknowledgment message | Fire-and-forget submit — socket delivery is reliable, reconnect handles crashes |
-| "cancel" message on shutdown | Broker detects connection close and drops pending jobs automatically |
-| Lazy file content | Separate concern, deferred to future milestone |
+| Nexus event-collection daemon | All data already exists in per-repo data.db, broker.log, and stats.json — no middleman needed |
+| Authentication / access control | Read-only viewer on a trusted LAN; no secrets exposed |
+| React / Vue framework | Svelte 5 chosen for near-zero runtime overhead; compiles away at build time |
+| Write-back to data.db | v1.3 is strictly read-only; write features deferred to future milestone |
+| WebSocket transport | SSE sufficient for log streaming; no bidirectional communication needed |
+| Daemon mode for Nexus | Runs in foreground by design; user can wrap in tmux/screen |
 
 ## Traceability
 
@@ -95,40 +119,47 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BROKER-01 | Phase 16 | Complete |
-| BROKER-02 | Phase 16 | Complete |
-| BROKER-03 | Phase 16 | Complete |
-| BROKER-04 | Phase 16 | Complete |
-| BROKER-05 | Phase 16 | Complete |
-| BROKER-06 | Phase 16 | Complete |
-| BROKER-07 | Phase 16 | Complete |
-| BROKER-08 | Phase 16 | Complete |
-| BROKER-09 | Phase 16 | Complete |
-| BROKER-10 | Phase 16 | Complete |
-| BROKER-11 | Phase 16 | Complete |
-| BROKER-12 | Phase 16 | Complete |
-| CLIENT-01 | Phase 17 | Complete |
-| CLIENT-02 | Phase 17 | Complete |
-| CLIENT-03 | Phase 17 | Complete |
-| CLIENT-04 | Phase 17 | Complete |
-| CLIENT-05 | Phase 17 | Complete |
-| PIPE-01 | Phase 17 | Complete |
-| CONF-01 | Phase 17 | Complete |
-| CONF-02 | Phase 17 | Complete |
-| CONF-03 | Phase 17 | Complete |
-| CLEAN-01 | Phase 18 | Complete |
-| CLEAN-02 | Phase 18 | Complete |
-| CLEAN-03 | Phase 18 | Complete |
-| CLEAN-04 | Phase 18 | Complete |
-| CLEAN-05 | Phase 18 | Complete |
-| OBS-01 | Phase 19 | Complete |
-| OBS-02 | Phase 19 | Complete |
+| NEXUS-01 | Phase 20 | Pending |
+| NEXUS-02 | Phase 20 | Pending |
+| NEXUS-03 | Phase 20 | Pending |
+| NEXUS-04 | Phase 20 | Pending |
+| NEXUS-05 | Phase 20 | Pending |
+| NEXUS-06 | Phase 20 | Pending |
+| NEXUS-07 | Phase 20 | Pending |
+| NEXUS-08 | Phase 20 | Pending |
+| NEXUS-09 | Phase 20 | Pending |
+| NEXUS-10 | Phase 20 | Pending |
+| NEXUS-11 | Phase 20 | Pending |
+| NEXUS-12 | Phase 20 | Pending |
+| NEXUS-13 | Phase 20 | Pending |
+| NEXUS-14 | Phase 20 | Pending |
+| NEXUS-15 | Phase 21 | Pending |
+| NEXUS-16 | Phase 21 | Pending |
+| NEXUS-17 | Phase 21 | Pending |
+| NEXUS-18 | Phase 21 | Pending |
+| NEXUS-19 | Phase 22 | Pending |
+| NEXUS-20 | Phase 22 | Pending |
+| NEXUS-21 | Phase 22 | Pending |
+| NEXUS-22 | Phase 22 | Pending |
+| NEXUS-23 | Phase 22 | Pending |
+| NEXUS-24 | Phase 22 | Pending |
+| NEXUS-25 | Phase 23 | Pending |
+| NEXUS-26 | Phase 23 | Pending |
+| NEXUS-27 | Phase 23 | Pending |
+| NEXUS-28 | Phase 23 | Pending |
+| NEXUS-29 | Phase 23 | Pending |
+| NEXUS-30 | Phase 23 | Pending |
+| NEXUS-31 | Phase 24 | Pending |
+| NEXUS-32 | Phase 24 | Pending |
+| NEXUS-33 | Phase 24 | Pending |
+| NEXUS-34 | Phase 24 | Pending |
+| NEXUS-35 | Phase 24 | Pending |
 
 **Coverage:**
-- v1.2 requirements: 28 total
-- Mapped to phases: 28
+- v1.3 requirements: 35 total
+- Mapped to phases: 35
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-03-21*
-*Last updated: 2026-03-21 after roadmap creation*
+*Requirements defined: 2026-04-01*
+*Last updated: 2026-04-01 after roadmap creation*

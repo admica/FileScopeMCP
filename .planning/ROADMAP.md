@@ -4,7 +4,8 @@
 
 - ✅ **v1.0 Autonomous File Metadata** — Phases 1-9 (shipped 2026-03-19)
 - ✅ **v1.1 Hardening** — Phases 10-15 (shipped 2026-03-20)
-- 🚧 **v1.2 LLM Broker** — Phases 16-19 (in progress)
+- ✅ **v1.2 LLM Broker** — Phases 16-19 (shipped 2026-03-23)
+- 🚧 **v1.3 Nexus** — Phases 20-24 (in progress)
 
 ## Phases
 
@@ -39,14 +40,29 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full phase details.
 
 </details>
 
-### v1.2 LLM Broker (In Progress)
+<details>
+<summary>✅ v1.2 LLM Broker (Phases 16-19) — SHIPPED 2026-03-23</summary>
 
-**Milestone Goal:** Standalone broker process that coordinates LLM access across multiple FileScopeMCP instances through importance-based priority ordering, replacing per-instance direct Ollama calls.
+- [x] Phase 16: Broker Core (2/2 plans) — completed 2026-03-22
+- [x] Phase 17: Instance Client + Pipeline Wiring (2/2 plans) — completed 2026-03-22
+- [x] Phase 18: Cleanup (2/2 plans) — completed 2026-03-22
+- [x] Phase 19: Observability (2/2 plans) — completed 2026-03-23
 
-- [x] **Phase 16: Broker Core** — Standalone broker process: Unix socket server, in-memory priority queue, sequential Ollama worker, PID guard, graceful shutdown, and esbuild entry point (completed 2026-03-22)
-- [x] **Phase 17: Instance Client + Pipeline Wiring** — broker-client.ts with submitJob() as unified LLM entry point, config migration, reconnection, startup resubmission, and coordinator lifecycle wiring (completed 2026-03-22)
-- [x] **Phase 18: Cleanup** — Drop legacy llm_jobs/llm_runtime_state tables, delete pipeline.ts and rate-limiter.ts, remove dead job CRUD from repository.ts, and strip isExhausted threading (completed 2026-03-22)
-- [x] **Phase 19: Observability** — Update get_llm_status to report broker connection state, queue depth, in-progress job, and per-repo token totals from ~/.filescope/stats.json (completed 2026-03-23)
+See: ROADMAP.md Phase Details below for full phase details (not yet archived).
+
+</details>
+
+### v1.3 Nexus (In Progress)
+
+**Milestone Goal:** Visual code exploration dashboard that opens existing per-repo databases and log files directly — cross-repo observability without a new daemon or protocol. Fastify API + Svelte 5 SPA + Cytoscape.js/D3 + Tailwind dark mode on 0.0.0.0:1234.
+
+**Design document:** `NEXUS-PLAN.md`
+
+- [ ] **Phase 20: Server Skeleton + Repo Discovery** — Fastify server, CLI entry point, dashboard.json registry, auto-discovery, per-repo read-only DB connections, HTML shell with navbar, basic route structure, static file serving, graceful shutdown
+- [ ] **Phase 21: File Tree + Detail Panel** — Collapsible directory tree with htmx partial swaps, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel
+- [ ] **Phase 22: Dependency Graph** — D3.js force-directed graph of local imports, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree↔graph toggle
+- [ ] **Phase 23: System View + Live Activity** — Broker status polling via broker.sock, token usage from stats.json, SSE log tailing (fs.watch + ring buffer), log line parsing
+- [ ] **Phase 24: Polish** — Importance heat colors, staleness icons, tab status indicators, settings page (add/remove repos), responsive layout
 
 ## Phase Details
 
@@ -102,8 +118,64 @@ Plans:
   2. Calling get_llm_status while the broker is not running returns mode "broker", brokerConnected false, and the last-known per-repo token totals (stale but present); the tool does not error or hang
 **Plans:** 2/2 plans complete
 Plans:
-- [ ] 19-01-PLAN.md — Broker-side stats persistence and StatusResponse enrichment
-- [ ] 19-02-PLAN.md — Client requestStatus(), coordinator getBrokerStatus(), MCP tool update
+- [x] 19-01-PLAN.md — Broker-side stats persistence and StatusResponse enrichment
+- [x] 19-02-PLAN.md — Client requestStatus(), coordinator getBrokerStatus(), MCP tool update
+
+### Phase 20: Server Skeleton + Repo Discovery
+**Goal**: Running `filescope-nexus` starts a Fastify HTTP server that discovers all FileScopeMCP repos, opens their databases read-only, and serves a navigable shell page with per-repo tabs
+**Depends on**: Phase 19
+**Requirements**: NEXUS-01, NEXUS-02, NEXUS-03, NEXUS-04, NEXUS-05, NEXUS-06, NEXUS-07, NEXUS-08, NEXUS-09, NEXUS-10, NEXUS-11, NEXUS-12, NEXUS-13, NEXUS-14
+**Canonical refs**: `NEXUS-PLAN.md` (Architecture, Repo Discovery, Data Access, Lifecycle sections)
+**Success Criteria** (what must be TRUE):
+  1. `npm run nexus` (or `node dist/nexus/main.js`) starts a Fastify server on 0.0.0.0:1234; `--port` and `--host` flags override defaults
+  2. With no ~/.filescope/dashboard.json, the server scans ~ for .filescope/data.db directories, writes the discovered list to dashboard.json, and serves tabs for each discovered repo
+  3. With an existing dashboard.json, the server opens each listed repo's data.db read-only; repos whose data.db is missing appear as "offline" tabs (not removed from registry)
+  4. GET / returns an HTML shell with navbar showing all repo tabs, a System tab, and a Settings tab; clicking a repo tab loads GET /project/:repoName
+  5. SIGTERM/SIGINT triggers graceful shutdown: all DB connections closed, HTTP server stopped, process exits cleanly
+
+### Phase 21: File Tree + Detail Panel
+**Goal**: Clicking a repo tab shows a two-panel layout — a collapsible file tree on the left, and a metadata detail panel on the right that populates when you click a file or directory
+**Depends on**: Phase 20
+**Requirements**: NEXUS-15, NEXUS-16, NEXUS-17, NEXUS-18
+**Canonical refs**: `NEXUS-PLAN.md` (UI Layout > Project View, File Tree, Detail Panel sections), `src/db/schema.ts` (files table columns), `src/llm/types.ts` (ConceptsResult, ChangeImpactResult), `src/change-detector/types.ts` (ExportSnapshot)
+**Success Criteria** (what must be TRUE):
+  1. GET /project/:repoName renders a two-panel layout with a collapsible file tree (left) and detail panel (right); directories sort first, files alphabetically within
+  2. Clicking a file in the tree loads its detail panel via htmx partial swap (no full-page reload) showing: summary, importance, concepts (purpose + tag groups), change impact (risk badge + summary + lists), dependencies (clickable), dependents (clickable), package deps, staleness per field, and exports
+  3. Clicking a directory shows aggregate stats: file count, average importance, % with summaries, % stale, and top files by importance (clickable)
+  4. Tree expand/collapse is lazy — child nodes load via htmx when a directory is clicked, not all at once on page load
+
+### Phase 22: Dependency Graph
+**Goal**: A toggle switches the left panel from directory tree to a D3.js force-directed dependency graph where files are nodes and imports are edges — interactive, filterable, and linked to the detail panel
+**Depends on**: Phase 21
+**Requirements**: NEXUS-19, NEXUS-20, NEXUS-21, NEXUS-22, NEXUS-23, NEXUS-24
+**Canonical refs**: `NEXUS-PLAN.md` (Dependency Graph View section), `src/db/schema.ts` (file_dependencies table)
+**Success Criteria** (what must be TRUE):
+  1. GET /api/project/:repoName/graph returns JSON { nodes, edges } built from file_dependencies WHERE dependency_type = 'local_import'
+  2. Toggling Tree ↔ Graph in the left panel renders a D3 force-directed graph with nodes sized by importance and colored by directory
+  3. Hovering a node highlights its direct dependencies and dependents; clicking a node loads its detail panel
+  4. Graph supports zoom, pan, and drag-to-rearrange; a directory filter dropdown limits visible nodes to a subtree plus its external deps
+
+### Phase 23: System View + Live Activity
+**Goal**: The System tab shows cross-repo broker status, token usage, and a live-updating activity feed streamed from log files via SSE
+**Depends on**: Phase 22
+**Requirements**: NEXUS-25, NEXUS-26, NEXUS-27, NEXUS-28, NEXUS-29, NEXUS-30
+**Canonical refs**: `NEXUS-PLAN.md` (System View, Log Tailing, Broker Status, Token Stats sections), `src/broker/types.ts` (StatusResponse), `src/broker/stats.ts` (stats.json format)
+**Success Criteria** (what must be TRUE):
+  1. GET /system renders broker status (pending count, in-progress job, connected clients, model name) and per-repo token totals; broker status refreshes via polling every 5s
+  2. When broker.sock is unreachable, System view shows "Broker: offline" without errors; token totals fall back to stats.json
+  3. GET /api/stream/activity returns an SSE stream of parsed log lines from broker.log and mcp-server.log; new connections receive the last 500 lines from the ring buffer immediately
+  4. Log lines are parsed via regex (ISO timestamp + [PREFIX]); the activity feed updates in real time as new log entries appear
+
+### Phase 24: Polish
+**Goal**: Visual refinements that make the Nexus informative at a glance — importance heat colors, staleness icons, tab status dots, a settings page for repo management, and responsive layout
+**Depends on**: Phase 23
+**Requirements**: NEXUS-31, NEXUS-32, NEXUS-33, NEXUS-34, NEXUS-35
+**Canonical refs**: `NEXUS-PLAN.md` (Navigation, File Tree, UI Layout sections)
+**Success Criteria** (what must be TRUE):
+  1. File tree entries show importance as a heat-colored indicator (gray→blue→green→yellow→red scaling 0→10) and staleness as an icon (⟳ stale, ✓ fresh)
+  2. Navbar tabs show a status dot: green (MCP instance connected per broker), gray (no active instance), orange (repo has stale files)
+  3. GET /settings renders a page where users can add a repo by path and remove existing repos; changes take effect immediately (DB opened/closed, tab appears/disappears) without server restart
+  4. Layout remains usable at viewport widths from 1024px to 2560px
 
 ## Progress
 
@@ -127,4 +199,9 @@ Plans:
 | 16. Broker Core | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 17. Instance Client + Pipeline Wiring | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
-| 19. Observability | 2/2 | Complete    | 2026-03-23 | - |
+| 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
+| 20. Server Skeleton + Repo Discovery | v1.3 | 0/? | Pending | — |
+| 21. File Tree + Detail Panel | v1.3 | 0/? | Pending | — |
+| 22. Dependency Graph | v1.3 | 0/? | Pending | — |
+| 23. System View + Live Activity | v1.3 | 0/? | Pending | — |
+| 24. Polish | v1.3 | 0/? | Pending | — |

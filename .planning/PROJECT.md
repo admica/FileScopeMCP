@@ -10,18 +10,20 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Current Milestone: v1.3 Nexus
 
-**Goal:** Centralized observability service that collects events from all MCP instances, persists activity history, and provides live cross-repo monitoring via log file and SQLite database.
+**Goal:** Read-only web dashboard that opens existing per-repo databases and log files directly — cross-repo observability without a new daemon or protocol.
 
 **Target features:**
-- Nexus daemon process (PID guard, Unix socket, graceful shutdown)
-- Event collection from all MCP instances (fire-and-forget NDJSON)
-- Connection & identity model (repo:init handshake, socket-to-repo mapping)
-- SQLite persistent storage (repos table, activity log, write batching)
-- Human-readable log file (tail -f interface with formatted output)
-- Nexus client module in MCP instances (auto-spawn, reconnect, emit)
-- Integration with coordinator, broker client, and MCP tool handlers
-- Stats migration from broker's stats.json to Nexus-owned token tracking
-- Graceful degradation (Nexus down = zero impact on core functionality)
+- Fastify JSON API server + Svelte 5 SPA (Vite + Tailwind CSS, dark mode only)
+- Interactive dependency map via Cytoscape.js, auxiliary charts via D3.js
+- Repo discovery: `~/.filescope/nexus.json` registry with 2-level auto-discovery fallback
+- Per-repo file tree with importance heat colors, staleness indicators, and lazy directory expansion
+- File detail panel: summary, concepts, change impact, exports, dependencies/dependents, staleness
+- D3 force-directed dependency graph with hover/click interactions and directory filtering
+- System view: broker status (via broker.sock), per-repo token stats, live activity feed
+- SSE log tailing of broker.log and mcp-server.log via fs.watch() + ring buffer
+- CLI entry point (`filescope-nexus`) with `--port` and `--host` flags, default `0.0.0.0:1234`
+- Read-only SQLite access (WAL mode, re-query per request), no writes to any FileScopeMCP data
+- Graceful degradation (broker down = "offline" badge, repo DB missing = "offline" tab)
 
 ## Requirements
 
@@ -90,7 +92,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - Real-time streaming of changes to MCP clients — query-based, not push-based
 - Code generation or refactoring — this is a read/analysis tool, not a writer
 - Git integration (blame, history, branch awareness) — file-system level only
-- UI/dashboard — headless, MCP and daemon only
+- Nexus event-collection daemon — original concept replaced by read-only dashboard; all data already exists in per-repo data.db, broker.log, and stats.json
 - Vector embedding search — structured metadata serves LLM needs better
 - Full AST caching in storage — ASTs too large and go stale immediately
 - Lazy file content for large codebases — deferred to future milestone
@@ -102,7 +104,7 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 Shipped v1.0 (9 phases, 9,515 LOC), v1.1 (6 phases, hardening + language support), and v1.2 (4 phases, LLM broker). 250+ tests passing. The system is a complete autonomous file intelligence platform with a standalone LLM broker coordinating all Ollama access.
 
-v1.3 builds the Nexus — a centralized observability service that collects events from all running MCP instances. Architecture fully designed in NEXUS-PLAN.md. Mirrors broker patterns (PID guard, Unix socket, auto-spawn, reconnect). Foundation for a future web frontend with visual project exploration (dark mode, Three.js-style visualization — future milestone).
+v1.3 builds the Nexus — a visual code exploration dashboard that opens existing per-repo SQLite databases and log files to provide cross-repo observability. No new daemon or IPC protocol — the data already exists. Architecture fully designed in NEXUS-PLAN.md. Fastify API + Svelte 5 SPA + Cytoscape.js/D3 + Tailwind dark mode, accessible on the LAN at `0.0.0.0:1234`.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -151,4 +153,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-24 after milestone v1.3 started*
+*Last updated: 2026-04-01 after Nexus plan refinement*
