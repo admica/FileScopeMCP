@@ -1,43 +1,26 @@
 // src/change-detector/llm-diff-fallback.ts
-// LLM job queuing for unsupported languages (CHNG-03).
+// LLM diff preparation for unsupported languages (CHNG-03).
 // When a file change cannot be classified via tree-sitter AST, this module
-// queues an async LLM job so Phase 5's LLM pipeline can classify it later.
-import { readFileSync } from 'node:fs';
-import { getFile } from '../db/repository.js';
-import { submitJob } from '../broker/client.js';
-import { log } from '../logger.js';
+// returns the git diff in the SemanticChangeSummary so cascadeStale can
+// submit a single change_impact job with the real diff as payload.
 import type { SemanticChangeSummary } from './types.js';
 
 // ~16KB diff limit — prevents oversized payloads sent to the LLM broker.
-// Calculated as MAX_DIFF_TOKENS * ~4 bytes/token with GPT-4 token estimates.
-const MAX_DIFF_BYTES = 16 * 1024; // 16 384 bytes
+const MAX_DIFF_BYTES = 16 * 1024;
 
 /**
- * Queues an LLM diff classification job for a file that cannot be analysed
- * via tree-sitter (e.g., Go, Rust, Python).
+ * Prepares a conservative SemanticChangeSummary for a file that cannot be
+ * analysed via tree-sitter (e.g., Go, Rust, Python, C++).
  *
- * - Truncates the diff at MAX_DIFF_BYTES with a "[truncated]" suffix
- * - Submits a change_impact job to the broker via submitJob
- * - Returns a conservative SemanticChangeSummary immediately (no await)
- *
- * The job is intentionally fire-and-forget here — Phase 5 will pick it up
- * asynchronously and update the summary once LLM classification is done.
+ * Returns the git diff in the `diff` field so the coordinator can pass it
+ * through changeContext.directPayload to cascadeStale — making cascadeStale
+ * the single submission point for change_impact jobs.
  */
 export function queueLlmDiffJob(filePath: string, diff: string): SemanticChangeSummary {
-  // Truncate oversized diffs to avoid DB bloat and LLM context overflow
   const truncatedDiff =
     diff.length > MAX_DIFF_BYTES
       ? diff.slice(0, MAX_DIFF_BYTES) + '... [truncated]'
       : diff;
-
-  try {
-    const fileContent = readFileSync(filePath, 'utf-8');
-    const importance = getFile(filePath)?.importance ?? 0;
-    submitJob(filePath, 'change_impact', importance, fileContent, truncatedDiff);
-  } catch (err) {
-    // Non-fatal: if file is unreadable or submit fails, log and continue
-    log(`[llm-diff-fallback] Failed to queue LLM job for ${filePath}: ${err}`);
-  }
 
   return {
     filePath,
@@ -45,5 +28,6 @@ export function queueLlmDiffJob(filePath: string, diff: string): SemanticChangeS
     affectsDependents: true,
     confidence: 'heuristic',
     timestamp: Date.now(),
+    diff: truncatedDiff,
   };
 }

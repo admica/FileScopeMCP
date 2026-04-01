@@ -191,16 +191,16 @@ describe('ast-parser logger usage', () => {
   });
 });
 
-// ─── queueLlmDiffJob dedup source check ─────────────────────────────────────
+// ─── queueLlmDiffJob source check ───────────────────────────────────────────
 
-describe('queueLlmDiffJob dedup', () => {
-  it('llm-diff-fallback.ts source uses submitJob (not legacy insertLlmJobIfNotPending)', async () => {
+describe('queueLlmDiffJob source', () => {
+  it('llm-diff-fallback.ts does not call submitJob directly (cascadeStale handles submission)', async () => {
     const fallbackSource = await fs.readFile(
       new URL('./llm-diff-fallback.ts', import.meta.url),
       'utf-8'
     );
     expect(fallbackSource).not.toContain('insertLlmJobIfNotPending');
-    expect(fallbackSource).toContain('submitJob');
+    expect(fallbackSource).not.toContain('submitJob');
   });
 });
 
@@ -220,34 +220,25 @@ describe('queueLlmDiffJob', () => {
     expect(typeof result.timestamp).toBe('number');
   });
 
-  it('calls submitJob with job_type=change_impact and the diff as payload', async () => {
-    const filePath = path.join(tmpDir, 'queued.go');
-    await fs.writeFile(filePath, 'package main\nfunc main() {}');
+  it('returns the diff in the diff field instead of calling submitJob', () => {
     const diff = 'func main() { println("hello") }';
 
-    queueLlmDiffJob(filePath, diff);
+    const result = queueLlmDiffJob('/fake/queued.go', diff);
 
+    expect(result.diff).toBe(diff);
+    // submitJob should NOT be called — cascadeStale handles submission
     const mockSJ = submitJob as ReturnType<typeof vi.fn>;
-    expect(mockSJ).toHaveBeenCalledTimes(1);
-    expect(mockSJ.mock.calls[0][1]).toBe('change_impact');
-    // 5th arg is the payload (truncated diff)
-    expect(mockSJ.mock.calls[0][4]).toBe(diff);
+    expect(mockSJ).not.toHaveBeenCalled();
   });
 
-  it('truncates diffs longer than ~16KB with [truncated] suffix', async () => {
-    const filePath = path.join(tmpDir, 'large-diff.go');
-    await fs.writeFile(filePath, 'package main\nfunc main() {}');
-    // 20KB diff
+  it('truncates diffs longer than ~16KB with [truncated] suffix', () => {
     const longDiff = 'x'.repeat(20 * 1024);
 
-    queueLlmDiffJob(filePath, longDiff);
+    const result = queueLlmDiffJob('/fake/large-diff.go', longDiff);
 
-    const mockSJ = submitJob as ReturnType<typeof vi.fn>;
-    expect(mockSJ).toHaveBeenCalledTimes(1);
-    const payload = mockSJ.mock.calls[0][4] as string;
-    // Payload should be truncated — must be shorter than the original
-    expect(payload.length).toBeLessThan(longDiff.length);
-    expect(payload).toContain('[truncated]');
+    expect(result.diff).toBeDefined();
+    expect(result.diff!.length).toBeLessThan(longDiff.length);
+    expect(result.diff).toContain('[truncated]');
   });
 
   it('returns unknown summary even if submitJob throws (no DB)', () => {
@@ -266,20 +257,19 @@ describe('ChangeDetector LLM fallback wiring', () => {
     (submitJob as ReturnType<typeof vi.fn>).mockClear();
   });
 
-  it('classify on a .py file calls submitJob with job_type=change_impact and non-null payload', async () => {
+  it('classify on a .py file returns diff in the SemanticChangeSummary instead of calling submitJob', async () => {
     const pyFile = path.join(tmpDir, 'wired-test.py');
     await fs.writeFile(pyFile, 'def hello():\n    pass\n');
 
     const detector = new ChangeDetector(tmpDir);
-    await detector.classify(pyFile);
+    const result = await detector.classify(pyFile);
 
+    // submitJob should NOT be called — diff is returned for cascadeStale to use
     const mockSJ = submitJob as ReturnType<typeof vi.fn>;
-    expect(mockSJ).toHaveBeenCalledTimes(1);
-    expect(mockSJ.mock.calls[0][1]).toBe('change_impact');
-    // 5th arg is the payload — should be non-null for a file with a diff
-    const payload = mockSJ.mock.calls[0][4];
-    expect(payload).toBeDefined();
-    expect(typeof payload).toBe('string');
-    expect((payload as string).length).toBeGreaterThan(0);
+    expect(mockSJ).not.toHaveBeenCalled();
+    // diff should be present in the result
+    expect(result.diff).toBeDefined();
+    expect(typeof result.diff).toBe('string');
+    expect(result.diff!.length).toBeGreaterThan(0);
   });
 });

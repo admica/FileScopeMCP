@@ -37,4 +37,6 @@ export interface SemanticChangeSummary {
   changedExports?: string[];
   confidence: 'ast' | 'llm' | 'heuristic';
   timestamp: number;
+  /** For non-TS/JS files: the git diff to use as change_impact payload. */
+  diff?: string;
 }

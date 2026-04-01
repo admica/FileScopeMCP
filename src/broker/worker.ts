@@ -4,12 +4,11 @@
 // enforces per-job timeout via AbortController, and reports results via callbacks.
 // Exports: BrokerWorker
 
-import { generateText, Output } from 'ai';
+import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { buildSummaryPrompt, buildConceptsPrompt, buildChangeImpactPrompt } from '../llm/prompts.js';
-import { ConceptsSchema, ChangeImpactSchema } from '../llm/types.js';
 import { log } from '../logger.js';
 import type { QueueJob, JobResult } from './types.js';
 import type { PriorityQueue } from './queue.js';
@@ -197,58 +196,28 @@ export class BrokerWorker {
       }
 
       case 'concepts': {
-        try {
-          const { output, usage } = await generateText({
-            model: this.model,
-            output: Output.object({ schema: ConceptsSchema }),
-            prompt: buildConceptsPrompt(job.filePath, job.fileContent),
-            maxOutputTokens,
-            abortSignal: signal,
-          });
-          return { text: JSON.stringify(output), totalTokens: usage?.totalTokens ?? 0 };
-        } catch (err: any) {
-          // CRITICAL: re-throw AbortError before entering fallback (RESEARCH.md Pitfall 5)
-          if (err.name === 'AbortError') throw err;
-          // Ollama JSON repair fallback
-          log(`BrokerWorker: structured output failed for concepts job ${job.id}, falling back to plain text — ${err}`);
-          const { text, usage } = await generateText({
-            model: this.model,
-            prompt: buildConceptsPrompt(job.filePath, job.fileContent),
-            maxOutputTokens,
-            abortSignal: signal,
-          });
-          const parsed = JSON.parse(stripMarkdownFences(text.trim()));
-          return { text: JSON.stringify(parsed), totalTokens: usage?.totalTokens ?? 0 };
-        }
+        const { text, usage } = await generateText({
+          model: this.model,
+          prompt: buildConceptsPrompt(job.filePath, job.fileContent),
+          maxOutputTokens,
+          abortSignal: signal,
+        });
+        const conceptsParsed = JSON.parse(stripMarkdownFences(text.trim()));
+        return { text: JSON.stringify(conceptsParsed), totalTokens: usage?.totalTokens ?? 0 };
       }
 
       case 'change_impact': {
         if (!job.payload) {
           throw Object.assign(new Error('no payload (diff text) for change_impact job'), { name: 'parse_error' });
         }
-        try {
-          const { output, usage } = await generateText({
-            model: this.model,
-            output: Output.object({ schema: ChangeImpactSchema }),
-            prompt: buildChangeImpactPrompt(job.filePath, job.payload),
-            maxOutputTokens,
-            abortSignal: signal,
-          });
-          return { text: JSON.stringify(output), totalTokens: usage?.totalTokens ?? 0 };
-        } catch (err: any) {
-          // CRITICAL: re-throw AbortError before entering fallback (RESEARCH.md Pitfall 5)
-          if (err.name === 'AbortError') throw err;
-          // Ollama JSON repair fallback
-          log(`BrokerWorker: structured output failed for change_impact job ${job.id}, falling back to plain text — ${err}`);
-          const { text, usage } = await generateText({
-            model: this.model,
-            prompt: buildChangeImpactPrompt(job.filePath, job.payload),
-            maxOutputTokens,
-            abortSignal: signal,
-          });
-          const parsed = JSON.parse(stripMarkdownFences(text.trim()));
-          return { text: JSON.stringify(parsed), totalTokens: usage?.totalTokens ?? 0 };
-        }
+        const { text, usage } = await generateText({
+          model: this.model,
+          prompt: buildChangeImpactPrompt(job.filePath, job.payload),
+          maxOutputTokens,
+          abortSignal: signal,
+        });
+        const impactParsed = JSON.parse(stripMarkdownFences(text.trim()));
+        return { text: JSON.stringify(impactParsed), totalTokens: usage?.totalTokens ?? 0 };
       }
 
       default: {

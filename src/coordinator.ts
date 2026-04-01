@@ -370,7 +370,11 @@ export class ServerCoordinator {
       return;
     }
     await brokerConnect(this._projectRoot);
-    log('[Coordinator] Broker client connected');
+    if (brokerIsConnected()) {
+      log('[Coordinator] Broker client connected');
+    } else {
+      log('[Coordinator] Broker client not connected — will retry in background');
+    }
   }
 
   disconnectBroker(): void {
@@ -492,12 +496,11 @@ export class ServerCoordinator {
                   if (changeSummary.affectsDependents) {
                     // Export/type surface changed — propagate staleness to all transitive dependents.
                     // Build a changeContext so cascade jobs carry non-null payloads for the LLM pipeline.
-                    // Note: for non-TS/JS files, _classifyWithLlmFallback already submitted a more
-                    // detailed diff-based change_impact job via queueLlmDiffJob/submitJob.
-                    // cascadeStale's change_impact for the root file acts as a redundant safety net
-                    // (broker deduplicates by file+type in its in-memory queue).
+                    // For non-TS/JS files, changeSummary.diff carries the real git diff from
+                    // queueLlmDiffJob — use it as directPayload so the LLM gets the actual diff.
+                    // For TS/JS files (AST path), no diff is available — use a metadata string.
                     const changeContext = {
-                      directPayload: `[file changed: ${filePath} (${changeSummary.changeType})]`,
+                      directPayload: changeSummary.diff ?? `[file changed: ${filePath} (${changeSummary.changeType})]`,
                       changeType: changeSummary.changeType,
                       changedFilePath: filePath,
                     };

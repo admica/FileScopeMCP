@@ -437,115 +437,77 @@ export function isExcluded(filePath: string, baseDir: string, isDir?: boolean): 
     return true;
   }
   
-  // Add a failsafe check for node_modules
+  // Failsafe checks for common excludes
   if (filePath.includes('node_modules') || path.basename(filePath) === 'node_modules') {
-    log(`🔴 SPECIAL CASE: node_modules directory/file detected: ${filePath}`);
-    return true;
-  }
-  
-  // Add a failsafe check for .filescope runtime artifacts (DB, WAL, PID)
-  const baseName = path.basename(filePath);
-  if (baseName.startsWith('.filescope')) {
-    log(`🔴 SPECIAL CASE: .filescope runtime artifact detected: ${filePath}`);
     return true;
   }
 
-  // Add a failsafe check for test_excluded files
-  if (filePath.includes('test_excluded') || path.basename(filePath).startsWith('test_excluded')) {
-    log(`🔴 SPECIAL CASE: test_excluded file detected: ${filePath}`);
+  const baseName = path.basename(filePath);
+  if (baseName.startsWith('.filescope')) {
     return true;
   }
-  
-  log(`\n===== EXCLUDE CHECK for: ${filePath} =====`);
-  
+
+  if (filePath.includes('test_excluded') || path.basename(filePath).startsWith('test_excluded')) {
+    return true;
+  }
+
   const config = getConfig();
   if (!config) {
-    log('❌ ERROR: Config is null! Global state not initialized properly.');
+    log('[isExcluded] Config is null — cannot check excludes');
     return false;
-  }
-  
-  if (!config.excludePatterns || config.excludePatterns.length === 0) {
-    log('⚠️ NOTE: No excludePatterns in config — only .filescopeignore rules apply.');
   }
 
   // Get relative path for matching, normalize to forward slashes for cross-platform consistency
   const relativePath = path.relative(baseDir, filePath).replace(/\\/g, '/');
   const fileName = path.basename(filePath);
-  
-  log(`📂 Path details:`);
-  log(`  - Full path: ${filePath}`);
-  log(`  - Base dir: ${baseDir}`);
-  log(`  - Relative path: ${relativePath}`);
-  log(`  - File name: ${fileName}`);
-  log(`  - Platform: ${process.platform}, path separator: ${path.sep}`);
-  
-  log(`\n🔍 Testing against ${config.excludePatterns?.length ?? 0} exclude patterns...`);
-  
+
   // Special case check for .git and node_modules
-  if (relativePath.includes('/.git/') || relativePath === '.git' || 
+  if (relativePath.includes('/.git/') || relativePath === '.git' ||
       fileName === '.git' || relativePath.startsWith('.git/')) {
-    log(`✅ MATCH! Special case for .git directory detected: ${relativePath}`);
     return true;
   }
-  
-  if (relativePath.includes('/node_modules/') || relativePath === 'node_modules' || 
+
+  if (relativePath.includes('/node_modules/') || relativePath === 'node_modules' ||
       fileName === 'node_modules' || relativePath.startsWith('node_modules/')) {
-    log(`✅ MATCH! Special case for node_modules directory detected: ${relativePath}`);
     return true;
   }
-  
+
   // Check each exclude pattern
   for (let i = 0; i < (config.excludePatterns?.length ?? 0); i++) {
     const pattern = config.excludePatterns[i];
-    log(`\n  [${i+1}/${config.excludePatterns.length}] Testing pattern: "${pattern}"`);
-    
+
     try {
       const regex = globToRegExp(pattern);
-      //log(`  - Converted to regex: ${regex}`); // Uncomment for debugging
-      
-      // Test against full relative path
-      const fullPathMatch = regex.test(relativePath);
-      //log(`  - Match against relative path: ${fullPathMatch ? '✅ YES' : '❌ NO'}`); // Uncomment for debugging
-      
-      if (fullPathMatch) {
-        log(`✅ MATCH! Path ${relativePath} matches exclude pattern ${pattern}`);
+
+      if (regex.test(relativePath)) {
         return true;
       }
-      
+
       // Also test against just the filename for file extension patterns
       if (pattern.startsWith('**/*.') || pattern.includes('/*.')) {
-        const filenameMatch = regex.test(fileName);
-        //log(`  - Match against filename only: ${filenameMatch ? '✅ YES' : '❌ NO'}`); // Uncomment for debugging
-        
-        if (filenameMatch) {
-          log(`✅ MATCH! Filename ${fileName} matches exclude pattern ${pattern}`);
+        if (regex.test(fileName)) {
           return true;
         }
       }
     } catch (error) {
-      log(`  - ❌ ERROR converting pattern to regex: ${error}`);
+      log(`[isExcluded] Error converting pattern "${pattern}" to regex: ${error}`);
     }
   }
-  
+
   // Check .filescopeignore rules (gitignore syntax via 'ignore' package)
   const ig = getFilescopeIgnore();
   if (ig) {
     const rel = path.relative(baseDir, filePath).replace(/\\/g, '/');
     if (rel && !rel.startsWith('..')) {
       if (ig.ignores(rel)) {
-        log(`MATCH! Path ${rel} matches .filescopeignore rule`);
         return true;
       }
-      // For directories, also test with trailing slash (gitignore: "dist/" means directory-only)
       if (isDir && ig.ignores(rel + '/')) {
-        log(`MATCH! Directory ${rel}/ matches .filescopeignore rule`);
         return true;
       }
     }
   }
 
-  log(`❌ No pattern matches found for ${relativePath}`);
-  log(`===== END EXCLUDE CHECK =====\n`);
   return false;
 }
 
@@ -1111,14 +1073,43 @@ export async function addFileNode(
 
   log(`[addFileNode] Attempting to add file: ${normalizedFilePath} to tree rooted at ${activeFileTree.path}`);
 
-  // 1. Find the parent directory node within the provided active tree
+  // 1. Find the parent directory node, creating intermediate directories if needed
   const parentDir = path.dirname(normalizedFilePath);
-  const parentNode = findNodeByPath(activeFileTree, parentDir);
+  let parentNode = findNodeByPath(activeFileTree, parentDir);
 
   if (!parentNode || !parentNode.isDirectory) {
-    log(`[addFileNode] Could not find parent directory node for: ${normalizedFilePath}`);
-    // Optionally: Handle cases where intermediate directories might also need creation
-    return;
+    // Walk up from parentDir toward the tree root to find the nearest existing ancestor,
+    // then create intermediate directory nodes downward (same as reconstructTreeFromDb's ensureDir)
+    const normalizedRoot = normalizePath(activeFileTree.path);
+    const dirsToCreate: string[] = [];
+    let cur = parentDir;
+    while (cur.length > normalizedRoot.length) {
+      const existing = findNodeByPath(activeFileTree, cur);
+      if (existing && existing.isDirectory) break;
+      dirsToCreate.push(cur);
+      cur = path.dirname(cur);
+    }
+
+    // Create directories from shallowest to deepest
+    for (let i = dirsToCreate.length - 1; i >= 0; i--) {
+      const dirPath = dirsToCreate[i];
+      const dirParent = findNodeByPath(activeFileTree, path.dirname(dirPath));
+      if (!dirParent || !dirParent.isDirectory) continue;
+      const dirNode: FileNode = {
+        path: dirPath,
+        name: path.basename(dirPath),
+        isDirectory: true,
+        children: [],
+      };
+      if (!dirParent.children) dirParent.children = [];
+      dirParent.children.push(dirNode);
+    }
+
+    parentNode = findNodeByPath(activeFileTree, parentDir);
+    if (!parentNode || !parentNode.isDirectory) {
+      log(`[addFileNode] Could not create parent directory chain for: ${normalizedFilePath}`);
+      return;
+    }
   }
 
   // 2. Check if node already exists (should not happen if watcher is correct, but good practice)

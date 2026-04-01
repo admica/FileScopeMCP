@@ -5,11 +5,11 @@
 import * as net from 'node:net';
 import * as readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
-import { SOCK_PATH } from './config.js';
+import { SOCK_PATH, PID_PATH } from './config.js';
 import type { SubmitMessage, StatusMessage, StatusResponse, BrokerMessage } from './types.js';
 import { writeLlmResult, clearStaleness } from '../db/repository.js';
 import { getSqlite } from '../db/db.js';
@@ -112,11 +112,30 @@ export function requestStatus(timeoutMs = 2000): Promise<StatusResponse | null> 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
 /**
- * Spawns the broker binary if the socket file does not exist.
- * Resolves the binary path relative to this compiled module (dist/broker/client.js).
+ * Spawns the broker binary if it is not running.
+ * If the socket file exists, checks the PID file to verify the broker is alive.
+ * Cleans up stale socket/PID files before spawning.
  */
 async function spawnBrokerIfNeeded(): Promise<void> {
-  if (existsSync(SOCK_PATH)) return;
+  if (existsSync(SOCK_PATH)) {
+    // Socket exists — verify the broker process is actually alive
+    if (existsSync(PID_PATH)) {
+      const raw = readFileSync(PID_PATH, 'utf-8').trim();
+      const pid = parseInt(raw, 10);
+      if (!isNaN(pid)) {
+        try {
+          process.kill(pid, 0); // signal 0 = existence check
+          return; // broker is alive, nothing to do
+        } catch {
+          // PID is dead — fall through to clean up and respawn
+        }
+      }
+    }
+    // Stale socket (broker died without cleanup) — remove before spawning
+    log('[broker-client] Stale broker socket detected — cleaning up');
+    rmSync(SOCK_PATH, { force: true });
+    rmSync(PID_PATH, { force: true });
+  }
 
   try {
     const distBrokerDir = path.dirname(fileURLToPath(import.meta.url));
@@ -273,8 +292,9 @@ export function resubmitStaleFiles(): void {
  */
 function startReconnectTimer(): void {
   if (reconnectTimer !== null) return;
-  reconnectTimer = setInterval(() => {
-    attemptConnect().catch(() => {});
+  reconnectTimer = setInterval(async () => {
+    await spawnBrokerIfNeeded();
+    await attemptConnect();
   }, 10_000);
   reconnectTimer.unref();
 }
