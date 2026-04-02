@@ -215,6 +215,6 @@ Plans:
 | 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
 | 20. Server Skeleton + Repo Discovery | v1.3 | 3/3 | Complete    | 2026-04-01 |
 | 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete    | 2026-04-02 |
-| 22. Dependency Graph | v1.3 | 2/2 | Complete   | 2026-04-02 |
+| 22. Dependency Graph | v1.3 | 2/2 | Complete    | 2026-04-02 |
 | 23. System View + Live Activity | v1.3 | 0/? | Pending | -- |
 | 24. Polish | v1.3 | 0/? | Pending | -- |
