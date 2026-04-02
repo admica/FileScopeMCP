@@ -138,3 +138,41 @@ export async function fetchGraph(repoName: string, dir?: string): Promise<GraphR
   if (!res.ok) throw new Error(`Graph fetch failed: ${res.status}`);
   return res.json();
 }
+
+// ─── System types ─────────────────────────────────────────────────────────────
+
+export type BrokerStatus = {
+  online: boolean;
+  pendingCount: number;
+  inProgressJob: { repoPath: string; filePath: string; jobType: string } | null;
+  connectedClients: number;
+  repoTokens: Record<string, number>;
+  model: string;
+};
+
+export type TokenEntry = {
+  repo: string;
+  total: number;
+  sessionDelta: number;
+};
+
+export type LogLine = {
+  timestamp: string;
+  prefix: string;
+  message: string;
+  source: 'broker' | 'mcp-server';
+};
+
+// ─── System fetch ─────────────────────────────────────────────────────────────
+
+export async function fetchBrokerStatus(): Promise<BrokerStatus> {
+  const res = await fetch('/api/system/broker');
+  if (!res.ok) throw new Error(`Broker status fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTokenStats(): Promise<TokenEntry[]> {
+  const res = await fetch('/api/system/tokens');
+  if (!res.ok) throw new Error(`Token stats fetch failed: ${res.status}`);
+  return res.json();
+}
