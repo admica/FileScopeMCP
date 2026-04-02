@@ -33,6 +33,8 @@
     | { type: 'project'; name: string }
     | { type: 'project-file'; name: string; filePath: string }
     | { type: 'project-dir'; name: string; dirPath: string }
+    | { type: 'project-graph'; name: string }
+    | { type: 'project-graph-file'; name: string; filePath: string }
     | { type: 'system' }
     | { type: 'settings' }
     | { type: 'home' };
@@ -41,6 +43,25 @@
     const path = hash.replace(/^#/, '') || '/';
     if (path.startsWith('/project/')) {
       const rest = path.slice(9); // strip '/project/'
+
+      // Check for graph routes FIRST (before /file/ and /dir/ — avoids fallback match)
+      const graphFileIdx = rest.indexOf('/graph/file/');
+      const graphIdx = rest.indexOf('/graph');
+      if (graphFileIdx !== -1) {
+        return {
+          type: 'project-graph-file' as const,
+          name: decodeURIComponent(rest.slice(0, graphFileIdx)),
+          filePath: rest.slice(graphFileIdx + 12),
+        };
+      }
+      if (graphIdx !== -1 && rest.slice(graphIdx) === '/graph') {
+        return {
+          type: 'project-graph' as const,
+          name: decodeURIComponent(rest.slice(0, graphIdx)),
+        };
+      }
+
+      // Existing checks for /file/ and /dir/
       const fileIdx = rest.indexOf('/file/');
       const dirIdx = rest.indexOf('/dir/');
       if (fileIdx !== -1) {
@@ -73,17 +94,21 @@
         <p class="text-gray-500">Loading...</p>
       </div>
     {:else if route.type === 'project'}
-      <Project repoName={route.name} filePath={null} dirPath={null} />
+      <Project repoName={route.name} filePath={null} dirPath={null} showGraph={false} />
     {:else if route.type === 'project-file'}
-      <Project repoName={route.name} filePath={route.filePath} dirPath={null} />
+      <Project repoName={route.name} filePath={route.filePath} dirPath={null} showGraph={false} />
     {:else if route.type === 'project-dir'}
-      <Project repoName={route.name} filePath={null} dirPath={route.dirPath} />
+      <Project repoName={route.name} filePath={null} dirPath={route.dirPath} showGraph={false} />
+    {:else if route.type === 'project-graph'}
+      <Project repoName={route.name} filePath={null} dirPath={null} showGraph={true} />
+    {:else if route.type === 'project-graph-file'}
+      <Project repoName={route.name} filePath={route.filePath} dirPath={null} showGraph={true} />
     {:else if route.type === 'system'}
       <System />
     {:else if route.type === 'settings'}
       <Settings />
     {:else if repos.length > 0}
-      <Project repoName={repos[0].name} filePath={null} dirPath={null} />
+      <Project repoName={repos[0].name} filePath={null} dirPath={null} showGraph={false} />
     {:else}
       <div class="flex items-center justify-center h-64">
         <p class="text-gray-500">No repos discovered. Add repos in Settings.</p>
