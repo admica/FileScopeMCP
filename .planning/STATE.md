@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Ready to execute
-stopped_at: Completed 22-01-PLAN.md
-last_updated: "2026-04-02T05:12:53.075Z"
+status: Phase complete — ready for verification
+stopped_at: "Checkpoint: Task 3 human-verify — visual verification of dependency graph needed"
+last_updated: "2026-04-02T05:19:12.177Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 9
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 15
-  completed_plans: 14
+  completed_plans: 15
 ---
 
 # Project State
@@ -66,6 +66,9 @@ v1.3 key decisions:
 - [Phase 21-file-tree-detail-panel]: filePath/dirPath not encoded in URL hash — they contain forward slashes required for path structure; only repoName encoded as single segment
 - [Phase 22-dependency-graph]: Only local_import edges in graph (not package_import) — package deps not meaningful for dependency visualization
 - [Phase 22-dependency-graph]: fetchGraph() encodes dir query param via encodeURIComponent — unlike hash path segments which contain meaningful slashes
+- [Phase 22-dependency-graph]: cytoscape.use(fcose) at module level prevents duplicate registration if component re-mounts
+- [Phase 22-dependency-graph]: Graph routes parsed before /file/ and /dir/ in hash parser to avoid route collision
+- [Phase 22-dependency-graph]: flex-1 min-h-0 on graph container required for Cytoscape height calculation
 
 ### Pending Todos
 
@@ -88,9 +91,10 @@ None.
 | Phase 21 P01 | 2 | 2 tasks | 3 files |
 | Phase 21-file-tree-detail-panel P02 | 4min | 3 tasks | 10 files |
 | Phase 22-dependency-graph P01 | 2min | 2 tasks | 4 files |
+| Phase 22-dependency-graph P02 | 220 | 2 tasks | 4 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-02
-Stopped at: Completed 22-01-PLAN.md
+Stopped at: Checkpoint: Task 3 human-verify — visual verification of dependency graph needed
 Resume file: None

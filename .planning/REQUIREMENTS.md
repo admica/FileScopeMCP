@@ -43,11 +43,11 @@ Requirements for the Nexus milestone. Read-only web dashboard that opens existin
 ### Dependency Graph
 
 - [x] **NEXUS-19**: D3.js force-directed graph visualization of file_dependencies WHERE dependency_type = 'local_import'
-- [ ] **NEXUS-20**: Graph nodes sized by importance, colored by directory or file type
-- [ ] **NEXUS-21**: Hover a node highlights its direct dependencies and dependents; click opens file detail panel
-- [ ] **NEXUS-22**: Zoom, pan, and drag-to-rearrange interactions on the graph canvas
-- [ ] **NEXUS-23**: Directory subtree filter (e.g., show only src/broker/ and its external deps) to manage node count
-- [ ] **NEXUS-24**: Tree ↔ Graph toggle switches left panel between directory tree and dependency graph
+- [x] **NEXUS-20**: Graph nodes sized by importance, colored by directory or file type
+- [x] **NEXUS-21**: Hover a node highlights its direct dependencies and dependents; click opens file detail panel
+- [x] **NEXUS-22**: Zoom, pan, and drag-to-rearrange interactions on the graph canvas
+- [x] **NEXUS-23**: Directory subtree filter (e.g., show only src/broker/ and its external deps) to manage node count
+- [x] **NEXUS-24**: Tree ↔ Graph toggle switches left panel between directory tree and dependency graph
 
 ### System View & Live Activity
 
@@ -138,11 +138,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NEXUS-17 | Phase 21 | Complete |
 | NEXUS-18 | Phase 21 | Complete |
 | NEXUS-19 | Phase 22 | Complete |
-| NEXUS-20 | Phase 22 | Pending |
-| NEXUS-21 | Phase 22 | Pending |
-| NEXUS-22 | Phase 22 | Pending |
-| NEXUS-23 | Phase 22 | Pending |
-| NEXUS-24 | Phase 22 | Pending |
+| NEXUS-20 | Phase 22 | Complete |
+| NEXUS-21 | Phase 22 | Complete |
+| NEXUS-22 | Phase 22 | Complete |
+| NEXUS-23 | Phase 22 | Complete |
+| NEXUS-24 | Phase 22 | Complete |
 | NEXUS-25 | Phase 23 | Pending |
 | NEXUS-26 | Phase 23 | Pending |
 | NEXUS-27 | Phase 23 | Pending |
