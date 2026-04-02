@@ -80,6 +80,21 @@ export type FileDetail = {
   packageDeps: { name: string; version: string; isDev: boolean }[];
 };
 
+// ─── Graph types ─────────────────────────────────────────────────────────────
+
+export type GraphNode = {
+  path: string;
+  name: string;
+  importance: number;
+  directory: string;
+  hasSummary: boolean;
+  isStale: boolean;
+};
+
+export type GraphEdge = { source: string; target: string };
+
+export type GraphResponse = { nodes: GraphNode[]; edges: GraphEdge[] };
+
 // ─── Directory detail types ───────────────────────────────────────────────────
 
 export type DirDetail = {
@@ -111,5 +126,15 @@ export async function fetchFileDetail(repoName: string, filePath: string): Promi
 export async function fetchDirDetail(repoName: string, dirPath: string): Promise<DirDetail> {
   const res = await fetch(`/api/project/${encodeURIComponent(repoName)}/dir/${dirPath}`);
   if (!res.ok) throw new Error(`Dir detail fetch failed: ${res.status}`);
+  return res.json();
+}
+
+// ─── Graph fetch ─────────────────────────────────────────────────────────────
+
+export async function fetchGraph(repoName: string, dir?: string): Promise<GraphResponse> {
+  const base = `/api/project/${encodeURIComponent(repoName)}/graph`;
+  const url = dir ? `${base}?dir=${encodeURIComponent(dir)}` : base;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Graph fetch failed: ${res.status}`);
   return res.json();
 }

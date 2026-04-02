@@ -4,7 +4,7 @@
 
 import Fastify, { FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { getRepos, getDb, getRepoStats, getTreeEntries, getFileDetail, getDirDetail } from './repo-store.js';
+import { getRepos, getDb, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
 
 // ─── Server factory ───────────────────────────────────────────────────────────
 
@@ -99,6 +99,20 @@ export async function createServer(options: { staticDir: string }): Promise<Fast
         return { error: 'Repo not found or offline' };
       }
       return getDirDetail(db, req.params['*']);
+    }
+  );
+
+  // GET /api/project/:repoName/graph — dependency graph nodes and edges
+  app.get<{ Params: { repoName: string }; Querystring: { dir?: string } }>(
+    '/api/project/:repoName/graph',
+    async (req, reply) => {
+      const db = getDb(req.params.repoName);
+      if (!db) {
+        reply.code(404);
+        return { error: 'Repo not found or offline' };
+      }
+      const dirFilter = req.query.dir;
+      return getGraphData(db, dirFilter);
     }
   );
 
