@@ -31,13 +31,34 @@
 
   type Route =
     | { type: 'project'; name: string }
+    | { type: 'project-file'; name: string; filePath: string }
+    | { type: 'project-dir'; name: string; dirPath: string }
     | { type: 'system' }
     | { type: 'settings' }
     | { type: 'home' };
 
   let route: Route = $derived.by(() => {
     const path = hash.replace(/^#/, '') || '/';
-    if (path.startsWith('/project/')) return { type: 'project', name: decodeURIComponent(path.slice(9)) };
+    if (path.startsWith('/project/')) {
+      const rest = path.slice(9); // strip '/project/'
+      const fileIdx = rest.indexOf('/file/');
+      const dirIdx = rest.indexOf('/dir/');
+      if (fileIdx !== -1) {
+        return {
+          type: 'project-file',
+          name: decodeURIComponent(rest.slice(0, fileIdx)),
+          filePath: rest.slice(fileIdx + 6),
+        };
+      }
+      if (dirIdx !== -1) {
+        return {
+          type: 'project-dir',
+          name: decodeURIComponent(rest.slice(0, dirIdx)),
+          dirPath: rest.slice(dirIdx + 5),
+        };
+      }
+      return { type: 'project', name: decodeURIComponent(rest) };
+    }
     if (path === '/system') return { type: 'system' };
     if (path === '/settings') return { type: 'settings' };
     return { type: 'home' };
@@ -52,13 +73,17 @@
         <p class="text-gray-500">Loading...</p>
       </div>
     {:else if route.type === 'project'}
-      <Project repoName={route.name} />
+      <Project repoName={route.name} filePath={null} dirPath={null} />
+    {:else if route.type === 'project-file'}
+      <Project repoName={route.name} filePath={route.filePath} dirPath={null} />
+    {:else if route.type === 'project-dir'}
+      <Project repoName={route.name} filePath={null} dirPath={route.dirPath} />
     {:else if route.type === 'system'}
       <System />
     {:else if route.type === 'settings'}
       <Settings />
     {:else if repos.length > 0}
-      <Project repoName={repos[0].name} />
+      <Project repoName={repos[0].name} filePath={null} dirPath={null} />
     {:else}
       <div class="flex items-center justify-center h-64">
         <p class="text-gray-500">No repos discovered. Add repos in Settings.</p>
