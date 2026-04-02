@@ -60,7 +60,7 @@ See: ROADMAP.md Phase Details below for full phase details (not yet archived).
 
 - [x] **Phase 20: Server Skeleton + Repo Discovery** (3 plans) — Fastify server, CLI entry point, nexus.json registry, auto-discovery, per-repo read-only DB connections, Svelte 5 SPA with navbar, hash routing, stats card, static file serving, graceful shutdown (completed 2026-04-01)
 - [x] **Phase 21: File Tree + Detail Panel** (2 plans) — Collapsible directory tree with lazy loading, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel (completed 2026-04-02)
-- [ ] **Phase 22: Dependency Graph** — Cytoscape.js interactive dependency map, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree/graph toggle
+- [ ] **Phase 22: Dependency Graph** (2 plans) — Cytoscape.js interactive dependency map, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree/graph toggle
 - [ ] **Phase 23: System View + Live Activity** — Broker status polling via broker.sock, token usage from stats.json, SSE log tailing (fs.watch + ring buffer), log line parsing
 - [ ] **Phase 24: Polish** — Importance heat colors, staleness icons, tab status indicators, settings page (add/remove repos), responsive layout
 
@@ -163,6 +163,10 @@ Plans:
   2. Toggling Tree / Graph in the left panel renders a Cytoscape.js graph with nodes sized by importance and colored by directory
   3. Hovering a node highlights its direct dependencies and dependents; clicking a node loads its detail panel
   4. Graph supports zoom, pan, and drag-to-rearrange; a directory filter dropdown limits visible nodes to a subtree plus its external deps
+**Plans:** 2 plans
+Plans:
+- [ ] 22-01-PLAN.md — Backend: getGraphData() query, /graph API route, frontend graph types + fetchGraph()
+- [ ] 22-02-PLAN.md — Frontend: DependencyGraph + GraphFilter components, App.svelte routing, Project.svelte toggle
 
 ### Phase 23: System View + Live Activity
 **Goal**: The System tab shows cross-repo broker status, token usage, and a live-updating activity feed streamed from log files via SSE
@@ -210,7 +214,7 @@ Plans:
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
 | 20. Server Skeleton + Repo Discovery | v1.3 | 3/3 | Complete    | 2026-04-01 |
-| 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete   | 2026-04-02 |
-| 22. Dependency Graph | v1.3 | 0/? | Pending | -- |
+| 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete    | 2026-04-02 |
+| 22. Dependency Graph | v1.3 | 0/2 | Planned | -- |
 | 23. System View + Live Activity | v1.3 | 0/? | Pending | -- |
 | 24. Polish | v1.3 | 0/? | Pending | -- |
