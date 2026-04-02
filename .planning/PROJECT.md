@@ -77,12 +77,17 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - ✓ Config migration: LLM model config moved to broker, instance has enabled-only — v1.2
 - ✓ Broker status reporting via MCP tool — v1.2
 - ✓ Remove legacy llm_jobs/llm_runtime_state tables and local job queue — v1.2
+- ✓ Interactive dependency map via Cytoscape.js — v1.3 (Phase 22)
+- ✓ File detail panel (summary, concepts, deps, staleness) — v1.3 (Phase 21)
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-(Defined in REQUIREMENTS.md during milestone setup)
+- Fastify JSON API + Svelte 5 SPA dashboard — v1.3 (Phase 20 delivered server + SPA scaffold)
+- Per-repo file tree with importance heat colors — v1.3
+- System view with broker status and token stats — v1.3
+- SSE log tailing — v1.3
 
 ### Out of Scope
 
@@ -105,6 +110,12 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 Shipped v1.0 (9 phases, 9,515 LOC), v1.1 (6 phases, hardening + language support), and v1.2 (4 phases, LLM broker). 250+ tests passing. The system is a complete autonomous file intelligence platform with a standalone LLM broker coordinating all Ollama access.
 
 v1.3 builds the Nexus — a visual code exploration dashboard that opens existing per-repo SQLite databases and log files to provide cross-repo observability. No new daemon or IPC protocol — the data already exists. Architecture fully designed in NEXUS-PLAN.md. Fastify API + Svelte 5 SPA + Cytoscape.js/D3 + Tailwind dark mode, accessible on the LAN at `0.0.0.0:1234`.
+
+**Phase 20 complete** (2026-04-01): Server skeleton + repo discovery — Fastify backend with CLI entry, 2-level repo auto-discovery, read-only SQLite connections, JSON API, Svelte 5 SPA with hash router, dark navbar, stats cards.
+
+**Phase 21 complete** (2026-04-02): File tree + detail panel — collapsible directory tree with lazy loading, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel.
+
+**Phase 22 complete** (2026-04-02): Dependency graph — Cytoscape.js interactive dependency map with fcose layout, importance-based node sizing, directory-based coloring, hover highlighting, click-to-detail navigation, directory subtree filter, tree/graph toggle.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
 
@@ -153,4 +164,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-01 after Nexus plan refinement*
+*Last updated: 2026-04-02 after Phase 22 completion*
