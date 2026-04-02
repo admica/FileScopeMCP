@@ -140,6 +140,24 @@ export type TreeEntryRow = {
   isStale: boolean;
 };
 
+// ─── Graph Query Types ───────────────────────────────────────────────────────
+
+export type GraphNode = {
+  path: string;
+  name: string;
+  importance: number;
+  directory: string;   // top-level directory (e.g. "src", "tests"); "" for root-level files
+  hasSummary: boolean;
+  isStale: boolean;
+};
+
+export type GraphEdge = {
+  source: string;
+  target: string;
+};
+
+export type GraphData = { nodes: GraphNode[]; edges: GraphEdge[] };
+
 // ─── Tree / Detail Query Functions ───────────────────────────────────────────
 
 /**
@@ -307,4 +325,60 @@ export function getDirDetail(
     pctStale: totalFiles > 0 ? Math.round((staleCount / totalFiles) * 100) : 0,
     topFiles: topFiles.map((f) => ({ path: f.path, name: f.name, importance: f.importance ?? 0 })),
   };
+}
+
+// ─── Graph Query Functions ──────────────────────────────────────────────────
+
+/**
+ * Return all local_import edges and their endpoint file metadata for the dependency graph.
+ * Optional dirFilter limits to edges where at least one endpoint is under that subtree.
+ */
+export function getGraphData(
+  db: InstanceType<typeof Database>,
+  dirFilter?: string
+): GraphData {
+  // Edges: all local_import dependencies (optionally filtered by subtree)
+  let edgeQuery = `
+    SELECT source_path AS source, target_path AS target
+    FROM file_dependencies
+    WHERE dependency_type = 'local_import'
+  `;
+  const edgeParams: string[] = [];
+  if (dirFilter) {
+    edgeQuery += ` AND (source_path LIKE ? OR target_path LIKE ?)`;
+    edgeParams.push(`${dirFilter}/%`, `${dirFilter}/%`);
+  }
+  const edges = db.prepare(edgeQuery).all(...edgeParams) as GraphEdge[];
+
+  // Collect unique file paths referenced by edges
+  const pathSet = new Set<string>();
+  for (const e of edges) { pathSet.add(e.source); pathSet.add(e.target); }
+  if (pathSet.size === 0) return { nodes: [], edges: [] };
+
+  // Nodes: fetch metadata for all referenced files
+  // Note: SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999.
+  // The 500-node performance cap (D-12) keeps this well under limit.
+  const paths = Array.from(pathSet);
+  const placeholders = paths.map(() => '?').join(',');
+  const fileRows = db.prepare(`
+    SELECT path, name, importance,
+           (summary IS NOT NULL) AS has_summary,
+           (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
+            OR change_impact_stale_since IS NOT NULL) AS is_stale
+    FROM files WHERE path IN (${placeholders}) AND is_directory = 0
+  `).all(...paths) as Array<{
+    path: string; name: string; importance: number | null;
+    has_summary: number; is_stale: number;
+  }>;
+
+  const nodes: GraphNode[] = fileRows.map(r => ({
+    path: r.path,
+    name: r.name,
+    importance: r.importance ?? 0,
+    directory: r.path.includes('/') ? r.path.split('/')[0] : '',
+    hasSummary: Boolean(r.has_summary),
+    isStale: Boolean(r.is_stale),
+  }));
+
+  return { nodes, edges };
 }

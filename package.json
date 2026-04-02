@@ -28,6 +28,8 @@
     "ai": "^6.0.116",
     "better-sqlite3": "^12.6.2",
     "chokidar": "^3.6.0",
+    "cytoscape": "^3.33.1",
+    "cytoscape-fcose": "^2.2.0",
     "drizzle-orm": "^0.45.1",
     "fastify": "^5.8.4",
     "ignore": "^7.0.5",
