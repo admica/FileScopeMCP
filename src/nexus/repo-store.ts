@@ -1,6 +1,7 @@
 // src/nexus/repo-store.ts
 // Per-repo read-only better-sqlite3 connection management for Nexus.
-// Exports: RepoState, openRepo, getRepos, getDb, closeAll, recheckOffline, getRepoStats
+// Exports: RepoState, openRepo, getRepos, getDb, closeAll, recheckOffline, getRepoStats,
+//          getTreeEntries, getFileDetail, getDirDetail
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -125,5 +126,185 @@ export function getRepoStats(db: InstanceType<typeof Database>): object {
     withConcepts: row.with_concepts,
     staleCount: row.stale_count,
     totalDeps: depsRow.total_deps,
+  };
+}
+
+// ─── Tree / Detail Query Types ────────────────────────────────────────────────
+
+export type TreeEntryRow = {
+  name: string;
+  path: string;
+  isDir: boolean;
+  importance: number;
+  hasSummary: boolean;
+  isStale: boolean;
+};
+
+// ─── Tree / Detail Query Functions ───────────────────────────────────────────
+
+/**
+ * Return direct children of a directory (or root-level entries when parentPath is '').
+ * Results sorted: directories first, then alphabetically by name.
+ */
+export function getTreeEntries(
+  db: InstanceType<typeof Database>,
+  parentPath: string
+): { entries: TreeEntryRow[] } {
+  let rows: Array<{
+    path: string;
+    name: string;
+    is_directory: number;
+    importance: number | null;
+    has_summary: number;
+    is_stale: number;
+  }>;
+
+  if (parentPath === '') {
+    rows = db.prepare(`
+      SELECT path, name, is_directory, importance,
+             (summary IS NOT NULL) AS has_summary,
+             (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
+              OR change_impact_stale_since IS NOT NULL) AS is_stale
+      FROM files
+      WHERE path NOT LIKE '%/%'
+      ORDER BY is_directory DESC, name ASC
+    `).all() as typeof rows;
+  } else {
+    rows = db.prepare(`
+      SELECT path, name, is_directory, importance,
+             (summary IS NOT NULL) AS has_summary,
+             (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
+              OR change_impact_stale_since IS NOT NULL) AS is_stale
+      FROM files
+      WHERE path LIKE ? AND path NOT LIKE ?
+      ORDER BY is_directory DESC, name ASC
+    `).all(`${parentPath}/%`, `${parentPath}/%/%`) as typeof rows;
+  }
+
+  const entries: TreeEntryRow[] = rows.map((r) => ({
+    path: r.path,
+    name: r.name,
+    isDir: Boolean(r.is_directory),
+    importance: r.importance ?? 0,
+    hasSummary: Boolean(r.has_summary),
+    isStale: Boolean(r.is_stale),
+  }));
+
+  return { entries };
+}
+
+/**
+ * Return full file metadata for a single file, including parsed JSON blobs and dependency info.
+ * Returns null if the file is not found or is a directory.
+ */
+export function getFileDetail(
+  db: InstanceType<typeof Database>,
+  filePath: string
+): object | null {
+  const row = db.prepare(`
+    SELECT path, name, importance, summary, mtime,
+           summary_stale_since, concepts_stale_since, change_impact_stale_since,
+           exports_snapshot, concepts, change_impact
+    FROM files WHERE path = ? AND is_directory = 0
+  `).get(filePath) as {
+    path: string;
+    name: string;
+    importance: number | null;
+    summary: string | null;
+    mtime: number | null;
+    summary_stale_since: number | null;
+    concepts_stale_since: number | null;
+    change_impact_stale_since: number | null;
+    exports_snapshot: string | null;
+    concepts: string | null;
+    change_impact: string | null;
+  } | undefined;
+
+  if (!row) return null;
+
+  const safeParse = (json: string | null): object | null => {
+    if (!json) return null;
+    try { return JSON.parse(json); } catch { return null; }
+  };
+
+  const dependencies = db.prepare(`
+    SELECT target_path AS path, dependency_type AS type
+    FROM file_dependencies WHERE source_path = ? AND dependency_type = 'local_import'
+  `).all(filePath) as { path: string; type: string }[];
+
+  const dependents = db.prepare(`
+    SELECT source_path AS path
+    FROM file_dependencies WHERE target_path = ? AND dependency_type = 'local_import'
+  `).all(filePath) as { path: string }[];
+
+  const packageDeps = db.prepare(`
+    SELECT package_name AS name, package_version AS version, is_dev_dependency AS isDev
+    FROM file_dependencies WHERE source_path = ? AND dependency_type = 'package_import'
+  `).all(filePath) as { name: string; version: string; isDev: number }[];
+
+  return {
+    path: row.path,
+    name: row.name,
+    importance: row.importance ?? 0,
+    summary: row.summary,
+    concepts: safeParse(row.concepts),
+    changeImpact: safeParse(row.change_impact),
+    exportsSnapshot: safeParse(row.exports_snapshot),
+    staleness: {
+      summary: row.summary_stale_since,
+      concepts: row.concepts_stale_since,
+      changeImpact: row.change_impact_stale_since,
+    },
+    dependencies,
+    dependents,
+    packageDeps: packageDeps.map((p) => ({ ...p, isDev: Boolean(p.isDev) })),
+  };
+}
+
+/**
+ * Return aggregate stats and top files for a directory (all descendants, not just direct children).
+ */
+export function getDirDetail(
+  db: InstanceType<typeof Database>,
+  dirPath: string
+): object {
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) AS total_files,
+      AVG(importance) AS avg_importance,
+      COUNT(*) FILTER (WHERE summary IS NOT NULL) AS with_summary,
+      COUNT(*) FILTER (WHERE summary_stale_since IS NOT NULL
+                       OR concepts_stale_since IS NOT NULL
+                       OR change_impact_stale_since IS NOT NULL) AS stale_count
+    FROM files
+    WHERE is_directory = 0 AND path LIKE ?
+  `).get(`${dirPath}/%`) as {
+    total_files: number;
+    avg_importance: number | null;
+    with_summary: number;
+    stale_count: number;
+  };
+
+  const topFiles = db.prepare(`
+    SELECT path, name, importance
+    FROM files
+    WHERE is_directory = 0 AND path LIKE ?
+    ORDER BY importance DESC
+    LIMIT 10
+  `).all(`${dirPath}/%`) as { path: string; name: string; importance: number | null }[];
+
+  const totalFiles = agg.total_files ?? 0;
+  const withSummary = agg.with_summary ?? 0;
+  const staleCount = agg.stale_count ?? 0;
+  const avgImportanceRaw = agg.avg_importance ?? 0;
+
+  return {
+    path: dirPath,
+    name: dirPath.split('/').pop() ?? dirPath,
+    totalFiles,
+    avgImportance: Math.round(avgImportanceRaw * 10) / 10,
+    pctWithSummary: totalFiles > 0 ? Math.round((withSummary / totalFiles) * 100) : 0,
+    pctStale: totalFiles > 0 ? Math.round((staleCount / totalFiles) * 100) : 0,
+    topFiles: topFiles.map((f) => ({ path: f.path, name: f.name, importance: f.importance ?? 0 })),
   };
 }
