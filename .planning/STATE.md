@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Phase complete — ready for verification
-stopped_at: Completed 21-02-PLAN.md — file tree and detail panel Svelte components
-last_updated: "2026-04-02T03:48:38.757Z"
+status: Ready to execute
+stopped_at: Completed 22-01-PLAN.md
+last_updated: "2026-04-02T05:12:53.075Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 9
   completed_phases: 6
-  total_plans: 13
-  completed_plans: 13
+  total_plans: 15
+  completed_plans: 14
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-01)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 21 — file-tree-detail-panel
+**Current focus:** Phase 22 — dependency-graph
 
 ## Current Position
 
-Phase: 21 (file-tree-detail-panel) — EXECUTING
+Phase: 22 (dependency-graph) — EXECUTING
 Plan: 2 of 2
 
 ## Performance Metrics
@@ -64,6 +64,8 @@ v1.3 key decisions:
 - [Phase 21]: Non-wildcard /tree registered before /tree/* wildcard — Fastify v5 is order-sensitive
 - [Phase 21-file-tree-detail-panel]: Svelte 5 {#snippet renderEntries} for recursive tree — avoids Svelte 4 self-referencing component pattern; snippets are first-class in Svelte 5
 - [Phase 21-file-tree-detail-panel]: filePath/dirPath not encoded in URL hash — they contain forward slashes required for path structure; only repoName encoded as single segment
+- [Phase 22-dependency-graph]: Only local_import edges in graph (not package_import) — package deps not meaningful for dependency visualization
+- [Phase 22-dependency-graph]: fetchGraph() encodes dir query param via encodeURIComponent — unlike hash path segments which contain meaningful slashes
 
 ### Pending Todos
 
@@ -85,9 +87,10 @@ None.
 | Phase 20-server-skeleton-repo-discovery P03 | 5 | 2 tasks | 1 files |
 | Phase 21 P01 | 2 | 2 tasks | 3 files |
 | Phase 21-file-tree-detail-panel P02 | 4min | 3 tasks | 10 files |
+| Phase 22-dependency-graph P01 | 2min | 2 tasks | 4 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-02
-Stopped at: Completed 21-02-PLAN.md — file tree and detail panel Svelte components
+Stopped at: Completed 22-01-PLAN.md
 Resume file: None

@@ -42,7 +42,7 @@ Requirements for the Nexus milestone. Read-only web dashboard that opens existin
 
 ### Dependency Graph
 
-- [ ] **NEXUS-19**: D3.js force-directed graph visualization of file_dependencies WHERE dependency_type = 'local_import'
+- [x] **NEXUS-19**: D3.js force-directed graph visualization of file_dependencies WHERE dependency_type = 'local_import'
 - [ ] **NEXUS-20**: Graph nodes sized by importance, colored by directory or file type
 - [ ] **NEXUS-21**: Hover a node highlights its direct dependencies and dependents; click opens file detail panel
 - [ ] **NEXUS-22**: Zoom, pan, and drag-to-rearrange interactions on the graph canvas
@@ -137,7 +137,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NEXUS-16 | Phase 21 | Complete |
 | NEXUS-17 | Phase 21 | Complete |
 | NEXUS-18 | Phase 21 | Complete |
-| NEXUS-19 | Phase 22 | Pending |
+| NEXUS-19 | Phase 22 | Complete |
 | NEXUS-20 | Phase 22 | Pending |
 | NEXUS-21 | Phase 22 | Pending |
 | NEXUS-22 | Phase 22 | Pending |

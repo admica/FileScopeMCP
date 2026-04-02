@@ -163,9 +163,9 @@ Plans:
   2. Toggling Tree / Graph in the left panel renders a Cytoscape.js graph with nodes sized by importance and colored by directory
   3. Hovering a node highlights its direct dependencies and dependents; clicking a node loads its detail panel
   4. Graph supports zoom, pan, and drag-to-rearrange; a directory filter dropdown limits visible nodes to a subtree plus its external deps
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 22-01-PLAN.md — Backend: getGraphData() query, /graph API route, frontend graph types + fetchGraph()
+- [x] 22-01-PLAN.md — Backend: getGraphData() query, /graph API route, frontend graph types + fetchGraph()
 - [ ] 22-02-PLAN.md — Frontend: DependencyGraph + GraphFilter components, App.svelte routing, Project.svelte toggle
 
 ### Phase 23: System View + Live Activity
@@ -215,6 +215,6 @@ Plans:
 | 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
 | 20. Server Skeleton + Repo Discovery | v1.3 | 3/3 | Complete    | 2026-04-01 |
 | 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete    | 2026-04-02 |
-| 22. Dependency Graph | v1.3 | 0/2 | Planned | -- |
+| 22. Dependency Graph | v1.3 | 1/2 | In Progress|  |
 | 23. System View + Live Activity | v1.3 | 0/? | Pending | -- |
 | 24. Polish | v1.3 | 0/? | Pending | -- |
