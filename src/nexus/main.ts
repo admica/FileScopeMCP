@@ -8,6 +8,8 @@ import path from 'node:path';
 import { readRegistry, writeRegistry, discoverRepos } from './discover.js';
 import { openRepo, closeAll, recheckOffline } from './repo-store.js';
 import { createServer } from './server.js';
+import { readStats } from '../broker/stats.js';
+import { initLogTailer, stopLogTailer } from './log-tailer.js';
 
 // ─── CLI arg parsing ──────────────────────────────────────────────────────────
 
@@ -51,12 +53,18 @@ async function main() {
   const recheckInterval = setInterval(() => recheckOffline(), 60_000);
   recheckInterval.unref(); // don't keep process alive just for recheck
 
+  // ── Startup token snapshot for session delta (D-09) ───────────────────────
+  const startupTokenSnapshot = { ...readStats().repoTokens };
+
+  // ── Initialize log tailer ────────────────────────────────────────────────
+  initLogTailer();
+
   // ── Create and start HTTP server ────────────────────────────────────────────
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const staticDir = path.join(__dirname, 'static');
 
-  const server = await createServer({ staticDir });
+  const server = await createServer({ staticDir, startupTokenSnapshot });
   await server.listen({ port: config.port, host: config.host });
   console.log(`Nexus: http://${config.host}:${config.port}`);
 
@@ -67,6 +75,7 @@ async function main() {
     const timeout = setTimeout(() => process.exit(1), 10_000);
     timeout.unref();
     clearInterval(recheckInterval);
+    stopLogTailer();
     closeAll();
     await server.close();
     clearTimeout(timeout);
