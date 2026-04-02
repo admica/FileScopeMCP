@@ -18,3 +18,98 @@ export async function fetchProjectStats(repoName: string): Promise<RepoStats> {
   if (!res.ok) throw new Error(`Failed to fetch stats for ${repoName}: ${res.status}`);
   return res.json();
 }
+
+// ─── Tree types ───────────────────────────────────────────────────────────────
+
+export type TreeEntry = {
+  name: string;
+  path: string;
+  isDir: boolean;
+  importance: number;
+  hasSummary: boolean;
+  isStale: boolean;
+};
+
+export type TreeResponse = { entries: TreeEntry[] };
+
+// ─── File detail types ────────────────────────────────────────────────────────
+
+export type ConceptsResult = {
+  functions: string[];
+  classes: string[];
+  interfaces: string[];
+  exports: string[];
+  purpose: string;
+};
+
+export type ChangeImpactResult = {
+  riskLevel: 'low' | 'medium' | 'high';
+  affectedAreas: string[];
+  breakingChanges: string[];
+  summary: string;
+};
+
+export type ExportedSymbol = {
+  name: string;
+  kind: 'function' | 'class' | 'variable' | 'type' | 'interface' | 'enum' | 'default';
+  signature: string;
+};
+
+export type ExportSnapshot = {
+  filePath: string;
+  exports: ExportedSymbol[];
+  imports: string[];
+  capturedAt: number;
+};
+
+export type FileDetail = {
+  path: string;
+  name: string;
+  importance: number;
+  summary: string | null;
+  concepts: ConceptsResult | null;
+  changeImpact: ChangeImpactResult | null;
+  exportsSnapshot: ExportSnapshot | null;
+  staleness: {
+    summary: number | null;
+    concepts: number | null;
+    changeImpact: number | null;
+  };
+  dependencies: { path: string; type: string }[];
+  dependents: { path: string }[];
+  packageDeps: { name: string; version: string; isDev: boolean }[];
+};
+
+// ─── Directory detail types ───────────────────────────────────────────────────
+
+export type DirDetail = {
+  path: string;
+  name: string;
+  totalFiles: number;
+  avgImportance: number;
+  pctWithSummary: number;
+  pctStale: number;
+  topFiles: { path: string; name: string; importance: number }[];
+};
+
+// ─── Fetch wrappers ───────────────────────────────────────────────────────────
+
+export async function fetchTree(repoName: string, dirPath?: string): Promise<TreeResponse> {
+  const base = `/api/project/${encodeURIComponent(repoName)}/tree`;
+  const url = dirPath ? `${base}/${dirPath}` : base;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Tree fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchFileDetail(repoName: string, filePath: string): Promise<FileDetail> {
+  const res = await fetch(`/api/project/${encodeURIComponent(repoName)}/file/${filePath}`);
+  if (!res.ok) throw new Error(`File detail fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDirDetail(repoName: string, dirPath: string): Promise<DirDetail> {
+  const res = await fetch(`/api/project/${encodeURIComponent(repoName)}/dir/${dirPath}`);
+  if (!res.ok) throw new Error(`Dir detail fetch failed: ${res.status}`);
+  return res.json();
+}
