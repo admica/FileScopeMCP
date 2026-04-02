@@ -35,10 +35,10 @@ Requirements for the Nexus milestone. Read-only web dashboard that opens existin
 
 ### File Tree & Detail Panel
 
-- [ ] **NEXUS-15**: Collapsible directory tree in left panel — directories first, then files alphabetically, lazy-load on expand
-- [ ] **NEXUS-16**: htmx partial swaps for tree expand/collapse and detail panel loading (no full-page reloads)
+- [x] **NEXUS-15**: Collapsible directory tree in left panel — directories first, then files alphabetically, lazy-load on expand
+- [x] **NEXUS-16**: htmx partial swaps for tree expand/collapse and detail panel loading (no full-page reloads)
 - [ ] **NEXUS-17**: File detail panel renders: summary (or "Pending..."), importance score, ConceptsResult (purpose + tag groups for functions/classes/interfaces/exports), ChangeImpactResult (risk badge + summary + lists), dependencies (clickable), dependents (clickable), package dependencies with versions, per-field staleness, ExportSnapshot (name, kind, signature)
-- [ ] **NEXUS-18**: Directory detail panel renders: total files, average importance, % with summaries, % stale, top files by importance (clickable)
+- [x] **NEXUS-18**: Directory detail panel renders: total files, average importance, % with summaries, % stale, top files by importance (clickable)
 
 ### Dependency Graph
 
@@ -133,10 +133,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NEXUS-12 | Phase 20 | Complete |
 | NEXUS-13 | Phase 20 | Complete |
 | NEXUS-14 | Phase 20 | Complete |
-| NEXUS-15 | Phase 21 | Pending |
-| NEXUS-16 | Phase 21 | Pending |
+| NEXUS-15 | Phase 21 | Complete |
+| NEXUS-16 | Phase 21 | Complete |
 | NEXUS-17 | Phase 21 | Pending |
-| NEXUS-18 | Phase 21 | Pending |
+| NEXUS-18 | Phase 21 | Complete |
 | NEXUS-19 | Phase 22 | Pending |
 | NEXUS-20 | Phase 22 | Pending |
 | NEXUS-21 | Phase 22 | Pending |

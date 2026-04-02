@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Phase complete — ready for verification
-stopped_at: Completed 20-03-PLAN.md
-last_updated: "2026-04-01T20:01:08.846Z"
-last_activity: 2026-04-01
+status: Ready to execute
+stopped_at: Completed 21-01-PLAN.md — tree/file/dir API endpoints
+last_updated: "2026-04-02T03:40:14.411Z"
+last_activity: 2026-04-02
 progress:
   total_phases: 9
   completed_phases: 5
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 13
+  completed_plans: 12
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-01)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 20 — server-skeleton-repo-discovery
+**Current focus:** Phase 21 — file-tree-detail-panel
 
 ## Current Position
 
-Phase: 20 (server-skeleton-repo-discovery) — EXECUTING
-Plan: 3 of 3
+Phase: 21 (file-tree-detail-panel) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -60,6 +60,8 @@ v1.3 key decisions:
 - [Phase 20-server-skeleton-repo-discovery]: Tailwind v4 dark-mode-only via :root CSS custom properties — no dark: prefix needed without light mode toggle
 - [Phase 20-server-skeleton-repo-discovery]: postbuild:nexus-api uses grep -q guard so shebang prepend is idempotent — safe to run repeatedly
 - [Phase 20-server-skeleton-repo-discovery]: build:nexus chains npm run build first to produce dist/broker/config.js before nexus backend compiles
+- [Phase 21]: Wildcard routes use req.params['*'] for unencoded file paths — encoding breaks Fastify wildcard matching
+- [Phase 21]: Non-wildcard /tree registered before /tree/* wildcard — Fastify v5 is order-sensitive
 
 ### Pending Todos
 
@@ -79,9 +81,10 @@ None.
 | Phase 20-server-skeleton-repo-discovery P01 | 4 | 2 tasks | 5 files |
 | Phase 20-server-skeleton-repo-discovery P02 | 141s | 2 tasks | 13 files |
 | Phase 20-server-skeleton-repo-discovery P03 | 5 | 2 tasks | 1 files |
+| Phase 21 P01 | 2 | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last activity: 2026-04-01
-Stopped at: Completed 20-03-PLAN.md
+Last activity: 2026-04-02
+Stopped at: Completed 21-01-PLAN.md — tree/file/dir API endpoints
 Resume file: None

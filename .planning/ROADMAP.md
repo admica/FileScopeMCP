@@ -148,9 +148,9 @@ Plans:
   2. Clicking a file in the tree loads its detail panel via htmx partial swap (no full-page reload) showing: summary, importance, concepts (purpose + tag groups), change impact (risk badge + summary + lists), dependencies (clickable), dependents (clickable), package deps, staleness per field, and exports
   3. Clicking a directory shows aggregate stats: file count, average importance, % with summaries, % stale, and top files by importance (clickable)
   4. Tree expand/collapse is lazy — child nodes load via htmx when a directory is clicked, not all at once on page load
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 21-01-PLAN.md — Backend API routes + SQLite queries + frontend fetch wrappers and types
+- [x] 21-01-PLAN.md — Backend API routes + SQLite queries + frontend fetch wrappers and types
 - [ ] 21-02-PLAN.md — Svelte components: FileTree, DetailPanel, FileDetail, DirDetail, router extension, resizable layout
 
 ### Phase 22: Dependency Graph
@@ -210,7 +210,7 @@ Plans:
 | 18. Cleanup | v1.2 | 2/2 | Complete | 2026-03-22 |
 | 19. Observability | v1.2 | 2/2 | Complete | 2026-03-23 |
 | 20. Server Skeleton + Repo Discovery | v1.3 | 3/3 | Complete    | 2026-04-01 |
-| 21. File Tree + Detail Panel | v1.3 | 0/2 | Planned | -- |
+| 21. File Tree + Detail Panel | v1.3 | 1/2 | In Progress|  |
 | 22. Dependency Graph | v1.3 | 0/? | Pending | -- |
 | 23. System View + Live Activity | v1.3 | 0/? | Pending | -- |
 | 24. Polish | v1.3 | 0/? | Pending | -- |
