@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
 status: Phase complete — ready for verification
-stopped_at: "Checkpoint: Task 3 human-verify — visual verification of dependency graph needed"
-last_updated: "2026-04-02T05:19:12.177Z"
+stopped_at: Completed 22-02-PLAN.md
+last_updated: "2026-04-02T13:30:12.507Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 9
@@ -69,6 +69,7 @@ v1.3 key decisions:
 - [Phase 22-dependency-graph]: cytoscape.use(fcose) at module level prevents duplicate registration if component re-mounts
 - [Phase 22-dependency-graph]: Graph routes parsed before /file/ and /dir/ in hash parser to avoid route collision
 - [Phase 22-dependency-graph]: flex-1 min-h-0 on graph container required for Cytoscape height calculation
+- [Phase 22-dependency-graph]: onFilterChange callback in DependencyGraph: allows parent to set graphFilterDir from inside graph (D-12 trigger)
 
 ### Pending Todos
 
@@ -91,10 +92,10 @@ None.
 | Phase 21 P01 | 2 | 2 tasks | 3 files |
 | Phase 21-file-tree-detail-panel P02 | 4min | 3 tasks | 10 files |
 | Phase 22-dependency-graph P01 | 2min | 2 tasks | 4 files |
-| Phase 22-dependency-graph P02 | 220 | 2 tasks | 4 files |
+| Phase 22-dependency-graph P02 | 4min | 3 tasks | 4 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-02
-Stopped at: Checkpoint: Task 3 human-verify — visual verification of dependency graph needed
+Stopped at: Completed 22-02-PLAN.md
 Resume file: None
