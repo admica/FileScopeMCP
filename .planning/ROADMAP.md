@@ -61,7 +61,7 @@ See: ROADMAP.md Phase Details below for full phase details (not yet archived).
 - [x] **Phase 20: Server Skeleton + Repo Discovery** (3 plans) — Fastify server, CLI entry point, nexus.json registry, auto-discovery, per-repo read-only DB connections, Svelte 5 SPA with navbar, hash routing, stats card, static file serving, graceful shutdown (completed 2026-04-01)
 - [x] **Phase 21: File Tree + Detail Panel** (2 plans) — Collapsible directory tree with lazy loading, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel (completed 2026-04-02)
 - [x] **Phase 22: Dependency Graph** (2 plans) — Cytoscape.js interactive dependency map, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree/graph toggle (completed 2026-04-02)
-- [ ] **Phase 23: System View + Live Activity** (2 plans) — Broker status polling via broker.sock, token usage D3 bar chart, SSE log tailing (fs.watch + ring buffer), log line parsing, activity feed with prefix filter
+- [x] **Phase 23: System View + Live Activity** (2 plans) — Broker status polling via broker.sock, token usage D3 bar chart, SSE log tailing (fs.watch + ring buffer), log line parsing, activity feed with prefix filter (completed 2026-04-02)
 - [ ] **Phase 24: Polish** — Importance heat colors, staleness icons, tab status indicators, settings page (add/remove repos), responsive layout
 
 ## Phase Details
@@ -178,10 +178,10 @@ Plans:
   2. When broker.sock is unreachable, System view shows "Broker: offline" without errors; token totals fall back to stats.json
   3. GET /api/stream/activity returns an SSE stream of parsed log lines from broker.log and mcp-server.log; new connections receive the last 500 lines from the ring buffer immediately
   4. Log lines are parsed via regex (ISO timestamp + [PREFIX]); the activity feed updates in real time as new log entries appear
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 23-01-PLAN.md — Backend: log-tailer.ts, broker socket query, token stats with session delta, SSE endpoint
-- [ ] 23-02-PLAN.md — Frontend: BrokerStatusBar, TokenChart (D3), ActivityFeed (SSE), System.svelte page layout
+- [x] 23-01-PLAN.md — Backend: log-tailer.ts, broker socket query, token stats with session delta, SSE endpoint
+- [x] 23-02-PLAN.md — Frontend: BrokerStatusBar, TokenChart (D3), ActivityFeed (SSE), System.svelte page layout
 
 ### Phase 24: Polish
 **Goal**: Visual refinements that make the Nexus informative at a glance — importance heat colors, staleness icons, tab status dots, a settings page for repo management, and responsive layout
@@ -220,5 +220,5 @@ Plans:
 | 20. Server Skeleton + Repo Discovery | v1.3 | 3/3 | Complete    | 2026-04-01 |
 | 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete    | 2026-04-02 |
 | 22. Dependency Graph | v1.3 | 2/2 | Complete    | 2026-04-02 |
-| 23. System View + Live Activity | v1.3 | 0/2 | Planned | -- |
+| 23. System View + Live Activity | v1.3 | 2/2 | Complete   | 2026-04-02 |
 | 24. Polish | v1.3 | 0/? | Pending | -- |

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Ready to plan
-stopped_at: Phase 23 context gathered
-last_updated: "2026-04-02T14:31:44.968Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 23-system-view-live-activity-02-PLAN.md
+last_updated: "2026-04-02T15:30:19.912Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 9
-  completed_phases: 7
-  total_plans: 15
-  completed_plans: 15
+  completed_phases: 8
+  total_plans: 17
+  completed_plans: 17
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-01)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 22 — dependency-graph
+**Current focus:** Phase 23 — system-view-live-activity
 
 ## Current Position
 
-Phase: 23
-Plan: Not started
+Phase: 23 (system-view-live-activity) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -70,6 +70,9 @@ v1.3 key decisions:
 - [Phase 22-dependency-graph]: Graph routes parsed before /file/ and /dir/ in hash parser to avoid route collision
 - [Phase 22-dependency-graph]: flex-1 min-h-0 on graph container required for Cytoscape height calculation
 - [Phase 22-dependency-graph]: onFilterChange callback in DependencyGraph: allows parent to set graphFilterDir from inside graph (D-12 trigger)
+- [Phase 23-system-view-live-activity]: Log tailer uses byte-offset tracking so log rotation (file shrink) is detectable; SSE uses reply.hijack() to prevent Fastify interference; queryBrokerStatus creates fresh socket per call for simplicity
+- [Phase 23-system-view-live-activity]: D3 renders via $effect() with clear-then-redraw approach for reactive SVG charts in Svelte 5
+- [Phase 23-system-view-live-activity]: ActivityFeed buffer bounded at 2000 lines, trimmed to 1500 — prevents unbounded memory growth in long SSE sessions
 
 ### Pending Todos
 
@@ -93,9 +96,11 @@ None.
 | Phase 21-file-tree-detail-panel P02 | 4min | 3 tasks | 10 files |
 | Phase 22-dependency-graph P01 | 2min | 2 tasks | 4 files |
 | Phase 22-dependency-graph P02 | 4min | 3 tasks | 4 files |
+| Phase 23-system-view-live-activity P01 | 15min | 2 tasks | 4 files |
+| Phase 23-system-view-live-activity P02 | 3min | 2 tasks | 5 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-02
-Stopped at: Phase 23 context gathered
-Resume file: .planning/phases/23-system-view-live-activity/23-CONTEXT.md
+Stopped at: Completed 23-system-view-live-activity-02-PLAN.md
+Resume file: None
