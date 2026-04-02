@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Ready to execute
-stopped_at: Completed 20-02-PLAN.md
-last_updated: "2026-04-01T19:51:36.998Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 20-03-PLAN.md
+last_updated: "2026-04-01T20:01:08.846Z"
 last_activity: 2026-04-01
 progress:
   total_phases: 9
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
 ---
 
 # Project State
@@ -58,6 +58,8 @@ v1.3 key decisions:
 - [Phase 20-server-skeleton-repo-discovery]: Fastify factory pattern: createServer() returns configured instance, main.ts calls listen() — keeps server testable
 - [Phase 20-server-skeleton-repo-discovery]: Hand-rolled hash router over svelte-spa-router — 3 routes, saves a dependency
 - [Phase 20-server-skeleton-repo-discovery]: Tailwind v4 dark-mode-only via :root CSS custom properties — no dark: prefix needed without light mode toggle
+- [Phase 20-server-skeleton-repo-discovery]: postbuild:nexus-api uses grep -q guard so shebang prepend is idempotent — safe to run repeatedly
+- [Phase 20-server-skeleton-repo-discovery]: build:nexus chains npm run build first to produce dist/broker/config.js before nexus backend compiles
 
 ### Pending Todos
 
@@ -76,9 +78,10 @@ None.
 | 260401-a19 | Fix double change_impact, structured output waste, stale broker, log noise, addFileNode | 2026-04-01 | e81dac8 | [260401-a19](./quick/260401-a19-fix-double-change-impact-and-structured-ou/) |
 | Phase 20-server-skeleton-repo-discovery P01 | 4 | 2 tasks | 5 files |
 | Phase 20-server-skeleton-repo-discovery P02 | 141s | 2 tasks | 13 files |
+| Phase 20-server-skeleton-repo-discovery P03 | 5 | 2 tasks | 1 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-01
-Stopped at: Completed 20-02-PLAN.md
+Stopped at: Completed 20-03-PLAN.md
 Resume file: None
