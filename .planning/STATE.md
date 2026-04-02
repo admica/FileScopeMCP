@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Ready to execute
-stopped_at: Completed 21-01-PLAN.md — tree/file/dir API endpoints
-last_updated: "2026-04-02T03:40:14.411Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 21-02-PLAN.md — file tree and detail panel Svelte components
+last_updated: "2026-04-02T03:48:38.757Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 9
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 13
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -62,6 +62,8 @@ v1.3 key decisions:
 - [Phase 20-server-skeleton-repo-discovery]: build:nexus chains npm run build first to produce dist/broker/config.js before nexus backend compiles
 - [Phase 21]: Wildcard routes use req.params['*'] for unencoded file paths — encoding breaks Fastify wildcard matching
 - [Phase 21]: Non-wildcard /tree registered before /tree/* wildcard — Fastify v5 is order-sensitive
+- [Phase 21-file-tree-detail-panel]: Svelte 5 {#snippet renderEntries} for recursive tree — avoids Svelte 4 self-referencing component pattern; snippets are first-class in Svelte 5
+- [Phase 21-file-tree-detail-panel]: filePath/dirPath not encoded in URL hash — they contain forward slashes required for path structure; only repoName encoded as single segment
 
 ### Pending Todos
 
@@ -82,9 +84,10 @@ None.
 | Phase 20-server-skeleton-repo-discovery P02 | 141s | 2 tasks | 13 files |
 | Phase 20-server-skeleton-repo-discovery P03 | 5 | 2 tasks | 1 files |
 | Phase 21 P01 | 2 | 2 tasks | 3 files |
+| Phase 21-file-tree-detail-panel P02 | 4min | 3 tasks | 10 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-02
-Stopped at: Completed 21-01-PLAN.md — tree/file/dir API endpoints
+Stopped at: Completed 21-02-PLAN.md — file tree and detail panel Svelte components
 Resume file: None
