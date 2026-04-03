@@ -1,4 +1,4 @@
-FROM qwen2.5-coder:7b-instruct-q6_K
+FROM gemma4:e4b
 
 # Parameters
 # 32k context - large source files + prompt + response headroom

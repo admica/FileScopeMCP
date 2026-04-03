@@ -24,7 +24,7 @@ This script will:
 
 - Install Ollama if not present (supports Linux and macOS)
 - Detect GPU hardware (NVIDIA, AMD, Metal) and configure acceleration
-- Pull the base model (`qwen2.5-coder:7b-instruct-q6_K`)
+- Pull the base model (`gemma4:e4b`)
 - Create the custom `FileScopeMCP-brain` model from the Modelfile
 - Verify the installation
 
@@ -81,7 +81,7 @@ You have three options:
 In PowerShell or Command Prompt on Windows:
 
 ```powershell
-ollama pull qwen2.5-coder:7b-instruct-q6_K
+ollama pull gemma4:e4b
 ```
 
 This downloads approximately 5 GB. Wait for it to complete.
@@ -107,7 +107,7 @@ Verify both models are available:
 ollama list
 ```
 
-You should see both `qwen2.5-coder:7b-instruct-q6_K` and `FileScopeMCP-brain` in the output.
+You should see both `gemma4:e4b` and `FileScopeMCP-brain` in the output.
 
 ### Step 5: Configure the broker in WSL
 
@@ -205,7 +205,7 @@ curl http://<ollama-ip>:11434/v1/models
 
 ```bash
 # On the remote machine
-ollama pull qwen2.5-coder:7b-instruct-q6_K
+ollama pull gemma4:e4b
 # Copy Modelfile to remote machine (e.g., via scp), then:
 ollama create FileScopeMCP-brain -f Modelfile
 ```

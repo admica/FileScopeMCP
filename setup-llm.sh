@@ -12,7 +12,7 @@
 set -e
 
 # --- Configuration ---
-BASE_MODEL="qwen2.5-coder:7b-instruct-q6_K"
+BASE_MODEL="gemma4:e4b"
 CUSTOM_MODEL="FileScopeMCP-brain"
 OLLAMA_API="http://localhost:11434"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

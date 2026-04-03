@@ -276,7 +276,7 @@ Copy the matching template to `~/.filescope/broker.json` and edit as needed.
 
 ### Custom LLM Model (Modelfile)
 
-The `Modelfile` in the repo root defines the `FileScopeMCP-brain` Ollama model — system prompt, base model (`qwen2.5-coder:7b-instruct-q6_K`), and tuned parameters (`temperature: 0.1`, `num_ctx: 32768`). The system prompt teaches the model all three task types (summary, concepts, change_impact) and enforces output format rules.
+The `Modelfile` in the repo root defines the `FileScopeMCP-brain` Ollama model — system prompt, base model (`gemma4:e4b`), and tuned parameters (`temperature: 0.1`, `num_ctx: 32768`). The system prompt teaches the model all three task types (summary, concepts, change_impact) and enforces output format rules.
 
 To modify: edit `Modelfile`, then run `ollama create FileScopeMCP-brain -f Modelfile`. No broker restart needed.
 

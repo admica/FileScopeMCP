@@ -63,9 +63,10 @@ None.
 |---|-------------|------|--------|-----------|
 | 260323-kgd | Auto-init MCP to CWD, rename set_project_path to set_base_directory | 2026-03-23 | 50b7016 | [260323-kgd](./quick/260323-kgd-auto-init-mcp-to-cwd-rename-set-project-/) |
 | 260324-0yz | Comprehensive documentation update: README and config.example.json for v1.2 | 2026-03-24 | a96b263 | [260324-0yz](./quick/260324-0yz-comprehensive-documentation-update-readm/) |
+| 260402-u6p | Rewrite README.md to accurately reflect current codebase; extract Ollama guides to docs/ollama-setup.md | 2026-04-02 | 539f00b | [260402-u6p](./quick/260402-u6p-rewrite-readme-md-to-accurately-reflect-/) |
 
 ## Session Continuity
 
-Last activity: 2026-03-24 - Started milestone v1.3 Nexus
-Stopped at: Defining requirements
+Last activity: 2026-04-02 - Rewrote README.md (1020→431 lines) and created docs/ollama-setup.md
+Stopped at: Defining requirements (v1.3 Nexus)
 Resume file: None
