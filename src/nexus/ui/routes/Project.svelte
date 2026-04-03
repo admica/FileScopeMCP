@@ -18,6 +18,8 @@
   } = $props();
 
   let treeWidth = $state(30); // percent
+  let treeCollapsed = $state(false);
+  let viewportWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1920);
 
   // ─── Graph state ──────────────────────────────────────────────────────────
   let graphNodes: GraphNode[] = $state([]);
@@ -84,9 +86,31 @@
       graphLoading = false;
     });
   });
+
+  // ─── Responsive collapse ──────────────────────────────────────────────────
+  $effect(() => {
+    function onResize() {
+      viewportWidth = window.innerWidth;
+      if (viewportWidth >= 1280 && treeCollapsed) treeCollapsed = false;
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  let showCollapseToggle = $derived(viewportWidth < 1280);
 </script>
 
-<div class="flex flex-1 overflow-hidden" style="height: calc(100vh - 3rem)">
+<div class="relative flex flex-1 overflow-hidden" style="height: calc(100vh - 3rem)">
+  {#if showCollapseToggle || treeCollapsed}
+    <button
+      class="absolute top-14 left-2 z-10 p-1.5 bg-gray-800 border border-gray-600 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
+      onclick={() => treeCollapsed = !treeCollapsed}
+      aria-label="Toggle file tree"
+    >
+      {treeCollapsed ? '\u2630' : '\u2715'}
+    </button>
+  {/if}
+  {#if !treeCollapsed}
   <!-- Left panel: file tree or dependency graph -->
   <div class="flex flex-col overflow-hidden border-r border-gray-700" style="width: {treeWidth}%">
     <!-- Toggle: Tree | Graph -->
@@ -143,6 +167,7 @@
     class="w-1 bg-gray-700 hover:bg-blue-500 cursor-col-resize flex-shrink-0 transition-colors"
     onpointerdown={onDividerPointerDown}
   ></div>
+  {/if}
 
   <!-- Right panel: detail -->
   <div class="flex-1 overflow-y-auto">
