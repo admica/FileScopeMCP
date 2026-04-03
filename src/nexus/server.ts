@@ -7,12 +7,13 @@ import fastifyStatic from '@fastify/static';
 import * as net from 'node:net';
 import * as readline from 'node:readline';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { SOCK_PATH, CONFIG_PATH } from '../broker/config.js';
 import type { StatusResponse } from '../broker/types.js';
 import { readStats } from '../broker/stats.js';
 import { getRecentLines, addSseClient } from './log-tailer.js';
-import { getRepos, getDb, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
+import { getRepos, getDb, getStaleCount, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
 
 // ─── Broker socket query ──────────────────────────────────────────────────────
 
@@ -76,13 +77,31 @@ export async function createServer(options: {
 
   // ─── API Routes ───────────────────────────────────────────────────────────
 
-  // GET /api/repos — list all repos with online status
+  // GET /api/repos — list all repos with online status, stale count, and db mtime
   app.get('/api/repos', async (_req, _reply) => {
-    return getRepos().map((r) => ({
-      name: r.name,
-      path: r.path,
-      online: r.online,
-    }));
+    return getRepos().map((r) => {
+      let dbMtimeMs: number | null = null;
+      let staleCount = 0;
+
+      if (r.online && r.db) {
+        // Check data.db mtime for activity heuristic
+        try {
+          const dbPath = path.join(r.path, '.filescope', 'data.db');
+          dbMtimeMs = fs.statSync(dbPath).mtimeMs;
+        } catch { /* file may be inaccessible */ }
+
+        // Count stale files for orange dot
+        staleCount = getStaleCount(r.db);
+      }
+
+      return {
+        name: r.name,
+        path: r.path,
+        online: r.online,
+        staleCount,
+        dbMtimeMs,
+      };
+    });
   });
 
   // GET /api/project/:repoName/stats — aggregate stats from repo's data.db

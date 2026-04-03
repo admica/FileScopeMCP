@@ -1,4 +1,10 @@
-export type RepoListItem = { name: string; path: string; online: boolean };
+export type RepoListItem = {
+  name: string;
+  path: string;
+  online: boolean;
+  staleCount: number;
+  dbMtimeMs: number | null;
+};
 export type RepoStats = {
   totalFiles: number;
   withSummary: number;

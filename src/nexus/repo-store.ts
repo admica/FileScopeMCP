@@ -1,7 +1,7 @@
 // src/nexus/repo-store.ts
 // Per-repo read-only better-sqlite3 connection management for Nexus.
 // Exports: RepoState, openRepo, getRepos, getDb, closeAll, recheckOffline, getRepoStats,
-//          getTreeEntries, getFileDetail, getDirDetail
+//          getStaleCount, getTreeEntries, getFileDetail, getDirDetail
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -127,6 +127,16 @@ export function getRepoStats(db: InstanceType<typeof Database>): object {
     staleCount: row.stale_count,
     totalDeps: depsRow.total_deps,
   };
+}
+
+/**
+ * Count files with any stale metadata field in a repo's database.
+ */
+export function getStaleCount(db: InstanceType<typeof Database>): number {
+  const row = db.prepare(
+    'SELECT COUNT(*) AS n FROM files WHERE is_directory = 0 AND (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL OR change_impact_stale_since IS NOT NULL)'
+  ).get() as { n: number };
+  return row.n;
 }
 
 // ─── Tree / Detail Query Types ────────────────────────────────────────────────
