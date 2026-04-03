@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
 status: Ready to execute
-stopped_at: Completed 24-polish-02-PLAN.md
-last_updated: "2026-04-03T15:06:39.101Z"
+stopped_at: Completed 24-polish-01-PLAN.md
+last_updated: "2026-04-03T15:09:41.396Z"
 last_activity: 2026-04-03
 progress:
   total_phases: 9
   completed_phases: 8
   total_plans: 20
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-01)
 ## Current Position
 
 Phase: 24 (polish) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -75,6 +75,8 @@ v1.3 key decisions:
 - [Phase 23-system-view-live-activity]: ActivityFeed buffer bounded at 2000 lines, trimmed to 1500 — prevents unbounded memory growth in long SSE sessions
 - [Phase 24-polish]: 5-minute threshold for 'recent' data.db mtime — intuitive window for MCP activity detection
 - [Phase 24-polish]: Orange dot when staleCount > 0 but not recent — distinguishes active-processing (green) from queued-idle (orange)
+- [Phase 24-polish]: absolute left-0 top-0 bottom-0 w-0.5 span inside relative button pins 2px heat bar to row left edge regardless of depth indentation padding
+- [Phase 24-polish]: treeCollapsed gates both tree and graph views — same panel, same toggle behavior
 
 ### Pending Todos
 
@@ -101,9 +103,10 @@ None.
 | Phase 23-system-view-live-activity P01 | 15min | 2 tasks | 4 files |
 | Phase 23-system-view-live-activity P02 | 3min | 2 tasks | 5 files |
 | Phase 24-polish P02 | 10 | 2 tasks | 5 files |
+| Phase 24-polish P01 | 129s | 2 tasks | 2 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-03
-Stopped at: Completed 24-polish-02-PLAN.md
+Stopped at: Completed 24-polish-01-PLAN.md
 Resume file: None

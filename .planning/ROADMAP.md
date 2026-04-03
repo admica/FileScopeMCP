@@ -193,9 +193,9 @@ Plans:
   2. Navbar tabs show a status dot: green (MCP instance connected per broker), gray (no active instance), orange (repo has stale files)
   3. GET /settings renders a page where users can add a repo by path and remove existing repos; changes take effect immediately (DB opened/closed, tab appears/disappears) without server restart
   4. Layout remains usable at viewport widths from 1024px to 2560px
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 Plans:
-- [ ] 24-01-PLAN.md — Tree visual indicators (heat color bars, staleness icons) and responsive collapsible layout
+- [x] 24-01-PLAN.md — Tree visual indicators (heat color bars, staleness icons) and responsive collapsible layout
 - [x] 24-02-PLAN.md — Tab status dots (backend /api/repos extension, Navbar dots, 30s polling)
 - [ ] 24-03-PLAN.md — Settings page (blacklist schema, remove/restore API, Settings.svelte rewrite)
 
@@ -226,4 +226,4 @@ Plans:
 | 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete    | 2026-04-02 |
 | 22. Dependency Graph | v1.3 | 2/2 | Complete    | 2026-04-02 |
 | 23. System View + Live Activity | v1.3 | 2/2 | Complete    | 2026-04-02 |
-| 24. Polish | v1.3 | 1/3 | In Progress|  |
+| 24. Polish | v1.3 | 2/3 | In Progress|  |

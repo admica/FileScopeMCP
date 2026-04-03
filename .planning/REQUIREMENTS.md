@@ -60,11 +60,11 @@ Requirements for the Nexus milestone. Read-only web dashboard that opens existin
 
 ### Navigation & Settings (Polish)
 
-- [ ] **NEXUS-31**: Importance displayed as heat-colored indicator on file tree entries (gray→blue→green→yellow→red for 0→10)
-- [ ] **NEXUS-32**: Per-file staleness icon in tree (⟳ stale, ✓ fresh)
+- [x] **NEXUS-31**: Importance displayed as heat-colored indicator on file tree entries (gray→blue→green→yellow→red for 0→10)
+- [x] **NEXUS-32**: Per-file staleness icon in tree (⟳ stale, ✓ fresh)
 - [x] **NEXUS-33**: Tab status indicators on navbar: green dot (MCP instance connected), gray dot (no active instance), orange dot (stale files pending)
 - [ ] **NEXUS-34**: Settings page: add repo (POST /api/repos {path, name?}), remove repo (DELETE /api/repos/:repoName), updates nexus.json and opens/closes DB connections immediately
-- [ ] **NEXUS-35**: Responsive layout adapting to different screen widths
+- [x] **NEXUS-35**: Responsive layout adapting to different screen widths
 
 ## Future Requirements
 
@@ -149,11 +149,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NEXUS-28 | Phase 23 | Complete |
 | NEXUS-29 | Phase 23 | Complete |
 | NEXUS-30 | Phase 23 | Complete |
-| NEXUS-31 | Phase 24 | Pending |
-| NEXUS-32 | Phase 24 | Pending |
+| NEXUS-31 | Phase 24 | Complete |
+| NEXUS-32 | Phase 24 | Complete |
 | NEXUS-33 | Phase 24 | Complete |
 | NEXUS-34 | Phase 24 | Pending |
-| NEXUS-35 | Phase 24 | Pending |
+| NEXUS-35 | Phase 24 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 35 total
