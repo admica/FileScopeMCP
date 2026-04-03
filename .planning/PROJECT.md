@@ -2,28 +2,24 @@
 
 ## What This Is
 
-A fully autonomous file intelligence system that watches project directories and maintains rich, up-to-date metadata about every file — summaries, relationships, key concepts, and change impact — so LLMs can query structured knowledge about a codebase without reading raw files. Runs as a standalone daemon or as an MCP server, with a background LLM that handles all metadata maintenance automatically.
+A fully autonomous file intelligence system that watches project directories and maintains rich, up-to-date metadata about every file — summaries, relationships, key concepts, and change impact — so LLMs can query structured knowledge about a codebase without reading raw files. Includes a standalone LLM broker for cross-repo job coordination and a visual code exploration dashboard (Nexus) for cross-repo observability.
 
 ## Core Value
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
-## Current Milestone: v1.3 Nexus
+## Current State
 
-**Goal:** Read-only web dashboard that opens existing per-repo databases and log files directly — cross-repo observability without a new daemon or protocol.
+Shipped v1.3 Nexus (2026-04-03). All four milestones complete.
 
-**Target features:**
-- Fastify JSON API server + Svelte 5 SPA (Vite + Tailwind CSS, dark mode only)
-- Interactive dependency map via Cytoscape.js, auxiliary charts via D3.js
-- Repo discovery: `~/.filescope/nexus.json` registry with 2-level auto-discovery fallback
-- Per-repo file tree with importance heat colors, staleness indicators, and lazy directory expansion
-- File detail panel: summary, concepts, change impact, exports, dependencies/dependents, staleness
-- D3 force-directed dependency graph with hover/click interactions and directory filtering
-- System view: broker status (via broker.sock), per-repo token stats, live activity feed
-- SSE log tailing of broker.log and mcp-server.log via fs.watch() + ring buffer
-- CLI entry point (`filescope-nexus`) with `--port` and `--host` flags, default `0.0.0.0:1234`
-- Read-only SQLite access (WAL mode, re-query per request), no writes to any FileScopeMCP data
-- Graceful degradation (broker down = "offline" badge, repo DB missing = "offline" tab)
+**Architecture:**
+- MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface
+- LLM broker (singleton): standalone process coordinating all Ollama access via Unix socket IPC
+- Nexus dashboard: Fastify API + Svelte 5 SPA at 0.0.0.0:1234, read-only SQLite access
+
+**Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter, chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js
+
+**Codebase:** ~13K LOC TypeScript | 250+ tests passing | 24 phases shipped across 4 milestones
 
 ## Requirements
 
@@ -77,17 +73,22 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - ✓ Config migration: LLM model config moved to broker, instance has enabled-only — v1.2
 - ✓ Broker status reporting via MCP tool — v1.2
 - ✓ Remove legacy llm_jobs/llm_runtime_state tables and local job queue — v1.2
-- ✓ Interactive dependency map via Cytoscape.js — v1.3 (Phase 22)
-- ✓ File detail panel (summary, concepts, deps, staleness) — v1.3 (Phase 21)
+- ✓ Fastify JSON API + Svelte 5 SPA dashboard with auto-discovery — v1.3
+- ✓ Interactive dependency map via Cytoscape.js — v1.3
+- ✓ File tree with importance heat colors, staleness icons, lazy expand — v1.3
+- ✓ File detail panel (summary, concepts, change impact, deps, exports, staleness) — v1.3
+- ✓ Directory aggregate panel (file count, avg importance, % stale) — v1.3
+- ✓ System view with broker status and per-repo token stats — v1.3
+- ✓ SSE log tailing with ring buffer and live activity feed — v1.3
+- ✓ Navbar repo health status dots (green/orange/gray) — v1.3
+- ✓ Settings page with repo remove/blacklist/restore management — v1.3
+- ✓ Responsive collapsible layout for project view — v1.3
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-- Fastify JSON API + Svelte 5 SPA dashboard — v1.3 (Phase 20 delivered server + SPA scaffold)
-- Per-repo file tree with importance heat colors — v1.3
-- System view with broker status and token stats — v1.3
-- SSE log tailing — v1.3
+(None — planning next milestone)
 
 ### Out of Scope
 
@@ -104,20 +105,14 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 - Multi-GPU / concurrent broker workers — design supports it, implement when needed
 - Broker hot-reload of config/model — restart broker to change config
 - Formal version handshake between broker and instances — defer to future milestone
+- Authentication / access control for Nexus — read-only viewer on trusted LAN, no secrets exposed
+- WebSocket transport for Nexus — SSE sufficient for log streaming, no bidirectional needed
 
 ## Context
 
-Shipped v1.0 (9 phases, 9,515 LOC), v1.1 (6 phases, hardening + language support), and v1.2 (4 phases, LLM broker). 250+ tests passing. The system is a complete autonomous file intelligence platform with a standalone LLM broker coordinating all Ollama access.
+Shipped v1.0 (9 phases, 9,515 LOC), v1.1 (6 phases, hardening + language support), v1.2 (4 phases, LLM broker), and v1.3 (5 phases, Nexus dashboard). 250+ tests passing. The system is a complete autonomous file intelligence platform with a standalone LLM broker and a visual code exploration dashboard.
 
-v1.3 builds the Nexus — a visual code exploration dashboard that opens existing per-repo SQLite databases and log files to provide cross-repo observability. No new daemon or IPC protocol — the data already exists. Architecture fully designed in NEXUS-PLAN.md. Fastify API + Svelte 5 SPA + Cytoscape.js/D3 + Tailwind dark mode, accessible on the LAN at `0.0.0.0:1234`.
-
-**Phase 20 complete** (2026-04-01): Server skeleton + repo discovery — Fastify backend with CLI entry, 2-level repo auto-discovery, read-only SQLite connections, JSON API, Svelte 5 SPA with hash router, dark navbar, stats cards.
-
-**Phase 21 complete** (2026-04-02): File tree + detail panel — collapsible directory tree with lazy loading, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel.
-
-**Phase 22 complete** (2026-04-02): Dependency graph — Cytoscape.js interactive dependency map with fcose layout, importance-based node sizing, directory-based coloring, hover highlighting, click-to-detail navigation, directory subtree filter, tree/graph toggle.
-
-Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK.
+Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
 
 ## Constraints
 
@@ -145,6 +140,12 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | Unix domain socket over TCP/HTTP | Local-only, no port conflicts, fast IPC | ✓ Good |
 | Broker builds prompts | Avoids Zod schema serialization; centralizes LLM interaction | ✓ Good |
 | No dual-mode fallback | Broker or no LLM — single code path, no complexity | ✓ Good |
+| Read-only dashboard over event daemon | All data already in data.db/broker.log/stats.json — no middleman | ✓ Good |
+| Svelte 5 + Vite over htmx templates | Rich interactivity (graph, tree, SSE) needs client-side framework | ✓ Good |
+| Cytoscape.js for dependency graph | Mature graph library with built-in layout algorithms and interactions | ✓ Good |
+| Hash-based routing (hand-rolled) | Only ~5 routes, avoids a dependency | ✓ Good |
+| Auto-discovery + blacklist over manual add | Repos appear automatically, users only manage removals | ✓ Good |
+| Per-request SQLite queries (no cache) | Sync reads ~1ms via better-sqlite3, caching adds complexity | ✓ Good |
 
 ## Evolution
 
@@ -164,4 +165,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-02 after Phase 22 completion*
+*Last updated: 2026-04-03 after v1.3 Nexus milestone*

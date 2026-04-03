@@ -48,21 +48,135 @@
 
 ---
 
+## Milestone: v1.1 — Hardening
+
+**Shipped:** 2026-03-20
+**Phases:** 6 | **Plans:** 11
+
+### What Was Built
+- BFS transitive importance propagation with cycle safety
+- .filescopeignore with full gitignore semantics
+- Go and Ruby language support
+- Streaming async directory scan with two-pass SQLite integration
+- mtime-based lazy validation replacing polling integrity sweep
+- Cycle detection via iterative Tarjan's SCC
+
+### What Worked
+- Small focused phases (1-2 plans each) shipped in 2 days
+- Each phase was independent — minimal cross-phase dependencies
+- Code quality phase (10) at the start cleaned up technical debt before adding features
+
+### What Was Inefficient
+- No retrospective entry was created — lesson learned retroactively
+
+### Patterns Established
+- Language support follows a consistent pattern: parser function + test file + integration into dependency resolver
+
+### Key Lessons
+1. Hardening milestones (code quality + language support + performance) are fast because phases are independent
+
+---
+
+## Milestone: v1.2 — LLM Broker
+
+**Shipped:** 2026-03-23
+**Phases:** 4 | **Plans:** 8
+
+### What Was Built
+- Standalone broker process with Unix socket IPC and in-memory priority queue
+- Instance-side broker client with auto-spawn and reconnection
+- Full legacy cleanup (dropped llm_jobs tables, deleted pipeline.ts, rate-limiter.ts)
+- Per-repo token stats and broker status reporting via MCP tool
+
+### What Worked
+- 4-phase architecture (core → client → cleanup → observability) was a clean dependency chain
+- Cleanup phase (18) as a dedicated step ensured no dead code lingered
+- Broker prompt centralization simplified the instance dramatically
+
+### What Was Inefficient
+- No retrospective entry was created at milestone completion
+
+### Patterns Established
+- NDJSON over Unix domain socket for local IPC
+- PID-guarded singleton processes with stale cleanup on startup
+- Stats.json for persistent cross-session token accounting
+
+### Key Lessons
+1. Dedicated cleanup phase after major architectural changes (broker replacing local LLM pipeline) is worth the overhead
+2. Auto-spawn pattern (first client spawns broker) eliminates "start the broker first" friction
+
+---
+
+## Milestone: v1.3 — Nexus
+
+**Shipped:** 2026-04-03
+**Phases:** 5 | **Plans:** 12
+
+### What Was Built
+- Fastify JSON API server with 2-level auto-discovery of FileScopeMCP repos
+- Svelte 5 SPA with Vite + Tailwind dark mode, hash-based routing
+- Two-panel code explorer: lazy file tree, file/directory detail panels
+- Cytoscape.js interactive dependency graph with fcose layout and directory filtering
+- System view: broker status, D3 token bar chart, SSE activity feed
+- Visual polish: importance heat bars, staleness icons, navbar status dots, responsive layout
+- Settings page with repo remove/blacklist/restore management
+
+### What Worked
+- 3-day build from scratch to polished dashboard — tight scope kept velocity high
+- Read-only design eliminated write complexity (no auth, no transactions, no conflicts)
+- Building on existing data (data.db, broker.sock, stats.json) meant zero new data infrastructure
+- Phase-per-view structure (file tree → graph → system → polish) gave clear daily milestones
+- Svelte 5 runes + snippets enabled clean reactive patterns without boilerplate
+
+### What Was Inefficient
+- No VERIFICATION.md for any phase — integration checker was used as substitute
+- Stack decision changed mid-planning (htmx → Svelte 5) — initial planning docs referenced htmx
+- STATE.md accumulated per-phase decisions that belonged in SUMMARY.md — became a wall of text
+
+### Patterns Established
+- Fastify factory pattern (createServer returns configured instance)
+- Svelte 5 {#snippet} for recursive tree rendering
+- $effect() with clear-then-redraw for D3 in Svelte 5
+- SSE via reply.hijack() in Fastify with raw response headers
+- Auto-discovery + blacklist as repo management model
+
+### Key Lessons
+1. Read-only dashboards over existing data are high-value/low-effort — no new daemon, no new protocol, just queries
+2. Svelte 5 runes are a natural fit for reactive dashboards with rich state
+3. Phase verification (VERIFICATION.md) should not be skipped even for fast milestones — the integration checker caught what phases missed
+4. A 3-day milestone is achievable when scope is tight and data infrastructure already exists
+
+### Cost Observations
+- Model mix: sonnet for execution agents, opus for orchestration
+- Sessions: ~8 across 3 days
+- Notable: fastest milestone yet (3 days, 5 phases) despite being the most visible product
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
 
-| Milestone | Phases | Plans | Key Change |
-|-----------|--------|-------|------------|
-| v1.0 | 9 | 19 | Established audit-before-ship pattern |
+| Milestone | Phases | Plans | Days | Key Change |
+|-----------|--------|-------|------|------------|
+| v1.0 | 9 | 19 | 17 | Established audit-before-ship pattern |
+| v1.1 | 6 | 11 | 2 | Independent phases, no cross-phase deps |
+| v1.2 | 4 | 8 | 4 | Dedicated cleanup phase after architecture change |
+| v1.3 | 5 | 12 | 3 | Integration checker as verification substitute |
 
 ### Cumulative Quality
 
 | Milestone | Tests | Requirements | Verified |
 |-----------|-------|-------------|----------|
 | v1.0 | 180 | 28 | 28/28 (100%) |
+| v1.1 | 220+ | 7 | via audit |
+| v1.2 | 250+ | 12 | via audit |
+| v1.3 | 250+ | 35 | 35/35 via integration checker |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Milestone audit before shipping catches integration issues that phase-level testing misses
 2. Verification documentation should be part of implementation, not a separate phase
+3. Read-only dashboards over existing data are high-value/low-effort (v1.3)
+4. Dedicated cleanup phases after major architecture changes prevent dead code accumulation (v1.2)
+5. Fast milestones (2-3 days) are achievable when scope is tight and phases are independent (v1.1, v1.3)

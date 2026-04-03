@@ -122,3 +122,13 @@ None - no external service configuration required.
 - Phase 23 is now complete: all three backend endpoints (Plan 01) and full System tab UI (Plan 02) delivered
 - System tab shows live broker status, token usage, and activity feed when Nexus server is running
 - Phase 24 can proceed: settings page, file tree heat colors, staleness indicators per the roadmap
+
+## Self-Check: PASSED
+
+- FOUND: src/nexus/ui/lib/api.ts
+- FOUND: src/nexus/ui/components/BrokerStatusBar.svelte
+- FOUND: src/nexus/ui/components/TokenChart.svelte
+- FOUND: src/nexus/ui/components/ActivityFeed.svelte
+- FOUND: src/nexus/ui/routes/System.svelte
+- FOUND commit: ef8fed8 (Task 1)
+- FOUND commit: 33eb3fe (Task 2)

@@ -110,6 +110,12 @@ None - no external service configuration required.
 - Settings page provides repo lifecycle management: auto-discovery adds repos, Settings removes/restores them
 - Blacklist persists in nexus.json and survives server restarts
 
+## Self-Check: PASSED
+
+- All 7 modified files exist on disk
+- Commits 8fd2510 and 27c6392 verified in git log
+- npm run build:nexus completes without errors
+
 ---
 *Phase: 24-polish*
 *Completed: 2026-04-03*
