@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Phase complete — ready for verification
-stopped_at: Completed 23-system-view-live-activity-02-PLAN.md
-last_updated: "2026-04-02T15:30:19.912Z"
-last_activity: 2026-04-02
+status: Ready to execute
+stopped_at: Completed 24-polish-02-PLAN.md
+last_updated: "2026-04-03T15:06:39.101Z"
+last_activity: 2026-04-03
 progress:
   total_phases: 9
   completed_phases: 8
-  total_plans: 17
-  completed_plans: 17
+  total_plans: 20
+  completed_plans: 18
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-01)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 23 — system-view-live-activity
+**Current focus:** Phase 24 — polish
 
 ## Current Position
 
-Phase: 23 (system-view-live-activity) — EXECUTING
-Plan: 2 of 2
+Phase: 24 (polish) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -73,6 +73,8 @@ v1.3 key decisions:
 - [Phase 23-system-view-live-activity]: Log tailer uses byte-offset tracking so log rotation (file shrink) is detectable; SSE uses reply.hijack() to prevent Fastify interference; queryBrokerStatus creates fresh socket per call for simplicity
 - [Phase 23-system-view-live-activity]: D3 renders via $effect() with clear-then-redraw approach for reactive SVG charts in Svelte 5
 - [Phase 23-system-view-live-activity]: ActivityFeed buffer bounded at 2000 lines, trimmed to 1500 — prevents unbounded memory growth in long SSE sessions
+- [Phase 24-polish]: 5-minute threshold for 'recent' data.db mtime — intuitive window for MCP activity detection
+- [Phase 24-polish]: Orange dot when staleCount > 0 but not recent — distinguishes active-processing (green) from queued-idle (orange)
 
 ### Pending Todos
 
@@ -98,9 +100,10 @@ None.
 | Phase 22-dependency-graph P02 | 4min | 3 tasks | 4 files |
 | Phase 23-system-view-live-activity P01 | 15min | 2 tasks | 4 files |
 | Phase 23-system-view-live-activity P02 | 3min | 2 tasks | 5 files |
+| Phase 24-polish P02 | 10 | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last activity: 2026-04-02
-Stopped at: Completed 23-system-view-live-activity-02-PLAN.md
+Last activity: 2026-04-03
+Stopped at: Completed 24-polish-02-PLAN.md
 Resume file: None

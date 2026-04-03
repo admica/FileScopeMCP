@@ -51,18 +51,18 @@ Requirements for the Nexus milestone. Read-only web dashboard that opens existin
 
 ### System View & Live Activity
 
-- [ ] **NEXUS-25**: System view displays broker status from broker.sock: pending count, in-progress job, connected clients, per-repo token totals
-- [ ] **NEXUS-26**: Broker status polled every 5s; shows "Broker: offline" when broker.sock unreachable (not an error state)
-- [ ] **NEXUS-27**: Per-repo token usage from ~/.filescope/stats.json with totals
-- [ ] **NEXUS-28**: SSE streams for broker.log and mcp-server.log via fs.watch() + byte offset tracking; handles log rotation (size shrink → reset offset)
-- [ ] **NEXUS-29**: Ring buffer of last 500 log lines in memory; new SSE clients receive recent history immediately on connect
-- [ ] **NEXUS-30**: Log lines parsed via regex: extract ISO timestamp and [PREFIX], display remainder as-is
+- [x] **NEXUS-25**: System view displays broker status from broker.sock: pending count, in-progress job, connected clients, per-repo token totals
+- [x] **NEXUS-26**: Broker status polled every 5s; shows "Broker: offline" when broker.sock unreachable (not an error state)
+- [x] **NEXUS-27**: Per-repo token usage from ~/.filescope/stats.json with totals
+- [x] **NEXUS-28**: SSE streams for broker.log and mcp-server.log via fs.watch() + byte offset tracking; handles log rotation (size shrink → reset offset)
+- [x] **NEXUS-29**: Ring buffer of last 500 log lines in memory; new SSE clients receive recent history immediately on connect
+- [x] **NEXUS-30**: Log lines parsed via regex: extract ISO timestamp and [PREFIX], display remainder as-is
 
 ### Navigation & Settings (Polish)
 
 - [ ] **NEXUS-31**: Importance displayed as heat-colored indicator on file tree entries (gray→blue→green→yellow→red for 0→10)
 - [ ] **NEXUS-32**: Per-file staleness icon in tree (⟳ stale, ✓ fresh)
-- [ ] **NEXUS-33**: Tab status indicators on navbar: green dot (MCP instance connected), gray dot (no active instance), orange dot (stale files pending)
+- [x] **NEXUS-33**: Tab status indicators on navbar: green dot (MCP instance connected), gray dot (no active instance), orange dot (stale files pending)
 - [ ] **NEXUS-34**: Settings page: add repo (POST /api/repos {path, name?}), remove repo (DELETE /api/repos/:repoName), updates nexus.json and opens/closes DB connections immediately
 - [ ] **NEXUS-35**: Responsive layout adapting to different screen widths
 
@@ -143,15 +143,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NEXUS-22 | Phase 22 | Complete |
 | NEXUS-23 | Phase 22 | Complete |
 | NEXUS-24 | Phase 22 | Complete |
-| NEXUS-25 | Phase 23 | Pending |
-| NEXUS-26 | Phase 23 | Pending |
-| NEXUS-27 | Phase 23 | Pending |
-| NEXUS-28 | Phase 23 | Pending |
-| NEXUS-29 | Phase 23 | Pending |
-| NEXUS-30 | Phase 23 | Pending |
+| NEXUS-25 | Phase 23 | Complete |
+| NEXUS-26 | Phase 23 | Complete |
+| NEXUS-27 | Phase 23 | Complete |
+| NEXUS-28 | Phase 23 | Complete |
+| NEXUS-29 | Phase 23 | Complete |
+| NEXUS-30 | Phase 23 | Complete |
 | NEXUS-31 | Phase 24 | Pending |
 | NEXUS-32 | Phase 24 | Pending |
-| NEXUS-33 | Phase 24 | Pending |
+| NEXUS-33 | Phase 24 | Complete |
 | NEXUS-34 | Phase 24 | Pending |
 | NEXUS-35 | Phase 24 | Pending |
 
