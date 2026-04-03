@@ -1,6 +1,14 @@
 <script lang="ts">
   import type { TreeEntry } from '../lib/api';
 
+  function importanceColor(importance: number): string {
+    if (importance <= 1) return 'bg-gray-600';
+    if (importance <= 3) return 'bg-blue-500';
+    if (importance <= 5) return 'bg-green-500';
+    if (importance <= 7) return 'bg-yellow-500';
+    return 'bg-red-500';
+  }
+
   const FILE_ICONS: Record<string, string> = {
     '.ts': '\u{1F7E6}', '.tsx': '\u{1F7E6}',
     '.js': '\u{1F7E1}', '.jsx': '\u{1F7E1}', '.json': '\u{1F7E1}',
@@ -38,12 +46,13 @@
 
 <button
   class={[
-    'w-full flex items-center gap-1.5 py-0.5 px-2 text-left transition-colors cursor-pointer',
+    'relative w-full flex items-center gap-1.5 py-0.5 px-2 text-left transition-colors cursor-pointer',
     isSelected ? 'bg-blue-900/40 text-blue-300' : 'hover:bg-gray-800 text-gray-300',
   ].join(' ')}
   style="padding-left: {depth * 20 + 8}px"
   onclick={() => onToggle(entry)}
 >
+  <span class="absolute left-0 top-0 bottom-0 w-0.5 {importanceColor(entry.importance)}"></span>
   <!-- Chevron -->
   {#if entry.isDir}
     <span class="text-gray-500 text-xs w-3 flex-shrink-0">
@@ -70,4 +79,7 @@
 
   <!-- Name -->
   <span class="font-mono text-sm truncate">{entry.name}</span>
+  {#if !entry.isDir && entry.isStale}
+    <span class="text-orange-400 text-xs flex-shrink-0" title="Stale -- metadata needs update">&#x27F3;</span>
+  {/if}
 </button>
