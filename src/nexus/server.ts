@@ -13,7 +13,8 @@ import { SOCK_PATH, CONFIG_PATH } from '../broker/config.js';
 import type { StatusResponse } from '../broker/types.js';
 import { readStats } from '../broker/stats.js';
 import { getRecentLines, addSseClient } from './log-tailer.js';
-import { getRepos, getDb, getStaleCount, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
+import { readRegistry, writeRegistry } from './discover.js';
+import { getRepos, getDb, getStaleCount, removeRepo, openRepo, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
 
 // ─── Broker socket query ──────────────────────────────────────────────────────
 
@@ -103,6 +104,64 @@ export async function createServer(options: {
       };
     });
   });
+
+  // GET /api/repos/blacklist — return blacklisted repo paths (NEXUS-34, D-13)
+  app.get('/api/repos/blacklist', async (_req, _reply) => {
+    const registry = readRegistry();
+    const blacklist = registry?.blacklist ?? [];
+    // Return with derived names for display
+    return blacklist.map(p => ({
+      path: p,
+      name: p.split('/').pop() ?? p,
+    }));
+  });
+
+  // DELETE /api/repos/:repoName — blacklist a repo (NEXUS-34, D-10)
+  app.delete<{ Params: { repoName: string } }>(
+    '/api/repos/:repoName',
+    async (req, reply) => {
+      const { repoName } = req.params;
+      const removed = removeRepo(repoName);
+      if (!removed) {
+        reply.code(404);
+        return { error: 'Repo not found' };
+      }
+      // Update nexus.json: remove from repos, add path to blacklist
+      const registry = readRegistry() ?? { repos: [] };
+      registry.repos = registry.repos.filter(r => r.name !== repoName);
+      const blacklist = registry.blacklist ?? [];
+      if (!blacklist.includes(removed.path)) {
+        blacklist.push(removed.path);
+      }
+      registry.blacklist = blacklist;
+      writeRegistry(registry);
+      return { ok: true };
+    }
+  );
+
+  // POST /api/repos/:repoName/restore — un-blacklist and re-open a repo (NEXUS-34, D-13)
+  app.post<{ Params: { repoName: string }; Body: { path: string } }>(
+    '/api/repos/:repoName/restore',
+    async (req, reply) => {
+      const repoName = req.params.repoName;
+      const repoPath = (req.body as { path: string }).path;
+      if (!repoPath) {
+        reply.code(400);
+        return { error: 'path is required in request body' };
+      }
+      // Update nexus.json: remove from blacklist, add to repos
+      const registry = readRegistry() ?? { repos: [] };
+      registry.blacklist = (registry.blacklist ?? []).filter(p => p !== repoPath);
+      // Only add if not already in repos
+      if (!registry.repos.some(r => r.path === repoPath)) {
+        registry.repos.push({ name: repoName, path: repoPath });
+      }
+      writeRegistry(registry);
+      // Open DB connection
+      openRepo(repoName, repoPath);
+      return { ok: true };
+    }
+  );
 
   // GET /api/project/:repoName/stats — aggregate stats from repo's data.db
   app.get<{ Params: { repoName: string } }>(

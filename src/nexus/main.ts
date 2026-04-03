@@ -42,7 +42,12 @@ async function main() {
 
   // ── Open repo databases ─────────────────────────────────────────────────────
 
+  const blacklist = new Set(registry.blacklist ?? []);
   for (const repo of registry.repos) {
+    if (blacklist.has(repo.path)) {
+      console.log(`  - ${repo.name} (${repo.path}) [BLACKLISTED]`);
+      continue;
+    }
     const state = openRepo(repo.name, repo.path);
     const status = state.online ? 'online' : 'OFFLINE';
     console.log(`  - ${repo.name} (${repo.path}) [${status}]`);

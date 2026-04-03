@@ -10,7 +10,7 @@ import { FILESCOPE_DIR } from '../broker/config.js';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type NexusRepo = { path: string; name: string };
-export type NexusRegistry = { repos: NexusRepo[] };
+export type NexusRegistry = { repos: NexusRepo[]; blacklist?: string[] };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

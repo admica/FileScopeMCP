@@ -182,3 +182,29 @@ export async function fetchTokenStats(): Promise<TokenEntry[]> {
   if (!res.ok) throw new Error(`Token stats fetch failed: ${res.status}`);
   return res.json();
 }
+
+// ─── Settings types ──────────────────────────────────────────────────────────
+
+export type BlacklistEntry = { path: string; name: string };
+
+// ─── Settings fetch ──────────────────────────────────────────────────────────
+
+export async function fetchBlacklist(): Promise<BlacklistEntry[]> {
+  const res = await fetch('/api/repos/blacklist');
+  if (!res.ok) throw new Error(`Blacklist fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function removeRepoApi(repoName: string): Promise<void> {
+  const res = await fetch(`/api/repos/${encodeURIComponent(repoName)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Remove repo failed: ${res.status}`);
+}
+
+export async function restoreRepoApi(repoName: string, repoPath: string): Promise<void> {
+  const res = await fetch(`/api/repos/${encodeURIComponent(repoName)}/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: repoPath }),
+  });
+  if (!res.ok) throw new Error(`Restore repo failed: ${res.status}`);
+}

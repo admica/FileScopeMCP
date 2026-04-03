@@ -1,7 +1,7 @@
 // src/nexus/repo-store.ts
 // Per-repo read-only better-sqlite3 connection management for Nexus.
-// Exports: RepoState, openRepo, getRepos, getDb, closeAll, recheckOffline, getRepoStats,
-//          getStaleCount, getTreeEntries, getFileDetail, getDirDetail
+// Exports: RepoState, openRepo, getRepos, getDb, closeAll, recheckOffline, removeRepo,
+//          getRepoStats, getStaleCount, getTreeEntries, getFileDetail, getDirDetail
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -101,6 +101,20 @@ export function recheckOffline(): void {
       // Still offline — ignore
     }
   }
+}
+
+/**
+ * Remove a repo from the in-memory map. Closes its DB connection.
+ * Returns the removed RepoState (needed by caller for blacklist path), or null if not found.
+ */
+export function removeRepo(name: string): RepoState | null {
+  const state = repos.get(name);
+  if (!state) return null;
+  if (state.db) {
+    try { state.db.close(); } catch { /* ignore close errors */ }
+  }
+  repos.delete(name);
+  return state;
 }
 
 /**
