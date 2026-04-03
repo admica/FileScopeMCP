@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Nexus
-status: Ready to execute
-stopped_at: Completed 24-polish-01-PLAN.md
-last_updated: "2026-04-03T15:09:41.396Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 24-polish-03-PLAN.md
+last_updated: "2026-04-03T15:14:06.224Z"
 last_activity: 2026-04-03
 progress:
   total_phases: 9
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 20
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -77,6 +77,9 @@ v1.3 key decisions:
 - [Phase 24-polish]: Orange dot when staleCount > 0 but not recent — distinguishes active-processing (green) from queued-idle (orange)
 - [Phase 24-polish]: absolute left-0 top-0 bottom-0 w-0.5 span inside relative button pins 2px heat bar to row left edge regardless of depth indentation padding
 - [Phase 24-polish]: treeCollapsed gates both tree and graph views — same panel, same toggle behavior
+- [Phase 24-polish]: GET /api/repos/blacklist registered before /:repoName DELETE -- Fastify is order-sensitive; blacklist literal must precede param route
+- [Phase 24-polish]: onRefresh callback prop from App.svelte to Settings -- Settings calls back after mutation so navbar tabs update immediately
+- [Phase 24-polish]: blacklist stored as array of path strings in nexus.json -- names derived from path at read time to avoid stale name state
 
 ### Pending Todos
 
@@ -104,9 +107,10 @@ None.
 | Phase 23-system-view-live-activity P02 | 3min | 2 tasks | 5 files |
 | Phase 24-polish P02 | 10 | 2 tasks | 5 files |
 | Phase 24-polish P01 | 129s | 2 tasks | 2 files |
+| Phase 24-polish P03 | 138 | 2 tasks | 7 files |
 
 ## Session Continuity
 
 Last activity: 2026-04-03
-Stopped at: Completed 24-polish-01-PLAN.md
+Stopped at: Completed 24-polish-03-PLAN.md
 Resume file: None

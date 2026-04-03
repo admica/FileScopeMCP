@@ -62,7 +62,7 @@ See: ROADMAP.md Phase Details below for full phase details (not yet archived).
 - [x] **Phase 21: File Tree + Detail Panel** (2 plans) — Collapsible directory tree with lazy loading, file detail panel (summary, concepts, change impact, exports, deps, staleness), directory aggregate panel (completed 2026-04-02)
 - [x] **Phase 22: Dependency Graph** (2 plans) — Cytoscape.js interactive dependency map, node sizing/coloring by importance, hover/click interactions, zoom/pan/drag, directory filter, tree/graph toggle (completed 2026-04-02)
 - [x] **Phase 23: System View + Live Activity** (2 plans) — Broker status polling via broker.sock, token usage D3 bar chart, SSE log tailing (fs.watch + ring buffer), log line parsing, activity feed with prefix filter (completed 2026-04-02)
-- [ ] **Phase 24: Polish** (3 plans) — Importance heat colors, staleness icons, tab status indicators, settings page (blacklist-based repo management), responsive layout
+- [x] **Phase 24: Polish** (3 plans) — Importance heat colors, staleness icons, tab status indicators, settings page (blacklist-based repo management), responsive layout (completed 2026-04-03)
 
 ## Phase Details
 
@@ -193,11 +193,11 @@ Plans:
   2. Navbar tabs show a status dot: green (MCP instance connected per broker), gray (no active instance), orange (repo has stale files)
   3. GET /settings renders a page where users can add a repo by path and remove existing repos; changes take effect immediately (DB opened/closed, tab appears/disappears) without server restart
   4. Layout remains usable at viewport widths from 1024px to 2560px
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [x] 24-01-PLAN.md — Tree visual indicators (heat color bars, staleness icons) and responsive collapsible layout
 - [x] 24-02-PLAN.md — Tab status dots (backend /api/repos extension, Navbar dots, 30s polling)
-- [ ] 24-03-PLAN.md — Settings page (blacklist schema, remove/restore API, Settings.svelte rewrite)
+- [x] 24-03-PLAN.md — Settings page (blacklist schema, remove/restore API, Settings.svelte rewrite)
 
 ## Progress
 
@@ -226,4 +226,4 @@ Plans:
 | 21. File Tree + Detail Panel | v1.3 | 2/2 | Complete    | 2026-04-02 |
 | 22. Dependency Graph | v1.3 | 2/2 | Complete    | 2026-04-02 |
 | 23. System View + Live Activity | v1.3 | 2/2 | Complete    | 2026-04-02 |
-| 24. Polish | v1.3 | 2/3 | In Progress|  |
+| 24. Polish | v1.3 | 3/3 | Complete   | 2026-04-03 |
