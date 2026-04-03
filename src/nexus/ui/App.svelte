@@ -16,17 +16,31 @@
   });
 
   $effect(() => {
-    fetchRepos().then(r => {
-      repos = r;
-      loading = false;
-      // If on root hash and repos exist, navigate to first repo
-      if ((hash === '#/' || hash === '#') && r.length > 0) {
-        window.location.hash = `#/project/${r[0].name}`;
-      }
-    }).catch(err => {
-      console.error('Failed to load repos:', err);
-      loading = false;
-    });
+    let cancelled = false;
+
+    function loadRepos() {
+      fetchRepos().then(r => {
+        if (cancelled) return;
+        repos = r;
+        loading = false;
+        // Navigate to first repo on initial load only
+        if ((hash === '#/' || hash === '#') && r.length > 0) {
+          window.location.hash = `#/project/${r[0].name}`;
+        }
+      }).catch(err => {
+        if (cancelled) return;
+        console.error('Failed to load repos:', err);
+        loading = false;
+      });
+    }
+
+    loadRepos();
+    const interval = setInterval(loadRepos, 30_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   });
 
   type Route =
