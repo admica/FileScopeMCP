@@ -120,7 +120,7 @@
     {:else if route.type === 'system'}
       <System />
     {:else if route.type === 'settings'}
-      <Settings />
+      <Settings onRefresh={() => fetchRepos().then(r => { repos = r; })} />
     {:else if repos.length > 0}
       <Project repoName={repos[0].name} filePath={null} dirPath={null} showGraph={false} />
     {:else}
