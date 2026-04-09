@@ -71,7 +71,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full phase details.
 **Milestone Goal:** Replace regex-based dependency parsing with tree-sitter AST extraction, add confidence-labeled edges and community detection to transform the dependency graph into a richer code intelligence layer.
 
 - [x] **Phase 25: Schema Foundation + LanguageConfig Scaffolding** - New schema columns, confidence constants, LanguageConfig registry with regex fallback and TS/JS extractor (completed 2026-04-09)
-- [ ] **Phase 26: Multi-Language Tree-sitter Extraction** - AST extractors for Python, Rust, C/C++, Go; richer edge types and weights for TS/JS; all edges carry confidence labels
+- [x] **Phase 26: Multi-Language Tree-sitter Extraction** - AST extractors for Python, Rust, C/C++, Go; richer edge types and weights for TS/JS; all edges carry confidence labels (completed 2026-04-09)
 - [ ] **Phase 27: Community Detection** - Louvain clustering via graphology, file_communities table, get_communities MCP tool with dirty-flag cache
 - [ ] **Phase 28: MCP Polish** - Token budget parameter on list tools, edge types and confidence surfaced in get_file_summary
 
@@ -102,10 +102,10 @@ Plans:
   3. A TS/JS file with re-export statements produces edges with edge_type 're_exports'; a class extending another produces edge_type 'inherits'
   4. When a file imports another file multiple times (e.g., two functions imported in separate statements), the edge weight reflects the reference count, not just 1
   5. All edges in the database carry a non-null confidence label and numeric score; no edge written by any extractor has a NULL confidence field
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 26-01-PLAN.md -- Install grammar packages, create Python/Rust/C/C++ AST extractors with parity tests
-- [ ] 26-02-PLAN.md -- TS/JS richer edge types (re_exports, inherits), edge weight aggregation, Go parity verification
+- [x] 26-01-PLAN.md -- Install grammar packages, create Python/Rust/C/C++ AST extractors with parity tests
+- [x] 26-02-PLAN.md -- TS/JS richer edge types (re_exports, inherits), edge weight aggregation, Go parity verification
 
 ### Phase 27: Community Detection
 **Goal**: Files in the dependency graph are grouped into communities using Louvain clustering; communities are persisted to SQLite and queryable via a new MCP tool that identifies communities by representative file, not by raw integer ID
@@ -116,7 +116,10 @@ Plans:
   2. Calling get_communities via MCP returns a list of communities where each community is identified by the path of its highest-importance file (the representative), not a raw integer
   3. After a batch of file changes triggers setEdges(), a second call to get_communities does not re-run Louvain — it returns the cached result; only after a dirty-flag threshold is crossed does Louvain recompute
   4. Community membership is readable from SQLite via the file_communities table; a query by community_id returns all member file paths for that cluster
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 27-01-PLAN.md -- Pure Louvain algorithm module + community repository CRUD and dirty flag
+- [ ] 27-02-PLAN.md -- get_communities MCP tool with dirty-flag orchestration
 
 ### Phase 28: MCP Polish
 **Goal**: List-returning MCP tools support a token budget parameter that truncates results by item count with explicit metadata, and get_file_summary exposes edge types and confidence scores for each dependency
@@ -157,6 +160,6 @@ Plans:
 | 23. System View + Live Activity | v1.3 | 2/2 | Complete | 2026-04-02 |
 | 24. Polish | v1.3 | 3/3 | Complete | 2026-04-03 |
 | 25. Schema Foundation + LanguageConfig Scaffolding | v1.4 | 2/2 | Complete    | 2026-04-09 |
-| 26. Multi-Language Tree-sitter Extraction | v1.4 | 0/2 | Not started | - |
-| 27. Community Detection | v1.4 | 0/? | Not started | - |
+| 26. Multi-Language Tree-sitter Extraction | v1.4 | 2/2 | Complete    | 2026-04-09 |
+| 27. Community Detection | v1.4 | 0/2 | Not started | - |
 | 28. MCP Polish | v1.4 | 0/? | Not started | - |
