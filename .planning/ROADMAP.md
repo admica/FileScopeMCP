@@ -66,11 +66,11 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full phase details.
 
 </details>
 
-### 🚧 v1.4 Deep Graph Intelligence (In Progress)
+### v1.4 Deep Graph Intelligence (In Progress)
 
 **Milestone Goal:** Replace regex-based dependency parsing with tree-sitter AST extraction, add confidence-labeled edges and community detection to transform the dependency graph into a richer code intelligence layer.
 
-- [ ] **Phase 25: Schema Foundation + LanguageConfig Scaffolding** - New schema columns, confidence constants, LanguageConfig registry with regex fallback and TS/JS extractor
+- [x] **Phase 25: Schema Foundation + LanguageConfig Scaffolding** - New schema columns, confidence constants, LanguageConfig registry with regex fallback and TS/JS extractor (completed 2026-04-09)
 - [ ] **Phase 26: Multi-Language Tree-sitter Extraction** - AST extractors for Python, Rust, C/C++, Go; richer edge types and weights for TS/JS; all edges carry confidence labels
 - [ ] **Phase 27: Community Detection** - Louvain clustering via graphology, file_communities table, get_communities MCP tool with dirty-flag cache
 - [ ] **Phase 28: MCP Polish** - Token budget parameter on list tools, edge types and confidence surfaced in get_file_summary
@@ -87,10 +87,10 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full phase details.
   3. A confidence.ts constants file defines EXTRACTED (1.0) and INFERRED (0.8) as named exports; no extractor uses raw float literals
   4. Calling extractEdges() on any file extension dispatches correctly: TS/JS files use the AST extractor, unsupported languages use the regex fallback, and a broken grammar falls back to regex rather than crashing
   5. All currently-supported languages (Zig, Lua, PHP, C#, Java, Ruby) produce the same dependency results as before through the regex fallback path
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 25-01-PLAN.md -- Schema migration (edge metadata columns + file_communities) and confidence constants
-- [ ] 25-02-PLAN.md -- LanguageConfig registry, setEdges(), and integration wiring into analyzeNewFile/coordinator
+- [x] 25-01-PLAN.md -- Schema migration (edge metadata columns + file_communities) and confidence constants
+- [x] 25-02-PLAN.md -- LanguageConfig registry, setEdges(), and integration wiring into analyzeNewFile/coordinator
 
 ### Phase 26: Multi-Language Tree-sitter Extraction
 **Goal**: Python, Rust, C, C++, and Go files have their import edges extracted by tree-sitter AST analysis instead of regex; TS/JS gains richer edge types (imports, re_exports, inherits) and edge weights
@@ -102,7 +102,10 @@ Plans:
   3. A TS/JS file with re-export statements produces edges with edge_type 're_exports'; a class extending another produces edge_type 'inherits'
   4. When a file imports another file multiple times (e.g., two functions imported in separate statements), the edge weight reflects the reference count, not just 1
   5. All edges in the database carry a non-null confidence label and numeric score; no edge written by any extractor has a NULL confidence field
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 26-01-PLAN.md -- Install grammar packages, create Python/Rust/C/C++ AST extractors with parity tests
+- [ ] 26-02-PLAN.md -- TS/JS richer edge types (re_exports, inherits), edge weight aggregation, Go parity verification
 
 ### Phase 27: Community Detection
 **Goal**: Files in the dependency graph are grouped into communities using Louvain clustering; communities are persisted to SQLite and queryable via a new MCP tool that identifies communities by representative file, not by raw integer ID
@@ -153,7 +156,7 @@ Plans:
 | 22. Dependency Graph | v1.3 | 2/2 | Complete | 2026-04-02 |
 | 23. System View + Live Activity | v1.3 | 2/2 | Complete | 2026-04-02 |
 | 24. Polish | v1.3 | 3/3 | Complete | 2026-04-03 |
-| 25. Schema Foundation + LanguageConfig Scaffolding | v1.4 | 0/2 | In progress | - |
-| 26. Multi-Language Tree-sitter Extraction | v1.4 | 0/? | Not started | - |
+| 25. Schema Foundation + LanguageConfig Scaffolding | v1.4 | 2/2 | Complete    | 2026-04-09 |
+| 26. Multi-Language Tree-sitter Extraction | v1.4 | 0/2 | Not started | - |
 | 27. Community Detection | v1.4 | 0/? | Not started | - |
 | 28. MCP Polish | v1.4 | 0/? | Not started | - |
