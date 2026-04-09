@@ -8,6 +8,24 @@ import { files, file_dependencies } from './schema.js';
 import type { FileNode, PackageDependency } from '../types.js';
 import type { ExportSnapshot } from '../change-detector/types.js';
 import type { EdgeResult } from '../language-config.js';
+import type { CommunityResult } from '../community-detection.js';
+
+// ─── Community dirty flag ──────────────────────────────────────────────────────
+// Module-level mutable flag: true = community cache is stale, Louvain must rerun.
+// Starts true so the first query always runs Louvain (D-10, D-12).
+let _communitiesDirty = true;
+
+export function isCommunitiesDirty(): boolean {
+  return _communitiesDirty;
+}
+
+export function markCommunitiesDirty(): void {
+  _communitiesDirty = true;
+}
+
+export function clearCommunitiesDirty(): void {
+  _communitiesDirty = false;
+}
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -213,6 +231,23 @@ export function getAllLocalImportEdges(): Array<{ source_path: string; target_pa
 }
 
 /**
+ * Returns all local_import edges with their weight column.
+ * Used by community detection to build the weighted Louvain graph.
+ */
+export function getAllLocalImportEdgesWithWeights(): Array<{
+  source_path: string;
+  target_path: string;
+  weight: number;
+}> {
+  const sqlite = getSqlite();
+  return sqlite
+    .prepare(
+      "SELECT source_path, target_path, weight FROM file_dependencies WHERE dependency_type = 'local_import'"
+    )
+    .all() as Array<{ source_path: string; target_path: string; weight: number }>;
+}
+
+/**
  * Replaces all dependency rows for the given source file.
  * Deletes existing source_path rows first, then inserts fresh.
  * Stores local deps as 'local_import' and package deps as 'package_import'
@@ -287,6 +322,7 @@ export function setEdges(sourcePath: string, edges: EdgeResult[]): void {
       weight:            edge.weight,
     }).run();
   }
+  markCommunitiesDirty();
 }
 
 /**
@@ -530,5 +566,97 @@ export function clearStaleness(filePath: string, jobType: string): void {
   sqlite
     .prepare(`UPDATE files SET ${column} = NULL WHERE path = ?`)
     .run(filePath);
+}
+
+// ─── Community persistence ─────────────────────────────────────────────────────
+
+/**
+ * Replaces all community assignments in file_communities.
+ * Uses a transaction: DELETE all rows, INSERT all new assignments.
+ * This is a full replace — Louvain recomputes everything (D-17).
+ */
+export function setCommunities(communities: CommunityResult[]): void {
+  const sqlite = getSqlite();
+  const tx = sqlite.transaction(() => {
+    sqlite.prepare('DELETE FROM file_communities').run();
+    const stmt = sqlite.prepare(
+      'INSERT INTO file_communities (community_id, file_path) VALUES (?, ?)'
+    );
+    for (const c of communities) {
+      for (const filePath of c.members) {
+        stmt.run(c.communityId, filePath);
+      }
+    }
+  });
+  tx();
+}
+
+/**
+ * Reads all community assignments from file_communities, groups them,
+ * and returns CommunityResult[] with representatives derived from importance.
+ * Representative = highest-importance member in each community.
+ */
+export function getCommunities(): CommunityResult[] {
+  const sqlite = getSqlite();
+  const rows = sqlite.prepare(
+    'SELECT community_id, file_path FROM file_communities ORDER BY community_id'
+  ).all() as Array<{ community_id: number; file_path: string }>;
+
+  if (rows.length === 0) return [];
+
+  // Group by community_id
+  const groups = new Map<number, string[]>();
+  for (const row of rows) {
+    if (!groups.has(row.community_id)) groups.set(row.community_id, []);
+    groups.get(row.community_id)!.push(row.file_path);
+  }
+
+  // Build CommunityResult[] — need importance scores for representative selection
+  const allFiles = getAllFiles();
+  const importances = new Map(allFiles.map(f => [f.path, f.importance ?? 0]));
+
+  return Array.from(groups.entries()).map(([communityId, members]) => {
+    const representative = members.reduce((best, path) => {
+      return (importances.get(path) ?? 0) >= (importances.get(best) ?? 0) ? path : best;
+    }, members[0]);
+    return {
+      communityId,
+      representative,
+      members: members.sort(),
+      size: members.length,
+    };
+  });
+}
+
+/**
+ * Returns the community containing filePath, or null if the file is not
+ * in any community (isolated file with no local_import edges).
+ */
+export function getCommunityForFile(filePath: string): CommunityResult | null {
+  const sqlite = getSqlite();
+  const row = sqlite.prepare(
+    'SELECT community_id FROM file_communities WHERE file_path = ?'
+  ).get(filePath) as { community_id: number } | undefined;
+  if (!row) return null;
+
+  // Fetch all members of that community
+  const memberRows = sqlite.prepare(
+    'SELECT file_path FROM file_communities WHERE community_id = ?'
+  ).all(row.community_id) as Array<{ file_path: string }>;
+  const members = memberRows.map(r => r.file_path);
+
+  // Determine representative
+  const allFiles = getAllFiles();
+  const importances = new Map(allFiles.map(f => [f.path, f.importance ?? 0]));
+  const representative = members.reduce((best, path) => {
+    return (importances.get(path) ?? 0) >= (importances.get(best) ?? 0) ? path : best;
+  }, members[0]);
+
+  return {
+    communityId: row.community_id,
+    representative,
+    members: members.sort(),
+    size: members.length,
+  };
 }
 
