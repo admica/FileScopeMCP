@@ -187,37 +187,44 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
   });
 
   server.tool("find_important_files", "Find the most important files in the project", {
-    limit: z.number().optional().describe("Number of files to return (default: 10)"),
+    maxItems: z.number().optional().describe("Maximum number of files to return (default: 10)"),
     minImportance: z.number().optional().describe("Minimum importance score (0-10)")
-  }, async (params: { limit?: number, minImportance?: number }) => {
+  }, async (params: { maxItems?: number, minImportance?: number }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
 
-    const limit = params.limit || 10;
+    const maxItems = params.maxItems || 10;
     const minImportance = params.minImportance || 0;
 
     // Use repository to get all files from DB
     const allFiles = getAllFiles().filter(f => !f.isDirectory);
 
     // Filter by minimum importance and sort by importance (descending)
-    const importantFiles = allFiles
+    const allMatching = allFiles
       .filter(file => (file.importance || 0) >= minImportance)
-      .sort((a, b) => (b.importance || 0) - (a.importance || 0))
-      .slice(0, limit)
-      .map(file => {
-        const fileStale = getStaleness(file.path);
-        return {
-          path: file.path,
-          importance: file.importance || 0,
-          dependentCount: (file.dependents?.length || getDependents(file.path).length) || 0,
-          dependencyCount: (file.dependencies?.length || getDependencies(file.path).length) || 0,
-          hasSummary: !!file.summary,
-          ...(fileStale.summaryStale !== null && { summaryStale: fileStale.summaryStale }),
-          ...(fileStale.conceptsStale !== null && { conceptsStale: fileStale.conceptsStale }),
-          ...(fileStale.changeImpactStale !== null && { changeImpactStale: fileStale.changeImpactStale }),
-        };
-      });
+      .sort((a, b) => (b.importance || 0) - (a.importance || 0));
 
-    return createMcpResponse(importantFiles);
+    const isTruncated = allMatching.length > maxItems;
+    const results = isTruncated ? allMatching.slice(0, maxItems) : allMatching;
+
+    const items = results.map(file => {
+      const fileStale = getStaleness(file.path);
+      return {
+        path: file.path,
+        importance: file.importance || 0,
+        dependentCount: (file.dependents?.length || getDependents(file.path).length) || 0,
+        dependencyCount: (file.dependencies?.length || getDependencies(file.path).length) || 0,
+        hasSummary: !!file.summary,
+        ...(fileStale.summaryStale !== null && { summaryStale: fileStale.summaryStale }),
+        ...(fileStale.conceptsStale !== null && { conceptsStale: fileStale.conceptsStale }),
+        ...(fileStale.changeImpactStale !== null && { changeImpactStale: fileStale.changeImpactStale }),
+      };
+    });
+
+    return createMcpResponse({
+      files: items,
+      ...(isTruncated && { truncated: true }),
+      ...(isTruncated && { totalCount: allMatching.length }),
+    });
   });
 
   server.tool("get_file_summary", "Get full file intel: summary, importance, dependencies, concepts, change impact, and staleness", {

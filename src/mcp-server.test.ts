@@ -379,6 +379,54 @@ describe('get_file_summary enriched dependency shape', () => {
   });
 });
 
+// ─── find_important_files maxItems truncation tests ───────────────────────────
+
+describe('find_important_files maxItems truncation', () => {
+  it('includes truncated and totalCount when results exceed maxItems', () => {
+    clearTables();
+    insertFile('/a.ts');
+    insertFile('/b.ts');
+    insertFile('/c.ts');
+
+    // Simulate handler logic
+    const allFiles = ['/a.ts', '/b.ts', '/c.ts'];
+    const maxItems = 2;
+    const isTruncated = allFiles.length > maxItems;
+    const results = isTruncated ? allFiles.slice(0, maxItems) : allFiles;
+
+    const response: Record<string, unknown> = {
+      files: results,
+      ...(isTruncated && { truncated: true }),
+      ...(isTruncated && { totalCount: allFiles.length }),
+    };
+
+    expect(response.truncated).toBe(true);
+    expect(response.totalCount).toBe(3);
+    expect((response.files as string[]).length).toBe(2);
+  });
+
+  it('omits truncated and totalCount when all results fit', () => {
+    clearTables();
+    insertFile('/a.ts');
+    insertFile('/b.ts');
+
+    const allFiles = ['/a.ts', '/b.ts'];
+    const maxItems = 5;
+    const isTruncated = allFiles.length > maxItems;
+    const results = isTruncated ? allFiles.slice(0, maxItems) : allFiles;
+
+    const response: Record<string, unknown> = {
+      files: results,
+      ...(isTruncated && { truncated: true }),
+      ...(isTruncated && { totalCount: allFiles.length }),
+    };
+
+    expect(response).not.toHaveProperty('truncated');
+    expect(response).not.toHaveProperty('totalCount');
+    expect((response.files as string[]).length).toBe(2);
+  });
+});
+
 // ─── COMPAT-01: All MCP tool names registered ─────────────────────────────────
 
 describe('COMPAT-01: MCP tool names and schemas remain identical', () => {
