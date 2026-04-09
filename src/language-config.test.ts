@@ -224,3 +224,104 @@ describe('Grammar fallback behavior', () => {
     expect(result).toHaveLength(0);
   });
 });
+
+// ─── TS/JS richer edge types ─────────────────────────────────────────────────
+
+describe('TS/JS richer edge types', () => {
+  it('re-export produces re_exports edge type', async () => {
+    // Use a package import (non-relative) so file existence check is bypassed
+    const fixture = `export { Foo } from 'some-package';`;
+    const edges = await extractEdges('/project/index.ts', fixture, '/project');
+    const reExports = edges.filter(e => e.edgeType === 're_exports');
+    expect(reExports.length).toBeGreaterThanOrEqual(1);
+    expect(reExports[0].edgeType).toBe('re_exports');
+  });
+
+  it('class extends imported class produces inherits edge type', async () => {
+    // Use a package import so file existence check is bypassed
+    const fixture = `import { Base } from 'base-pkg';\nclass Child extends Base {}`;
+    const edges = await extractEdges('/project/child.ts', fixture, '/project');
+    const inherits = edges.filter(e => e.edgeType === 'inherits');
+    expect(inherits.length).toBeGreaterThanOrEqual(1);
+    expect(inherits[0].edgeType).toBe('inherits');
+  });
+
+  it('same module imported and re-exported produces two distinct edges', async () => {
+    // Use package imports so both edges resolve without filesystem access
+    const fixture = `import { Foo } from 'shared-pkg';\nexport { Bar } from 'shared-pkg';`;
+    const edges = await extractEdges('/project/index.ts', fixture, '/project');
+    const pkgEdges = edges.filter(e => e.target.includes('shared-pkg'));
+    const edgeTypes = new Set(pkgEdges.map(e => e.edgeType));
+    expect(edgeTypes.has('imports')).toBe(true);
+    expect(edgeTypes.has('re_exports')).toBe(true);
+  });
+
+  it('class extends same-file class produces no inherits edge', async () => {
+    // Base is not imported, so no cross-file inherits edge
+    const fixture = `class Base {}\nclass Child extends Base {}`;
+    const edges = await extractEdges('/project/child.ts', fixture, '/project');
+    const inherits = edges.filter(e => e.edgeType === 'inherits');
+    expect(inherits.length).toBe(0);
+  });
+});
+
+// ─── Edge weight aggregation ─────────────────────────────────────────────────
+
+describe('edge weight aggregation', () => {
+  it('duplicate imports to same package produce weight > 1', async () => {
+    // Two separate import statements referencing the same package
+    const fixture = `import { Foo } from 'shared-dep';\nimport { Bar } from 'shared-dep';`;
+    const edges = await extractEdges('/project/test.ts', fixture, '/project');
+    const sharedEdges = edges.filter(e => e.target.includes('shared-dep') && e.edgeType === 'imports');
+    // After aggregation, should be exactly 1 edge with weight >= 2
+    expect(sharedEdges.length).toBe(1);
+    expect(sharedEdges[0].weight).toBeGreaterThanOrEqual(2);
+  });
+
+  it('import and re-export of same package stay separate', async () => {
+    const fixture = `import { X } from 'lib-pkg';\nexport { Y } from 'lib-pkg';`;
+    const edges = await extractEdges('/project/test.ts', fixture, '/project');
+    const libEdges = edges.filter(e => e.target.includes('lib-pkg'));
+    // Should be 2 edges (different edgeTypes), each with weight=1
+    expect(libEdges.length).toBe(2);
+    expect(libEdges.every(e => e.weight === 1)).toBe(true);
+  });
+});
+
+// ─── Go extraction unchanged ─────────────────────────────────────────────────
+
+describe('Go extraction unchanged', () => {
+  it('Go file produces INFERRED confidence edges', async () => {
+    const fixture = `package main\nimport "fmt"\nimport "os"`;
+    const edges = await extractEdges('/project/main.go', fixture, '/project');
+    // Go edges should have INFERRED confidence (0.8)
+    for (const e of edges) {
+      expect(e.confidence).toBe(0.8);
+      expect(e.confidenceSource).toBe('inferred');
+    }
+  });
+});
+
+// ─── Confidence non-null invariant ────────────────────────────────────────────
+
+describe('confidence non-null invariant', () => {
+  const cases = [
+    { ext: '.py', fixture: 'import os', desc: 'Python' },
+    { ext: '.rs', fixture: 'use std::io;', desc: 'Rust' },
+    { ext: '.c', fixture: '#include <stdio.h>', desc: 'C' },
+    { ext: '.ts', fixture: "import { x } from './y';", desc: 'TypeScript' },
+    { ext: '.go', fixture: 'package main\nimport "fmt"', desc: 'Go' },
+  ];
+
+  for (const { ext, fixture, desc } of cases) {
+    it(`${desc} edges have non-null confidence and confidenceSource`, async () => {
+      const edges = await extractEdges(`/project/test${ext}`, fixture, '/project');
+      for (const e of edges) {
+        expect(e.confidence).not.toBeNull();
+        expect(e.confidence).toBeGreaterThan(0);
+        expect(e.confidenceSource).not.toBeNull();
+        expect(['extracted', 'inferred']).toContain(e.confidenceSource);
+      }
+    });
+  }
+});
