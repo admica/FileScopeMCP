@@ -7,6 +7,7 @@ import { getDb, getSqlite } from './db.js';
 import { files, file_dependencies } from './schema.js';
 import type { FileNode, PackageDependency } from '../types.js';
 import type { ExportSnapshot } from '../change-detector/types.js';
+import type { EdgeResult } from '../language-config.js';
 
 // ─── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -255,6 +256,36 @@ export function setDependencies(
         is_dev_dependency: pkg.isDevDependency ?? null,
       })
       .run();
+  }
+}
+
+/**
+ * Replaces all dependency rows for the given source file with enriched edge data.
+ * Like setDependencies() but writes edge_type, confidence, confidence_source, and weight.
+ * Callers migrated to extractEdges() should use this instead of setDependencies().
+ */
+export function setEdges(sourcePath: string, edges: EdgeResult[]): void {
+  const db = getDb();
+
+  // Delete all existing dependency rows for this source
+  db.delete(file_dependencies)
+    .where(eq(file_dependencies.source_path, sourcePath))
+    .run();
+
+  // Insert enriched edge rows
+  for (const edge of edges) {
+    db.insert(file_dependencies).values({
+      source_path:       sourcePath,
+      target_path:       edge.target,
+      dependency_type:   edge.isPackage ? 'package_import' : 'local_import',
+      package_name:      edge.packageName ?? null,
+      package_version:   edge.packageVersion ?? null,
+      is_dev_dependency: null,
+      edge_type:         edge.edgeType,
+      confidence:        edge.confidence,
+      confidence_source: edge.confidenceSource,
+      weight:            edge.weight,
+    }).run();
   }
 }
 

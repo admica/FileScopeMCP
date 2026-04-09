@@ -4,8 +4,9 @@ import * as path from 'path';
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { getProjectRoot, getConfig, addExclusionPattern, getFilescopeIgnore } from './global-state.js';
 import { log } from './logger.js'; // Import the logger
-import { upsertFile, deleteFile, setDependencies } from './db/repository.js';
-import { extractSnapshot, isTreeSitterLanguage } from './change-detector/ast-parser.js';
+import { upsertFile, deleteFile, setEdges } from './db/repository.js';
+import { extractEdges } from './language-config.js';
+import type { EdgeResult } from './language-config.js';
 
 /**
  * Canonical path normalization for the entire codebase.
@@ -841,136 +842,37 @@ export function findNodeByPath(tree: FileNode | null, targetPath: string): FileN
 
 // --- New Functions for Incremental Updates ---
 
-// Placeholder for dependency analysis of a single new file
-// This needs to replicate the relevant logic from scanDirectory
-async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[] }> {
+// Analyzes a single file's dependencies via the LanguageConfig registry.
+// Returns the legacy { dependencies, packageDependencies } shape alongside the
+// enriched edges array so call sites can pass edges to setEdges().
+async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[]; edges: EdgeResult[] }> {
   log(`[analyzeNewFile] Analyzing ${filePath}`);
-  const dependencies: string[] = [];
-  const packageDependencies: PackageDependency[] = [];
-  const ext = path.extname(filePath).toLowerCase();
 
-  // AST-based import extraction for TS/JS (CHNG-04)
-  if (isTreeSitterLanguage(ext)) {
-    try {
-      const content = await fsPromises.readFile(filePath, 'utf-8');
-      const snapshot = extractSnapshot(filePath, content);
-      if (snapshot) {
-        log(`[analyzeNewFile] [AST] Found ${snapshot.imports.length} imports in ${filePath}`);
-        for (const importPath of snapshot.imports) {
-          if (isUnresolvedTemplateLiteral(importPath)) {
-            log(`[analyzeNewFile] Skipping unresolved template literal: ${importPath}`);
-            continue;
-          }
-          try {
-            const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
-            const normalizedResolvedPath = normalizePath(resolvedPath);
-            if (normalizedResolvedPath.includes('node_modules') || (!importPath.startsWith('.') && !importPath.startsWith('/'))) {
-              const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
-              if (!pkgDep.name) {
-                if (importPath.startsWith('@')) {
-                  const parts = importPath.split('/');
-                  if (parts.length >= 2) { pkgDep.scope = parts[0]; pkgDep.name = `${parts[0]}/${parts[1]}`; }
-                } else if (importPath.includes('/')) {
-                  pkgDep.name = importPath.split('/')[0];
-                } else {
-                  pkgDep.name = importPath;
-                }
-              }
-              if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
-              const version = await extractPackageVersion(pkgDep.name, projectRoot);
-              if (version) pkgDep.version = version;
-              packageDependencies.push(pkgDep);
-            } else {
-              try {
-                await fsPromises.access(normalizedResolvedPath);
-                dependencies.push(normalizedResolvedPath);
-              } catch { /* file not found with this path */ }
-            }
-          } catch (resolveError) {
-            log(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}: ${resolveError}`);
-          }
-        }
-      }
-    } catch (readError) {
-      log(`[analyzeNewFile] Error reading file ${filePath} (AST path): ${readError}`);
-    }
-  } else if (ext === '.go') {
-    try {
-      const content = await fsPromises.readFile(filePath, 'utf-8');
-      const moduleName = await readGoModuleName(projectRoot);
-      const goResult = await resolveGoImports(content, filePath, projectRoot, moduleName);
-      dependencies.push(...goResult.dependencies);
-      packageDependencies.push(...goResult.packageDependencies);
-    } catch (readError) {
-      log(`[analyzeNewFile] Error reading Go file ${filePath}: ${readError}`);
-    }
-  } else if (ext === '.rb') {
-    try {
-      const content = await fsPromises.readFile(filePath, 'utf-8');
-      const rbResult = await resolveRubyImports(content, filePath, projectRoot);
-      dependencies.push(...rbResult.dependencies);
-      packageDependencies.push(...rbResult.packageDependencies);
-    } catch (readError) {
-      log(`[analyzeNewFile] Error reading Ruby file ${filePath}: ${readError}`);
-    }
-  } else {
-    const pattern = IMPORT_PATTERNS[ext];
-    if (pattern) {
-       const cppExts = new Set(['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hh', '.hxx']);
-       const isCppFile = cppExts.has(ext);
-       try {
-         const content = await fsPromises.readFile(filePath, 'utf-8');
-         let match;
-         while ((match = pattern.exec(content)) !== null) {
-           const importPath = match[1] || match[2] || match[3];
-           if (importPath) {
-              if (isUnresolvedTemplateLiteral(importPath)) {
-                continue;
-              }
-
-              try {
-                  const resolvedPath = path.resolve(path.dirname(filePath), importPath);
-                  const normalizedResolvedPath = normalizePath(resolvedPath);
-
-                  // C/C++: "quoted" includes are local files, <angled> are system/library headers.
-                  // Other languages: non-relative, non-absolute imports are package deps.
-                  const isPackageDep = normalizedResolvedPath.includes('node_modules')
-                    || (isCppFile && match[0].includes('<'))
-                    || (!isCppFile && !importPath.startsWith('.') && !importPath.startsWith('/'));
-                  if (isPackageDep) {
-                      const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
-
-                      // Skip if the package name is a template literal
-                      if (isUnresolvedTemplateLiteral(pkgDep.name)) {
-                        log(`[analyzeNewFile] Skipping package with template literal name: ${pkgDep.name}`);
-                        continue;
-                      }
-
-                      const version = await extractPackageVersion(pkgDep.name, projectRoot);
-                      if (version) {
-                        pkgDep.version = version;
-                      }
-                      packageDependencies.push(pkgDep);
-                  } else {
-                      // Attempt to confirm local file exists
-                      try {
-                        await fsPromises.access(normalizedResolvedPath);
-                        dependencies.push(normalizedResolvedPath);
-                      } catch {
-                      }
-                  }
-              } catch (resolveError) {
-                   log(`[analyzeNewFile] Error resolving import '${importPath}' in ${filePath}: ${resolveError}`);
-              }
-           }
-         }
-       } catch (readError) {
-         log(`[analyzeNewFile] Error reading file ${filePath}: ${readError}`);
-       }
-    }
+  let content: string;
+  try {
+    content = await fsPromises.readFile(filePath, 'utf-8');
+  } catch (readError) {
+    log(`[analyzeNewFile] Error reading file ${filePath}: ${readError}`);
+    return { dependencies: [], packageDependencies: [], edges: [] };
   }
-  log(`[analyzeNewFile] Found deps for ${filePath}: ${JSON.stringify({ dependencies, packageDependencies })}`);
-  return { dependencies, packageDependencies };
+
+  const edges = await extractEdges(filePath, content, projectRoot);
+
+  const dependencies = edges
+    .filter(e => !e.isPackage)
+    .map(e => e.target);
+
+  const packageDependencies = edges
+    .filter(e => e.isPackage)
+    .map(e => {
+      const pkg = PackageDependency.fromPath(e.target);
+      if (e.packageName) pkg.name = e.packageName;
+      if (e.packageVersion) pkg.version = e.packageVersion;
+      return pkg;
+    });
+
+  log(`[analyzeNewFile] Found deps for ${filePath}: ${JSON.stringify({ dependencies: dependencies.length, packageDependencies: packageDependencies.length })}`);
+  return { dependencies, packageDependencies, edges };
 }
 
 
@@ -1008,7 +910,7 @@ export async function updateFileNodeOnChange(
   const oldDeps = new Set(existingNode.dependencies || []);
 
   // Re-analyze file content
-  const { dependencies: newDeps, packageDependencies: newPkgDeps } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+  const { dependencies: newDeps, packageDependencies: newPkgDeps, edges } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
   const newDepsSet = new Set(newDeps);
 
   // Update mtime
@@ -1068,7 +970,7 @@ export async function updateFileNodeOnChange(
 
   // Persist to SQLite
   upsertFile(existingNode);
-  setDependencies(existingNode.path, existingNode.dependencies ?? [], existingNode.packageDependencies ?? []);
+  setEdges(existingNode.path, edges);
   log(`[updateFileNodeOnChange] Persisted updated node to SQLite: ${normalizedFilePath}`);
 
   log(`[updateFileNodeOnChange] Updated ${normalizedFilePath}: ${newDeps.length} deps, ${newPkgDeps.length} pkg deps`);
@@ -1157,7 +1059,7 @@ export async function addFileNode(
 
     // 4. Analyze the new file's content for dependencies
     // Use the placeholder analysis function
-    const { dependencies, packageDependencies } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+    const { dependencies, packageDependencies, edges } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
     newNode.dependencies = dependencies;
     newNode.packageDependencies = packageDependencies;
 
@@ -1184,7 +1086,7 @@ export async function addFileNode(
 
     // 9. Persist to SQLite
     upsertFile(newNode);
-    setDependencies(newNode.path, newNode.dependencies ?? [], newNode.packageDependencies ?? []);
+    setEdges(newNode.path, edges);
     log(`[addFileNode] Persisted node to SQLite: ${normalizedFilePath}`);
 
     log(`[addFileNode] Successfully added node: ${normalizedFilePath}`);
