@@ -21,9 +21,16 @@ import {
   getAllLocalImportEdges,
   markAllStale,
   getLlmProgress,
+  isCommunitiesDirty,
+  clearCommunitiesDirty,
+  getAllLocalImportEdgesWithWeights,
+  setCommunities,
+  getCommunities,
+  getCommunityForFile,
 } from './db/repository.js';
 import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
 import { detectCycles } from './cycle-detection.js';
+import { detectCommunities } from './community-detection.js';
 import { getSqlite } from './db/db.js';
 import { ServerCoordinator } from './coordinator.js';
 
@@ -422,6 +429,56 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       cycles: filtered,
       totalCycles: filtered.length,
       totalFilesInCycles,
+    });
+  });
+
+  server.tool("get_communities", "Get file communities detected by Louvain clustering. Returns groups of tightly-coupled files identified by their highest-importance representative file.", {
+    file_path: z.string().optional().describe("Optional: filter to the community containing this file path"),
+  }, async (params: { file_path?: string }) => {
+    if (!coordinator.isInitialized()) return projectPathNotSetError;
+
+    // Lazy recomputation: only run Louvain when edges have changed (D-11, D-12)
+    if (isCommunitiesDirty()) {
+      const edges = getAllLocalImportEdgesWithWeights();
+      if (edges.length === 0) {
+        // No local import edges — clear dirty flag, return empty
+        clearCommunitiesDirty();
+        if (params.file_path) {
+          return createMcpResponse(`No communities detected (no local import edges). File not in any community: ${params.file_path}`, true);
+        }
+        return createMcpResponse({ communities: [], totalCommunities: 0 });
+      }
+      const allFiles = getAllFiles();
+      const importances = new Map(allFiles.map(f => [f.path, f.importance ?? 0]));
+      const communities = detectCommunities(edges, importances);
+      setCommunities(communities);
+      clearCommunitiesDirty();
+    }
+
+    // file_path parameter: return single community (D-15)
+    if (params.file_path) {
+      const normalizedPath = normalizePath(params.file_path);
+      const community = getCommunityForFile(normalizedPath);
+      if (!community) {
+        return createMcpResponse(`File not found in any community: ${params.file_path}`, true);
+      }
+      return createMcpResponse({
+        representative: community.representative,
+        members: community.members,
+        size: community.size,
+      });
+    }
+
+    // No file_path: return all communities sorted by size descending (D-15)
+    const allCommunities = getCommunities();
+    const sorted = allCommunities.sort((a, b) => b.size - a.size);
+    return createMcpResponse({
+      communities: sorted.map(c => ({
+        representative: c.representative,
+        members: c.members,
+        size: c.size,
+      })),
+      totalCommunities: sorted.length,
     });
   });
 }
