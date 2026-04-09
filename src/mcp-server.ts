@@ -180,10 +180,37 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     return await coordinator.init(params.path);
   });
 
-  server.tool("list_files", "List all files in the project with their importance rankings", async () => {
+  server.tool("list_files", "List all files in the project with their importance rankings", {
+    maxItems: z.number().optional().describe("Cap response to N files sorted by importance. Omit for full tree.")
+  }, async (params: { maxItems?: number }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
-    // Return the tree reconstructed from DB for backward compat (COMPAT-01)
-    return createMcpResponse(coordinator.getFileTree());
+
+    // D-06: no maxItems = tree structure (current behavior preserved)
+    if (params.maxItems === undefined) {
+      return createMcpResponse(coordinator.getFileTree());
+    }
+
+    // D-05, D-07: flat list sorted by importance descending
+    const allFiles = getAllFiles().filter(f => !f.isDirectory);
+    const sorted = allFiles.sort((a, b) => (b.importance || 0) - (a.importance || 0));
+    const isTruncated = sorted.length > params.maxItems;
+    const results = isTruncated ? sorted.slice(0, params.maxItems) : sorted;
+
+    return createMcpResponse({
+      files: results.map(file => {
+        const fileStale = getStaleness(file.path);
+        return {
+          path: file.path,
+          importance: file.importance || 0,
+          hasSummary: !!file.summary,
+          ...(fileStale.summaryStale !== null && { summaryStale: fileStale.summaryStale }),
+          ...(fileStale.conceptsStale !== null && { conceptsStale: fileStale.conceptsStale }),
+          ...(fileStale.changeImpactStale !== null && { changeImpactStale: fileStale.changeImpactStale }),
+        };
+      }),
+      ...(isTruncated && { truncated: true }),
+      ...(isTruncated && { totalCount: sorted.length }),
+    });
   });
 
   server.tool("find_important_files", "Find the most important files in the project", {

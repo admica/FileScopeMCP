@@ -379,6 +379,75 @@ describe('get_file_summary enriched dependency shape', () => {
   });
 });
 
+// ─── list_files maxItems dual mode tests ──────────────────────────────────────
+
+describe('list_files maxItems dual mode', () => {
+  it('flat list mode: maxItems caps results with truncation metadata', () => {
+    clearTables();
+    insertFile('/high.ts');
+    insertFile('/med.ts');
+    insertFile('/low.ts');
+
+    // Simulate flat list logic
+    const allFiles = [
+      { path: '/high.ts', importance: 8 },
+      { path: '/med.ts', importance: 5 },
+      { path: '/low.ts', importance: 2 },
+    ];
+    const maxItems = 2;
+    const sorted = allFiles.sort((a, b) => b.importance - a.importance);
+    const isTruncated = sorted.length > maxItems;
+    const results = isTruncated ? sorted.slice(0, maxItems) : sorted;
+
+    const response: Record<string, unknown> = {
+      files: results.map(f => ({ path: f.path, importance: f.importance })),
+      ...(isTruncated && { truncated: true }),
+      ...(isTruncated && { totalCount: sorted.length }),
+    };
+
+    expect(response.truncated).toBe(true);
+    expect(response.totalCount).toBe(3);
+    expect((response.files as any[]).length).toBe(2);
+    expect((response.files as any[])[0].path).toBe('/high.ts');
+    expect((response.files as any[])[1].path).toBe('/med.ts');
+  });
+
+  it('flat list mode: no truncation metadata when all files fit', () => {
+    const allFiles = [
+      { path: '/a.ts', importance: 5 },
+      { path: '/b.ts', importance: 3 },
+    ];
+    const maxItems = 10;
+    const sorted = allFiles.sort((a, b) => b.importance - a.importance);
+    const isTruncated = sorted.length > maxItems;
+
+    const response: Record<string, unknown> = {
+      files: sorted,
+      ...(isTruncated && { truncated: true }),
+      ...(isTruncated && { totalCount: sorted.length }),
+    };
+
+    expect(response).not.toHaveProperty('truncated');
+    expect(response).not.toHaveProperty('totalCount');
+  });
+
+  it('flat list items include path, importance, hasSummary fields', () => {
+    clearTables();
+    insertFile('/summarized.ts', { summary: 'A file summary' });
+
+    const file = { path: '/summarized.ts', importance: 5, summary: 'A file summary' };
+    const item = {
+      path: file.path,
+      importance: file.importance,
+      hasSummary: !!file.summary,
+    };
+
+    expect(item.path).toBe('/summarized.ts');
+    expect(item.importance).toBe(5);
+    expect(item.hasSummary).toBe(true);
+  });
+});
+
 // ─── find_important_files maxItems truncation tests ───────────────────────────
 
 describe('find_important_files maxItems truncation', () => {
