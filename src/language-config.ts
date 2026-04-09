@@ -2,10 +2,14 @@
 // LanguageConfig registry: dispatches file extensions to the correct dependency extractor.
 //
 // Dispatch table:
-//   .ts/.tsx/.js/.jsx  → extractTsJsEdges()  (AST via tree-sitter, confidence = EXTRACTED 1.0)
-//   .go                → extractGoEdges()     (specialized Go resolver, confidence = INFERRED 0.8)
-//   .rb                → extractRubyEdges()   (specialized Ruby resolver, confidence = INFERRED 0.8)
-//   all IMPORT_PATTERNS → buildRegexExtractor() (generic regex, confidence = INFERRED 0.8)
+//   .ts/.tsx/.js/.jsx  → extractTsJsEdges()     (AST via tree-sitter, confidence = EXTRACTED 1.0)
+//   .py                → extractPythonEdges()    (AST via tree-sitter-python, confidence = EXTRACTED 1.0)
+//   .rs                → extractRustEdges()      (AST via tree-sitter-rust, confidence = EXTRACTED 1.0)
+//   .c/.h              → makeIncludeExtractor()  (AST via tree-sitter-c, confidence = EXTRACTED 1.0)
+//   .cpp/.cc/etc       → makeIncludeExtractor()  (AST via tree-sitter-cpp, confidence = EXTRACTED 1.0)
+//   .go                → extractGoEdges()        (specialized Go resolver, confidence = INFERRED 0.8)
+//   .rb                → extractRubyEdges()      (specialized Ruby resolver, confidence = INFERRED 0.8)
+//   all IMPORT_PATTERNS → buildRegexExtractor()  (generic regex, confidence = INFERRED 0.8)
 //   unknown extension  → returns []
 //
 // After this module, all dependency extraction flows through extractEdges() and all
@@ -14,10 +18,46 @@
 
 import * as path from 'node:path';
 import * as fsPromises from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { log } from './logger.js';
 import { EXTRACTED, INFERRED, CONFIDENCE_SOURCE_EXTRACTED, CONFIDENCE_SOURCE_INFERRED } from './confidence.js';
 import type { ConfidenceSource } from './confidence.js';
 import { extractSnapshot } from './change-detector/ast-parser.js';
+
+const _require = createRequire(import.meta.url);
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Parser = _require('tree-sitter') as any;
+
+// Grammar loading — each in a try/catch so one bad grammar doesn't block others
+let PythonLang: unknown = null;
+let RustLang: unknown = null;
+let CLang: unknown = null;
+let CppLang: unknown = null;
+
+try { PythonLang = _require('tree-sitter-python'); } catch (e) { log(`[language-config] Failed to load tree-sitter-python: ${e}`); }
+try { RustLang = _require('tree-sitter-rust'); } catch (e) { log(`[language-config] Failed to load tree-sitter-rust: ${e}`); }
+try { CLang = _require('tree-sitter-c'); } catch (e) { log(`[language-config] Failed to load tree-sitter-c: ${e}`); }
+try { CppLang = _require('tree-sitter-cpp'); } catch (e) { log(`[language-config] Failed to load tree-sitter-cpp: ${e}`); }
+
+// Parser instances — one per grammar (parser is stateful)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createParser(lang: unknown): any | null {
+  if (!lang) return null;
+  try {
+    const p = new Parser();
+    p.setLanguage(lang);
+    return p;
+  } catch (e) {
+    log(`[language-config] Failed to create parser: ${e}`);
+    return null;
+  }
+}
+
+const pythonParser = createParser(PythonLang);
+const rustParser = createParser(RustLang);
+const cParser = createParser(CLang);
+const cppParser = createParser(CppLang);
 import {
   IMPORT_PATTERNS,
   resolveImportPath,
@@ -76,6 +116,306 @@ async function getGoModuleName(projectRoot: string): Promise<string | null> {
   const name = await readGoModuleName(projectRoot);
   goModuleCache.set(projectRoot, name);
   return name;
+}
+
+// ─── Python AST extractor ─────────────────────────────────────────────────────
+
+async function handlePythonModule(
+  moduleName: string,
+  filePath: string,
+  projectRoot: string,
+  edges: EdgeResult[]
+): Promise<void> {
+  void projectRoot; // projectRoot reserved for future use (e.g. resolve installed packages)
+  if (!moduleName || moduleName === '.') return;
+  // Relative import: starts with '.'
+  if (moduleName.startsWith('.')) {
+    const resolved = path.resolve(path.dirname(filePath), moduleName);
+    const normalized = normalizePath(resolved);
+    try {
+      await fsPromises.access(normalized);
+      edges.push({
+        target: normalized,
+        edgeType: 'imports',
+        confidence: EXTRACTED,
+        confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+        weight: 1,
+        isPackage: false,
+      });
+    } catch { /* file not found — skip */ }
+  } else {
+    // Absolute module: package dependency
+    const topLevel = moduleName.split('.')[0];
+    const resolved = path.resolve(path.dirname(filePath), moduleName);
+    const normalized = normalizePath(resolved);
+    edges.push({
+      target: normalized,
+      edgeType: 'imports',
+      confidence: EXTRACTED,
+      confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+      weight: 1,
+      isPackage: true,
+      packageName: topLevel,
+    });
+  }
+}
+
+async function extractPythonEdges(
+  filePath: string,
+  content: string,
+  projectRoot: string
+): Promise<EdgeResult[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tree = (pythonParser as any).parse(content);
+  const edges: EdgeResult[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function visitNode(node: any): void {
+    if (node.type === 'import_statement') {
+      // "import os" or "import os, json" — multiple dotted_name/aliased_import children
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        const moduleName: string = child.type === 'aliased_import'
+          ? (child.childForFieldName('name')?.text ?? '')
+          : child.text;
+        if (moduleName) {
+          void handlePythonModule(moduleName, filePath, projectRoot, edges);
+        }
+      }
+    } else if (node.type === 'import_from_statement') {
+      const modNameNode = node.childForFieldName('module_name');
+      if (modNameNode) {
+        void handlePythonModule(modNameNode.text as string, filePath, projectRoot, edges);
+      }
+    }
+    for (let i = 0; i < node.childCount; i++) visitNode(node.child(i));
+  }
+
+  visitNode(tree.rootNode);
+  // Collect all async handlePythonModule calls — they were fired with void, edges are pushed synchronously
+  // for package imports. For relative imports we do fsPromises.access, but they are not awaited above.
+  // Re-implement with proper async collection:
+  const asyncEdgePromises: Promise<void>[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function visitNodeAsync(node: any): void {
+    if (node.type === 'import_statement') {
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        const moduleName: string = child.type === 'aliased_import'
+          ? (child.childForFieldName('name')?.text ?? '')
+          : child.text;
+        if (moduleName) asyncEdgePromises.push(handlePythonModule(moduleName, filePath, projectRoot, edges));
+      }
+    } else if (node.type === 'import_from_statement') {
+      const modNameNode = node.childForFieldName('module_name');
+      if (modNameNode) {
+        asyncEdgePromises.push(handlePythonModule(modNameNode.text as string, filePath, projectRoot, edges));
+      }
+    }
+    for (let i = 0; i < node.childCount; i++) visitNodeAsync(node.child(i));
+  }
+
+  edges.length = 0; // clear the void-fired edges
+  visitNodeAsync(tree.rootNode);
+  await Promise.all(asyncEdgePromises);
+  return edges;
+}
+
+// ─── Rust AST extractor ────────────────────────────────────────────────────────
+
+async function handleRustUse(
+  usePath: string,
+  filePath: string,
+  projectRoot: string,
+  edges: EdgeResult[]
+): Promise<void> {
+  void projectRoot;
+  if (!usePath) return;
+  const isLocal =
+    usePath.startsWith('crate::') ||
+    usePath.startsWith('super::') ||
+    usePath.startsWith('self::');
+
+  if (isLocal) {
+    let localPath = usePath;
+    if (usePath.startsWith('crate::')) {
+      localPath = usePath.slice('crate::'.length);
+    } else if (usePath.startsWith('super::')) {
+      localPath = usePath.slice('super::'.length);
+    } else if (usePath.startsWith('self::')) {
+      localPath = usePath.slice('self::'.length);
+    }
+    const fsPath = localPath.replace(/::/g, '/');
+    const candidate = path.join(path.dirname(filePath), fsPath + '.rs');
+    const normalized = normalizePath(candidate);
+    try {
+      await fsPromises.access(normalized);
+      edges.push({
+        target: normalized,
+        edgeType: 'imports',
+        confidence: EXTRACTED,
+        confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+        weight: 1,
+        isPackage: false,
+      });
+    } catch {
+      // Try without .rs (might be a module directory)
+      const dirCandidate = path.join(path.dirname(filePath), fsPath, 'mod.rs');
+      const normalizedDir = normalizePath(dirCandidate);
+      try {
+        await fsPromises.access(normalizedDir);
+        edges.push({
+          target: normalizedDir,
+          edgeType: 'imports',
+          confidence: EXTRACTED,
+          confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+          weight: 1,
+          isPackage: false,
+        });
+      } catch { /* not found — skip */ }
+    }
+  } else {
+    // External crate
+    const packageName = usePath.split('::')[0];
+    edges.push({
+      target: usePath,
+      edgeType: 'imports',
+      confidence: EXTRACTED,
+      confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+      weight: 1,
+      isPackage: true,
+      packageName,
+    });
+  }
+}
+
+async function handleRustMod(
+  modName: string,
+  filePath: string,
+  _projectRoot: string,
+  edges: EdgeResult[]
+): Promise<void> {
+  // mod utils; → look for utils.rs or utils/mod.rs relative to current file dir
+  const dir = path.dirname(filePath);
+  const candidate1 = normalizePath(path.join(dir, modName + '.rs'));
+  const candidate2 = normalizePath(path.join(dir, modName, 'mod.rs'));
+
+  for (const candidate of [candidate1, candidate2]) {
+    try {
+      await fsPromises.access(candidate);
+      edges.push({
+        target: candidate,
+        edgeType: 'imports',
+        confidence: EXTRACTED,
+        confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+        weight: 1,
+        isPackage: false,
+      });
+      return; // found first match
+    } catch { /* try next */ }
+  }
+}
+
+async function extractRustEdges(
+  filePath: string,
+  content: string,
+  projectRoot: string
+): Promise<EdgeResult[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tree = (rustParser as any).parse(content);
+  const edges: EdgeResult[] = [];
+  const asyncPromises: Promise<void>[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function visitNode(node: any): void {
+    if (node.type === 'use_declaration') {
+      const argNode = node.childForFieldName('argument');
+      if (argNode) asyncPromises.push(handleRustUse(argNode.text as string, filePath, projectRoot, edges));
+    } else if (node.type === 'mod_item') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode && !node.childForFieldName('body')) {
+        asyncPromises.push(handleRustMod(nameNode.text as string, filePath, projectRoot, edges));
+      }
+    } else if (node.type === 'extern_crate_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        edges.push({
+          target: nameNode.text as string,
+          edgeType: 'imports',
+          confidence: EXTRACTED,
+          confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+          weight: 1,
+          isPackage: true,
+          packageName: nameNode.text as string,
+        });
+      }
+    }
+    for (let i = 0; i < node.childCount; i++) visitNode(node.child(i));
+  }
+
+  visitNode(tree.rootNode);
+  await Promise.all(asyncPromises);
+  return edges;
+}
+
+// ─── C/C++ include extractor factory ──────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeIncludeExtractor(parser: any) {
+  return async function extractIncludeEdges(
+    filePath: string,
+    content: string,
+    _projectRoot: string
+  ): Promise<EdgeResult[]> {
+    const tree = parser.parse(content);
+    const edges: EdgeResult[] = [];
+    const asyncPromises: Promise<void>[] = [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function visitNode(node: any): void {
+      if (node.type === 'preproc_include') {
+        const pathNode = node.childForFieldName('path');
+        if (pathNode) {
+          if (pathNode.type === 'system_lib_string') {
+            // <stdio.h> — system include
+            const name = (pathNode.text as string).slice(1, -1); // strip < >
+            edges.push({
+              target: name,
+              edgeType: 'imports',
+              confidence: EXTRACTED,
+              confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+              weight: 1,
+              isPackage: true,
+              packageName: name,
+            });
+          } else if (pathNode.type === 'string_literal') {
+            // "myfile.h" — local include
+            const rawPath = (pathNode.text as string).slice(1, -1); // strip quotes
+            const resolved = path.resolve(path.dirname(filePath), rawPath);
+            const normalized = normalizePath(resolved);
+            asyncPromises.push(
+              fsPromises.access(normalized).then(() => {
+                edges.push({
+                  target: normalized,
+                  edgeType: 'imports',
+                  confidence: EXTRACTED,
+                  confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+                  weight: 1,
+                  isPackage: false,
+                });
+              }).catch(() => { /* file not found — skip */ })
+            );
+          }
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) visitNode(node.child(i));
+    }
+
+    visitNode(tree.rootNode);
+    await Promise.all(asyncPromises);
+    return edges;
+  };
 }
 
 // ─── TS/JS AST extractor ───────────────────────────────────────────────────────
@@ -423,8 +763,50 @@ registry.set('.rb', {
   extract: extractRubyEdges,
 });
 
-// All IMPORT_PATTERNS languages: generic regex extractor
-// Covers: .py, .c, .cpp, .cc, .cxx, .h, .hpp, .hh, .hxx, .rs, .lua, .zig, .php, .cs, .java
+// Python: AST extractor (with regex fallback if grammar failed to load)
+if (pythonParser) {
+  registry.set('.py', {
+    grammarLoader: () => PythonLang,
+    usesRegexFallback: false,
+    extract: extractPythonEdges,
+  });
+}
+
+// Rust: AST extractor
+if (rustParser) {
+  registry.set('.rs', {
+    grammarLoader: () => RustLang,
+    usesRegexFallback: false,
+    extract: extractRustEdges,
+  });
+}
+
+// C: AST extractor (for .c, .h)
+if (cParser) {
+  const extractCEdges = makeIncludeExtractor(cParser);
+  for (const ext of ['.c', '.h']) {
+    registry.set(ext, {
+      grammarLoader: () => CLang,
+      usesRegexFallback: false,
+      extract: extractCEdges,
+    });
+  }
+}
+
+// C++: AST extractor (for .cpp, .cc, .cxx, .hpp, .hh, .hxx)
+if (cppParser) {
+  const extractCppEdges = makeIncludeExtractor(cppParser);
+  for (const ext of ['.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx']) {
+    registry.set(ext, {
+      grammarLoader: () => CppLang,
+      usesRegexFallback: false,
+      extract: extractCppEdges,
+    });
+  }
+}
+
+// All IMPORT_PATTERNS languages not yet registered: generic regex extractor
+// Covers: .lua, .zig, .php, .cs, .java (Python, C, C++, Rust are handled by AST above)
 // Populated lazily on first extractEdges() call to avoid circular import issues
 // (file-utils.ts imports extractEdges, language-config.ts imports IMPORT_PATTERNS)
 let _regexExtractorsLoaded = false;
@@ -475,5 +857,5 @@ export async function extractEdges(
   }
 }
 
-// Export buildAstExtractor so Phase 26 can compose custom entries without modifying this file.
-export { buildAstExtractor };
+// Export buildAstExtractor and buildRegexExtractor for tests and external composition.
+export { buildAstExtractor, buildRegexExtractor };
