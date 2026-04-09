@@ -92,7 +92,7 @@ function clearTables(): void {
 
 // ─── getStaleness tests ────────────────────────────────────────────────────────
 
-import { getStaleness, markStale } from './db/repository.js';
+import { getStaleness, markStale, getDependenciesWithEdgeMetadata } from './db/repository.js';
 
 describe('getStaleness', () => {
   it('returns all nulls for a fresh file (no staleness set)', () => {
@@ -235,6 +235,147 @@ describe('Staleness injection into MCP response shape', () => {
 
     expect(freshEntry).not.toHaveProperty('summaryStale');
     expect(staleEntry).toHaveProperty('summaryStale', 7777);
+  });
+});
+
+// Helper: insert a dependency row into the DB
+function insertDependency(sourcePath: string, targetPath: string, opts?: {
+  dependency_type?: string;
+  edge_type?: string;
+  confidence?: number;
+  confidence_source?: string;
+}): void {
+  const sqlite = getSqlite();
+  sqlite.prepare(
+    'INSERT INTO file_dependencies (source_path, target_path, dependency_type, edge_type, confidence, confidence_source) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(
+    sourcePath,
+    targetPath,
+    opts?.dependency_type ?? 'local_import',
+    opts?.edge_type ?? 'imports',
+    opts?.confidence ?? 0.8,
+    opts?.confidence_source ?? 'inferred',
+  );
+}
+
+// ─── getDependenciesWithEdgeMetadata tests ────────────────────────────────────
+
+describe('getDependenciesWithEdgeMetadata', () => {
+  it('returns empty array for file with no dependencies', () => {
+    clearTables();
+    insertFile('/src/alone.ts');
+
+    const result = getDependenciesWithEdgeMetadata('/src/alone.ts');
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns {target_path, edge_type, confidence} for file with local_import edges', () => {
+    clearTables();
+    insertFile('/src/main.ts');
+    insertFile('/src/utils.ts');
+    insertDependency('/src/main.ts', '/src/utils.ts', {
+      edge_type: 'imports',
+      confidence: 0.8,
+    });
+
+    const result = getDependenciesWithEdgeMetadata('/src/main.ts');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({ target_path: '/src/utils.ts', edge_type: 'imports', confidence: 0.8 });
+  });
+
+  it('excludes package_import rows (only returns local_import)', () => {
+    clearTables();
+    insertFile('/src/main.ts');
+    insertDependency('/src/main.ts', '/src/utils.ts', { dependency_type: 'local_import', edge_type: 'imports', confidence: 0.8 });
+    insertDependency('/src/main.ts', 'react', { dependency_type: 'package_import', edge_type: 'imports', confidence: 1.0 });
+
+    const result = getDependenciesWithEdgeMetadata('/src/main.ts');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].target_path).toBe('/src/utils.ts');
+  });
+
+  it('returns correct edge_type values (imports, inherits, re_exports)', () => {
+    clearTables();
+    insertFile('/src/child.ts');
+    insertFile('/src/parent.ts');
+    insertFile('/src/base.ts');
+    insertDependency('/src/child.ts', '/src/parent.ts', { edge_type: 'inherits', confidence: 1.0 });
+    insertDependency('/src/child.ts', '/src/base.ts', { edge_type: 're_exports', confidence: 0.8 });
+
+    const result = getDependenciesWithEdgeMetadata('/src/child.ts');
+
+    expect(result).toHaveLength(2);
+    const edgeTypes = result.map(r => r.edge_type);
+    expect(edgeTypes).toContain('inherits');
+    expect(edgeTypes).toContain('re_exports');
+  });
+
+  it('returns correct confidence values (1.0 for extracted, 0.8 for inferred)', () => {
+    clearTables();
+    insertFile('/src/a.ts');
+    insertFile('/src/b.ts');
+    insertFile('/src/c.ts');
+    insertDependency('/src/a.ts', '/src/b.ts', { edge_type: 'imports', confidence: 1.0, confidence_source: 'extracted' });
+    insertDependency('/src/a.ts', '/src/c.ts', { edge_type: 'imports', confidence: 0.8, confidence_source: 'inferred' });
+
+    const result = getDependenciesWithEdgeMetadata('/src/a.ts');
+
+    expect(result).toHaveLength(2);
+    const bRow = result.find(r => r.target_path === '/src/b.ts');
+    const cRow = result.find(r => r.target_path === '/src/c.ts');
+    expect(bRow?.confidence).toBe(1.0);
+    expect(cRow?.confidence).toBe(0.8);
+  });
+});
+
+// ─── get_file_summary enriched dependency shape tests ─────────────────────────
+
+describe('get_file_summary enriched dependency shape', () => {
+  it('maps getDependenciesWithEdgeMetadata results to {path, edgeType, confidence} shape', () => {
+    clearTables();
+    insertFile('/src/main.ts');
+    insertFile('/src/utils.ts');
+    insertDependency('/src/main.ts', '/src/utils.ts', {
+      edge_type: 'imports',
+      confidence: 1.0,
+      confidence_source: 'extracted',
+    });
+
+    const deps = getDependenciesWithEdgeMetadata('/src/main.ts');
+    const mapped = deps.map(d => ({
+      path: d.target_path,
+      edgeType: d.edge_type,
+      confidence: d.confidence,
+    }));
+
+    expect(mapped).toEqual([
+      { path: '/src/utils.ts', edgeType: 'imports', confidence: 1.0 },
+    ]);
+  });
+
+  it('maps inherits edge type correctly', () => {
+    clearTables();
+    insertFile('/src/child.ts');
+    insertFile('/src/parent.ts');
+    insertDependency('/src/child.ts', '/src/parent.ts', {
+      edge_type: 'inherits',
+      confidence: 1.0,
+      confidence_source: 'extracted',
+    });
+
+    const deps = getDependenciesWithEdgeMetadata('/src/child.ts');
+    const mapped = deps.map(d => ({
+      path: d.target_path,
+      edgeType: d.edge_type,
+      confidence: d.confidence,
+    }));
+
+    expect(mapped).toEqual([
+      { path: '/src/parent.ts', edgeType: 'inherits', confidence: 1.0 },
+    ]);
   });
 });
 

@@ -202,6 +202,25 @@ export function getDependencies(filePath: string): string[] {
 }
 
 /**
+ * Returns local import dependencies for the given file with edge metadata.
+ * Each result includes target_path, edge_type, and confidence from the DB columns.
+ * Only returns local_import rows (package_import rows excluded).
+ * Use this instead of getDependencies() when the caller needs edge type/confidence.
+ */
+export function getDependenciesWithEdgeMetadata(filePath: string): Array<{
+  target_path: string;
+  edge_type: string;
+  confidence: number;
+}> {
+  const sqlite = getSqlite();
+  return sqlite
+    .prepare(
+      "SELECT target_path, edge_type, confidence FROM file_dependencies WHERE source_path = ? AND dependency_type = 'local_import'"
+    )
+    .all(filePath) as Array<{ target_path: string; edge_type: string; confidence: number }>;
+}
+
+/**
  * Returns source paths of files that depend on the given target (inverse query).
  * Per RESEARCH.md anti-pattern: dependents are NEVER stored as separate rows —
  * they are derived by querying file_dependencies WHERE target_path = ?.
