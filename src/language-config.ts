@@ -425,14 +425,20 @@ registry.set('.rb', {
 
 // All IMPORT_PATTERNS languages: generic regex extractor
 // Covers: .py, .c, .cpp, .cc, .cxx, .h, .hpp, .hh, .hxx, .rs, .lua, .zig, .php, .cs, .java
-for (const ext of Object.keys(IMPORT_PATTERNS)) {
-  if (!registry.has(ext)) {
-    // Don't overwrite TS/JS entries (they use AST, not regex)
-    registry.set(ext, {
-      grammarLoader: null,
-      usesRegexFallback: true,
-      extract: buildRegexExtractor(ext),
-    });
+// Populated lazily on first extractEdges() call to avoid circular import issues
+// (file-utils.ts imports extractEdges, language-config.ts imports IMPORT_PATTERNS)
+let _regexExtractorsLoaded = false;
+function ensureRegexExtractors(): void {
+  if (_regexExtractorsLoaded) return;
+  _regexExtractorsLoaded = true;
+  for (const ext of Object.keys(IMPORT_PATTERNS)) {
+    if (!registry.has(ext)) {
+      registry.set(ext, {
+        grammarLoader: null,
+        usesRegexFallback: true,
+        extract: buildRegexExtractor(ext),
+      });
+    }
   }
 }
 
@@ -457,6 +463,7 @@ export async function extractEdges(
   content: string,
   projectRoot: string
 ): Promise<EdgeResult[]> {
+  ensureRegexExtractors();
   const ext = path.extname(filePath).toLowerCase();
   const config = registry.get(ext);
   if (!config) return [];

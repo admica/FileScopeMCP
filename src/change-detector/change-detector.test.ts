@@ -51,7 +51,11 @@ beforeAll(async () => {
       dependency_type TEXT NOT NULL,
       package_name TEXT,
       package_version TEXT,
-      is_dev_dependency INTEGER
+      is_dev_dependency INTEGER,
+      edge_type TEXT DEFAULT 'imports',
+      confidence REAL DEFAULT 0.8,
+      confidence_source TEXT DEFAULT 'inferred',
+      weight REAL DEFAULT 1.0
     );
   `);
 });
