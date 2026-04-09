@@ -153,6 +153,51 @@
 
 ---
 
+## Milestone: v1.4 — Deep Graph Intelligence
+
+**Shipped:** 2026-04-09
+**Phases:** 4 | **Plans:** 8
+
+### What Was Built
+- Schema migration adds edge_type, confidence, weight columns + file_communities table
+- LanguageConfig registry with extractEdges() single entry point for all languages
+- Tree-sitter AST extractors for Python, Rust, C/C++ replacing regex parsing
+- TS/JS richer edge types (imports, re_exports, inherits) and edge weight aggregation
+- Louvain community detection via graphology with dirty-flag cache
+- get_communities MCP tool, enriched get_file_summary, maxItems token budget on list tools
+
+### What Worked
+- All 4 phases completed in a single day — tight linear dependency chain (schema→extractors→communities→polish)
+- LanguageConfig registry pattern made Phase 26 plug-in trivial: add grammar + extractor, register in map
+- setEdges() single writer with enriched columns ensured all paths write consistent edge metadata
+- Dirty-flag cache for communities avoided premature optimization — Louvain only runs when edges change
+- 19 parity tests (Phase 26) caught Python async bug and C/C++ path mismatch before they shipped
+
+### What Was Inefficient
+- No VERIFICATION.md for any phase — fourth milestone in a row where formal verification was skipped
+- REQUIREMENTS.md traceability table never updated from Pending — all 18 requirements still unchecked despite being completed
+- buildAstExtractor() scaffold created in Phase 25 was bypassed by Phase 26 — dead code shipped
+- AST-05 (Go tree-sitter) claimed as completed in SUMMARY frontmatter but Go still uses regex — misleading
+
+### Patterns Established
+- LanguageConfig registry: Map<ext, { extract }> for O(1) dispatch per extension
+- EdgeResult carries all metadata (confidence, edgeType, weight, isPackage) as a composable value
+- Pure algorithm module pattern (community-detection.ts): data in, results out, no project imports
+- Dirty-flag cache invalidation for expensive batch algorithms
+
+### Key Lessons
+1. Single-day milestones are achievable with a tight 4-phase linear chain and no cross-system integration
+2. Registry patterns pay off immediately — Phase 26 added 4 languages by just plugging into the registry
+3. VERIFICATION.md continues to be skipped — process needs to either be enforced or formally dropped
+4. Requirement claims in SUMMARY frontmatter should be verified against actual implementation (AST-05 mismatch)
+
+### Cost Observations
+- Model mix: sonnet for execution agents, opus for orchestration
+- Sessions: 1 session, single day
+- Notable: fastest milestone ever (4 phases in <1 day) due to clean linear dependencies and no Nexus/UI work
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -163,6 +208,7 @@
 | v1.1 | 6 | 11 | 2 | Independent phases, no cross-phase deps |
 | v1.2 | 4 | 8 | 4 | Dedicated cleanup phase after architecture change |
 | v1.3 | 5 | 12 | 3 | Integration checker as verification substitute |
+| v1.4 | 4 | 8 | 1 | Registry pattern enables single-day multi-language milestone |
 
 ### Cumulative Quality
 
@@ -172,6 +218,7 @@
 | v1.1 | 220+ | 7 | via audit |
 | v1.2 | 250+ | 12 | via audit |
 | v1.3 | 250+ | 35 | 35/35 via integration checker |
+| v1.4 | 260+ | 18 | 17/18 + 1 accepted deviation (AST-05) |
 
 ### Top Lessons (Verified Across Milestones)
 

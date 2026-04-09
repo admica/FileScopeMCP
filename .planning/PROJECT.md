@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A fully autonomous file intelligence system that watches project directories and maintains rich, up-to-date metadata about every file — summaries, relationships, key concepts, and change impact — so LLMs can query structured knowledge about a codebase without reading raw files. Includes a standalone LLM broker for cross-repo job coordination and a visual code exploration dashboard (Nexus) for cross-repo observability.
+A fully autonomous file intelligence system that watches project directories and maintains rich, up-to-date metadata about every file — summaries, relationships, key concepts, and change impact — so LLMs can query structured knowledge about a codebase without reading raw files. Features tree-sitter AST extraction with confidence-labeled edges, Louvain community detection, a standalone LLM broker for cross-repo job coordination, and a visual code exploration dashboard (Nexus).
 
 ## Core Value
 
@@ -10,16 +10,16 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Current State
 
-Shipped v1.3 Nexus (2026-04-03). All four milestones complete.
+Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 phases total).
 
 **Architecture:**
 - MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface
 - LLM broker (singleton): standalone process coordinating all Ollama access via Unix socket IPC
 - Nexus dashboard: Fastify API + Svelte 5 SPA at 0.0.0.0:1234, read-only SQLite access
 
-**Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter, chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js
+**Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter, chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js, graphology
 
-**Codebase:** ~13K LOC TypeScript | 250+ tests passing | 24 phases shipped across 4 milestones
+**Codebase:** ~19K LOC TypeScript | 260+ tests passing | 28 phases shipped across 5 milestones
 
 ## Requirements
 
@@ -83,12 +83,27 @@ Shipped v1.3 Nexus (2026-04-03). All four milestones complete.
 - ✓ Navbar repo health status dots (green/orange/gray) — v1.3
 - ✓ Settings page with repo remove/blacklist/restore management — v1.3
 - ✓ Responsive collapsible layout for project view — v1.3
+- ✓ LanguageConfig registry dispatching tree-sitter grammars per file extension — v1.4
+- ✓ Tree-sitter AST extraction for Python, Rust, C/C++ (replacing regex) — v1.4
+- ✓ Regex fallback for unsupported languages (Zig, Lua, PHP, C#, Java) — v1.4
+- ✓ Richer edge types: imports, re_exports, inherits for TS/JS — v1.4
+- ✓ Edge weights (reference count between file pairs) — v1.4
+- ✓ Edge metadata columns (edge_type, confidence, confidence_source, weight) — v1.4
+- ✓ Confidence constants (EXTRACTED 1.0, INFERRED 0.8) — v1.4
+- ✓ All edges carry confidence label and score — v1.4
+- ✓ get_file_summary returns edge types and confidence for dependencies — v1.4
+- ✓ Louvain community detection via graphology — v1.4
+- ✓ Community dirty-flag cache invalidation — v1.4
+- ✓ get_communities MCP tool with representative-path identification — v1.4
+- ✓ Community membership stored in SQLite file_communities table — v1.4
+- ✓ Token budget (maxItems) on list_files and find_important_files — v1.4
+- ✓ MCP tools surface edge types and confidence in responses — v1.4
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-(None — planning next milestone)
+None — planning next milestone.
 
 ### Out of Scope
 
@@ -107,12 +122,15 @@ Shipped v1.3 Nexus (2026-04-03). All four milestones complete.
 - Formal version handshake between broker and instances — defer to future milestone
 - Authentication / access control for Nexus — read-only viewer on trusted LAN, no secrets exposed
 - WebSocket transport for Nexus — SSE sufficient for log streaming, no bidirectional needed
+- Cross-file call resolution — requires type registry, HIGH complexity
+- Graph diff between scans — no clear use case
+- Real-time community updates — Louvain is batch-only; dirty-flag cache is correct pattern
 
 ## Context
 
-Shipped v1.0 (9 phases, 9,515 LOC), v1.1 (6 phases, hardening + language support), v1.2 (4 phases, LLM broker), and v1.3 (5 phases, Nexus dashboard). 250+ tests passing. The system is a complete autonomous file intelligence platform with a standalone LLM broker and a visual code exploration dashboard.
+Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), and v1.4 (4 phases). The system is a complete autonomous file intelligence platform with a standalone LLM broker, a visual code exploration dashboard (Nexus), and rich graph intelligence — tree-sitter AST extraction for Python/Rust/C/C++/Go/TS/JS with richer edge types (imports, re_exports, inherits), edge weights, confidence labels, Louvain community detection, and token budget caps on MCP tool responses.
 
-Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
+Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, graphology, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
 
 ## Constraints
 
@@ -146,6 +164,13 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | Hash-based routing (hand-rolled) | Only ~5 routes, avoids a dependency | ✓ Good |
 | Auto-discovery + blacklist over manual add | Repos appear automatically, users only manage removals | ✓ Good |
 | Per-request SQLite queries (no cache) | Sync reads ~1ms via better-sqlite3, caching adds complexity | ✓ Good |
+| LanguageConfig registry pattern | O(1) dispatch by extension, Phase 26+ adds entries without touching dispatch | ✓ Good |
+| extractEdges() single entry point | All dependency extraction through one function, eliminates multi-branch dispatch | ✓ Good |
+| Direct AST extractors over buildAstExtractor scaffold | Phase 26 bypassed the scaffold for cleaner per-language extractors | ✓ Good |
+| Go kept on regex (D-06) | No stable tree-sitter-go npm grammar; regex resolveGoImports works correctly | ✓ Good |
+| graphology for Louvain clustering | Mature graph library with community detection algorithms, minimal deps | ✓ Good |
+| Dirty-flag cache for communities | Louvain is batch-only; recompute only when edges change, not on every query | ✓ Good |
+| maxItems rename over backward compat | Zero legacy installs — clean API naming without shims | ✓ Good |
 
 ## Evolution
 
@@ -165,4 +190,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-03 after v1.3 Nexus milestone*
+*Last updated: 2026-04-09 after v1.4 Deep Graph Intelligence milestone complete*

@@ -1,17 +1,17 @@
 # Project Research Summary
 
-**Project:** FileScopeMCP v1.3 — Nexus Observability Service
-**Domain:** Centralized event sink / observability daemon for a local multi-process LLM tooling system
-**Researched:** 2026-03-24
+**Project:** FileScopeMCP v1.4 Deep Graph Intelligence
+**Domain:** Tree-sitter multi-language AST extraction, confidence-labeled dependency edges, Louvain community detection, MCP token budgeting
+**Researched:** 2026-04-08
 **Confidence:** HIGH
 
 ## Executive Summary
 
-FileScopeMCP v1.3 adds the Nexus: a standalone daemon that receives events from all running MCP instances over a Unix domain socket, persists them to a SQLite database (`nexus.db`), and writes a human-readable fixed-width log file that developers can monitor with `tail -f`. The Nexus is architecturally identical to the existing LLM broker — same PID guard, same NDJSON framing, same auto-spawn pattern, same reconnect model — making it a greenfield addition with zero architectural unknowns. The entire milestone requires no new npm dependencies; every capability is covered by Node.js 22 built-ins and existing dependencies (`better-sqlite3`, `esbuild`).
+FileScopeMCP v1.4 is a surgical capability addition to an existing, validated TypeScript 5.8 / Node.js 22 MCP server. The milestone replaces regex-based import parsing for Python, Rust, C, C++, Go with official tree-sitter grammar packages, introduces richer dependency edge types (imports, calls, inherits, contains) with confidence scores, adds Louvain community detection via the graphology ecosystem, and caps MCP tool responses with a token budget. Experts building this type of system use a LanguageConfig registry pattern — one config entry per language, one file per grammar — to keep multi-language extraction maintainable, and they treat community detection as an on-demand batch computation rather than a real-time reactive one.
 
-The recommended implementation approach is a strict linear six-phase build: types and store first (testable in isolation), server and daemon second, client third, MCP wiring fourth, stats migration fifth, and end-to-end verification last. This ordering is driven by hard dependency requirements — the client can't be integrated before the server API is stable, and the stats migration should only run after the core event pipeline is proven. The Nexus must be a pure fire-and-forget event sink; the single exception (stats query/response for the `status` MCP tool) is best avoided entirely by having MCP instances read `nexus.db` directly with a read-only `better-sqlite3` connection, which eliminates a 2-second timeout regression in the `status` tool.
+The recommended approach is schema-first: add the four new `file_dependencies` columns and the `file_communities` table before touching any extraction code, because code that writes `edge_type` will fail at runtime against an old schema. The AST extractor should be factored into a standalone `src/ast-extractor/` module with a clean `extractEdges(filePath, content, root): Edge[]` interface, replacing the three duplicated extraction code paths currently spread across `coordinator.ts`, `file-utils.ts`, and `analyzeNewFile()`. Graphology's Louvain implementation runs in ~50ms on 1K-node graphs and is the clear winner in the JS ecosystem — the integration pattern is straightforward once the graph is built from the existing `getAllLocalImportEdges()` query.
 
-The dominant risk class is the observability daemon accidentally becoming a critical-path dependency. If `nexusConnect()` is implemented as an async function that coordinator init awaits — mirroring the broker pattern — any Nexus startup failure (missing binary, disk full, permission denied) will break the user's Claude session. The fix is simple but must be a design constraint enforced from day one: `nexusConnect()` must be void (not async), must never throw, and must never be awaited. All other pitfalls (spawn races, WAL flush on shutdown, log rotation events lost, ring buffer bloat) have mechanical solutions documented in PITFALLS.md and can be prevented with targeted unit and integration tests written alongside each phase.
+The dominant risk is not algorithmic complexity but operational correctness: grammar ABI mismatches crash the MCP server at startup rather than at parse time, schema migrations must not emit `NOT NULL DEFAULT` constraints (which trigger a full SQLite table rebuild), community IDs from Louvain are non-deterministic across runs and must never be exposed as stable identifiers, and token budget truncation must happen at the data level (item count) rather than at the string level (character slice). All of these are known, preventable pitfalls with clear mitigation patterns documented in PITFALLS.md.
 
 ---
 
@@ -19,169 +19,161 @@ The dominant risk class is the observability daemon accidentally becoming a crit
 
 ### Recommended Stack
 
-This is a zero-dependency-addition milestone. All new capabilities are covered by the retained stack. The only "new" technology decisions are scoped to implementation choices within existing dependencies.
+The existing stack (TypeScript 5.8, Node.js 22, ESM, esbuild, `better-sqlite3`, `tree-sitter@^0.25.0`) is retained without change. v1.4 adds 13 new npm packages: 10 tree-sitter grammar packages for the languages currently handled by regex, plus `graphology@^0.26.0`, `graphology-types@^0.24.8`, and `graphology-communities-louvain@^2.0.2` for community detection. No new packages are needed for confidence labels or token budgeting — both are implemented as schema additions and utility functions respectively.
 
-**Core technologies and their v1.3 roles:**
+All new grammars use the same `createRequire(import.meta.url)` CJS loading pattern already established for `better-sqlite3` and the existing tree-sitter grammars. Community detection packages use the same pattern (`graphology-communities-louvain` is a CJS module). PHP grammar exports `{ php, php_only }` (same shape as TypeScript's `{ typescript, tsx }`) and must be verified at integration time.
 
-- **`better-sqlite3` (raw, no Drizzle):** `nexus.db` uses the same `createRequire(import.meta.url)` loading pattern as `src/db/db.ts`. The Nexus schema is two fixed tables with known columns — Drizzle's value is schema evolution, which doesn't apply here. Raw prepared statements + `db.transaction()` for batch inserts are the correct choice, as already demonstrated in `broker/stats.ts`.
-- **`node:net` + `node:readline`:** The Nexus server and client are structurally identical to `broker/server.ts` and `broker/client.ts`. Unix domain socket at `~/.filescope/nexus.sock`, NDJSON framing via `readline.createInterface`. No new IPC mechanism needed.
-- **`fs.appendFileSync` (not a stream):** Log file writes must use synchronous append, not a writable stream. Streams create an EBADF/ENOENT window during the 10MB log rotation rename sequence. At the Nexus's event volume (~200 events/minute peak), sync append performance is indistinguishable from a stream.
-- **Plain `T[]` array + self-rescheduling `setTimeout`:** Write batching uses a self-rescheduling `setTimeout` (not `setInterval`) draining a plain array. Libraries such as `better-queue` or `p-queue` are over-engineering for an 8-line pattern.
-- **Custom ring buffer (20 lines of TypeScript):** 1000 events at ~200 bytes each = ~200KB. No circular buffer library needed.
-- **esbuild (third entry point):** Add `src/nexus/main.ts` to the existing flat entry-point list. Identical configuration, output at `dist/nexus/main.js`.
+**Core new dependencies:**
+- `tree-sitter-python@^0.25.0`: Python import extraction — official tree-sitter org, full version alignment
+- `tree-sitter-rust@^0.24.0`: Rust `use`/`mod` extraction — works with tree-sitter 0.25 (peer dep is a lower bound, not exact)
+- `tree-sitter-go@^0.25.0`: Go import extraction — replaces the two-pass regex logic; Go has NO relative imports, all are package-level
+- `tree-sitter-c@^0.24.1` + `tree-sitter-cpp@^0.23.4`: C/C++ extraction — separate packages required (cpp is a superset grammar, not a replacement for the C grammar on C++ files)
+- `graphology@^0.26.0`: In-memory directed graph — required peer dep for Louvain; transient computation artifact, never persisted
+- `graphology-communities-louvain@^2.0.2`: Louvain clustering — 52ms on 1K nodes vs 2,368ms for jLouvain (45x faster); directed graph support confirmed
+- **NOT adding:** `tree-sitter-zig` (immature community package), `tree-sitter-language-pack` (248-grammar bundle, offline install problems), any Louvain alternative
 
-See `.planning/research/STACK.md` for full implementation patterns with code.
+**Deferred grammars (regex retained):** Lua, Zig, PHP, C#, Java, Ruby — these are P3 priorities. The LanguageConfig pattern ensures adding them later is a single-file addition with no changes to coordinator or file-utils.
+
+See `.planning/research/STACK.md` for full version compatibility matrix and alternatives considered.
 
 ### Expected Features
 
-**Must have — v1.3 launch (Nexus is not useful without these):**
+**Must have (table stakes for v1.4):**
+- LanguageConfig registry pattern — prerequisite for adding any grammar without duplicating code across three files
+- Python, Rust, C/C++, Go tree-sitter AST extraction — replaces regex for high-priority languages
+- Schema migration: `edge_type`, `confidence`, `weight`, `confidence_source` columns on `file_dependencies`
+- Schema migration: `file_communities` table with index on `community_id`
+- `EXTRACTED` (score 1.0) and `INFERRED` (score 0.75-0.8) confidence labels on all edges
+- Louvain community detection via graphology, persisted to `file_communities`
+- `get_communities` MCP tool returning representative-file-based community descriptions
+- `maxTokens` parameter on `list_files` and `find_important_files` with graceful truncation
 
-- Nexus daemon with PID guard and stale socket cleanup on startup
-- Unix socket server (`~/.filescope/nexus.sock`) with NDJSON framing
-- First-message identity protocol: `repo:init` establishes `Map<Socket, RepoConnection>`
-- Event routing to three destinations: in-memory state, SQLite batch queue, log file
-- Append-only human-readable log at `~/.filescope/nexus.log` — fixed-width columns, local time, log rotation at 10MB keeping 3 files
-- SQLite `nexus.db` with `repos` + `activity` tables, WAL mode, write batching (500ms / 50 events), 30-day activity pruning
-- In-memory ring buffer (1000 events) storing slim `RingEntry` projections (not raw `NexusEvent` objects)
-- Cross-repo aggregate stats counters (live, rebuilt from event stream on Nexus restart)
-- Nexus client (`src/nexus/client.ts`) with auto-spawn, fire-and-forget `emit()`, 10s reconnect timer (unref'd), progress debounce (every 10th completion or 60s)
-- MCP integration: coordinator emits `repo:init` / `repo:disconnect` / `files:changed`; broker client emits `job:submitted` / `job:completed` / `job:error` (with bulk-submit skip flag); mcp-server wraps all 11 tool handlers for `tool:called` timing
-- Graceful degradation: `emit()` is a silent no-op when disconnected — zero impact on core MCP functionality
-- Graceful shutdown: flush pending batch, WAL checkpoint, close DB, unlink socket + PID
+**Should have (P2 differentiators):**
+- `re_exports` and `inherits` edge types for TS/JS (feasible within the AST extractor, medium complexity)
+- `calls` edge type for TS/JS via `call_expression` traversal (high complexity — TS/JS only in v1.4)
+- `contains` INFERRED edge type via test file naming heuristic (score 0.6)
+- Community auto-labeling by dominant directory of top-importance files
+- Global `maxResponseTokens` in config schema
+- Nexus dashboard: community color-coding and edge opacity by confidence (frontend-only, reads existing API fields)
 
-**Should have — add after core is proven (v1.3 Phase 5):**
+**Defer to v1.5+:**
+- PHP, C#, Java, Ruby tree-sitter grammars (regex working, lower ROI)
+- Lua, Zig tree-sitter grammars (grammar packages immature)
+- `calls` extraction for Python, Rust, C
+- Leiden algorithm (no mature JS implementation in graphology)
+- Overlapping community detection
+- Streaming MCP responses (stdio transport is request/response only — protocol limitation)
 
-- Stats migration: `stats.json` → `nexus.db` one-time import using MAX semantics (idempotent, safe to repeat on every startup)
-- MCP `status` tool reads `total_tokens` directly from `nexus.db` via read-only `better-sqlite3` connection — eliminates the need for a `query:stats` socket protocol entirely
-- `repos` table becomes authoritative for token stats, replacing `broker/stats.ts` / `stats.json`
-
-**Defer to v1.4+:**
-
-- HTTP server + SSE endpoint for browser dashboard (reads from `nexus.db` + in-memory ring buffer)
-- Broker status tap (Nexus connects to broker as passive observer)
-- Cross-repo job throughput visualization
-
-See `.planning/research/FEATURES.md` for the full prioritization matrix and dependency graph.
+See `.planning/research/FEATURES.md` for the full prioritization matrix and feature dependency graph.
 
 ### Architecture Approach
 
-The Nexus is a new `src/nexus/` module directory that mirrors the `src/broker/` structure. Five new files (`types.ts`, `store.ts`, `server.ts`, `client.ts`, `main.ts`) contain all new code. Four existing files receive surgical additive changes only (`coordinator.ts`, `broker/client.ts`, `mcp-server.ts`, `package.json`). One file is removed in Phase 5 (`broker/stats.ts`) after Nexus becomes the authoritative token stats source.
+The milestone introduces two new module directories alongside the existing source tree: `src/ast-extractor/` (LanguageConfig registry, per-language extractors, types) and `src/graph/` (graphology graph construction, Louvain execution, community persistence). These modules have no shared state with each other. The extractor communicates with the rest of the system via a single `extractEdges(filePath, content, root): Promise<Edge[]>` function. Community detection communicates via repository functions — `graph/community.ts` never touches SQLite directly.
 
-**Major components:**
+The TS/JS extractor in `ast-extractor/languages/ts-js.ts` must reuse the parser instances already exported from `change-detector/ast-parser.ts` rather than constructing new ones, avoiding doubled memory and startup cost. Grammar loading across all new languages must be lazy — instantiated on first parse, not at module load — to prevent unused grammar memory accumulation and to ensure a broken grammar falls back to regex rather than crashing the server at startup.
 
-1. `nexus/types.ts` — Protocol contract: `NexusEvent` union (8 event types), `RepoConnection` interface, path constants for sock/pid/log/db files. No imports from broker or coordinator — pure protocol definition.
-2. `nexus/store.ts` — `NexusStore` class: SQLite schema initialization (WAL mode, two tables, three indexes), `ActivityBatcher` (self-rescheduling setTimeout, 50-event threshold), log append with `appendFileSync`, rename-based log rotation, `RingBuffer<RingEntry>`, `flushPendingBatch()` + `checkpoint()` for shutdown. Testable in complete isolation.
-3. `nexus/server.ts` — `NexusServer` class: `net.createServer()`, per-client `readline` interface, `Map<Socket, RepoConnection>` for connection identity, event dispatch to store. Composes `NexusStore`.
-4. `nexus/main.ts` — Entry point: PID guard (write PID before binding socket), `server.listen()` with `EADDRINUSE → process.exit(0)` handler, SIGTERM/SIGINT shutdown sequence.
-5. `nexus/client.ts` — Module-level socket state (mirrors `broker/client.ts` exactly). `nexusConnect()` is void and never throws. `emit()` is a no-op when disconnected. Auto-spawn + 10s reconnect timer (unref'd). Progress debounce counter.
+**Major new components:**
+1. `src/ast-extractor/` — LanguageConfig registry with per-language extraction files; public API is `extractEdges(filePath, content, root)`
+2. `src/graph/community.ts` — builds graphology DirectedGraph from DB edges, runs Louvain, writes to `file_communities` via repository
+3. `src/db/schema.ts` (modified) — four new columns on `file_dependencies`, new `file_communities` table
+4. `src/db/repository.ts` (modified) — `setEdges()` replaces `setDependencies()` signature; new community CRUD functions
+5. `src/mcp-server.ts` (modified) — `get_communities` tool, `budgetCap()` helper on all unbounded text responses
 
-**Key module boundary rule:** `nexus/client.ts` does not import from `broker/`. The dependency direction is `broker/client.ts → nexus/client.ts → nexus/types.ts`. The coordinator is the only module that calls both `brokerConnect` and `nexusConnect`.
+**Unchanged:** `change-detector/ast-parser.ts`, `cascade/`, `broker/`, `nexus/` (Nexus dashboard reads `community_id` from the existing API — no backend API changes needed)
 
-See `.planning/research/ARCHITECTURE.md` for the full system diagram, data flow sequences, and build configuration changes.
+See `.planning/research/ARCHITECTURE.md` for the full system diagram, data flow sequences, build order, and anti-patterns to avoid.
 
 ### Critical Pitfalls
 
-1. **Nexus becomes critical path** — If `nexusConnect()` is implemented as `async` and awaited in coordinator init (copying the broker pattern), any Nexus failure breaks the user's Claude session. Prevention: `nexusConnect()` must be `void`, never async, never throws, never awaited. Write a verification test: delete `dist/nexus/main.js`, confirm coordinator starts clean.
+1. **Grammar ABI mismatch crashes MCP server at startup** — Tree-sitter grammars compiled against Node.js 20 ABI (115) throw at `createRequire` time when running Node.js 22 (ABI 127). Use lazy grammar loading so a broken grammar falls back to regex instead of crashing the entire server. Add grammar load verification to `vitest.setup.ts`. Audit all target grammar packages before writing any extractor code.
 
-2. **Multi-instance spawn race produces duplicate Nexus daemons** — Three MCP instances starting simultaneously all pass the `existsSync(SOCK_PATH)` check before any Nexus has bound. Three processes race to `server.listen()`. The two losers must exit via `process.exit(0)` (not crash) on `EADDRINUSE`. The PID file must be written BEFORE binding the socket, so EADDRINUSE cleanup can remove both atomically.
+2. **Schema migration: NOT NULL DEFAULT causes full SQLite table rebuild** — `ADD COLUMN edge_type TEXT NOT NULL DEFAULT 'imports'` triggers SQLite to copy the entire `file_dependencies` table (seconds of lock time on large repos). Add columns as nullable only: `ADD COLUMN edge_type TEXT`. Treat `NULL` as `'imports'` in all queries. Existing rows migrate naturally when files are re-analyzed via setEdges's delete+reinsert pattern.
 
-3. **WAL shutdown loses the last flush batch** — The shutdown sequence must call `flushPendingBatch()` then `db.pragma('wal_checkpoint(TRUNCATE)')` then `db.close()` in that order. Closing the DB before flushing drops up to 499ms of events.
+3. **Louvain community IDs are non-deterministic — never expose them as stable identifiers** — Louvain community numbers change with every re-run (randomized initialization). Never return `communityId: 3` from the MCP tool. Return `representative: '/path/to/key-file.ts'` as the community identifier — the highest-importance file in each cluster, which is stable when the graph is stable.
 
-4. **Ring buffer memory bloat from large event payloads** — The ring buffer must store `RingEntry` projections (id, timestamp, eventType, repoPath, pre-formatted summary string), not raw `NexusEvent` objects. A `files:changed` event for a 500-file cascade could be 15KB; 1000 of those is 15MB just in the ring buffer. Define the `RingEntry` type before implementing the ring buffer.
+4. **Token budget truncation at string level produces invalid or incomplete JSON** — `response.slice(0, MAX_CHARS)` cuts mid-object. Enforce budget as `maxItems` on list fields before serialization. Every truncated response must include `truncated: true` and `totalCount: N` so the LLM knows results are incomplete and can refine the query.
 
-5. **`query:stats` creates a latency regression in the `status` tool** — If stats are fetched via a socket request/response, the `status` tool acquires a 2-second timeout dependency on the Nexus being up. Preferred solution: the MCP instance opens `nexus.db` directly with a read-only `better-sqlite3` connection per status call. Zero latency, zero timeout, Nexus remains a pure sink.
+5. **Regex-to-AST migration without parity tests causes silent dependency regression** — When a language switches from regex to tree-sitter in `isTreeSitterLanguage()`, all files of that type re-analyze simultaneously on restart. Wrong AST queries cascade into wrong importance scores and wrong staleness. Run both extractors on 3-5 real files per language and diff the results before switching.
 
-See `.planning/research/PITFALLS.md` for 10 critical pitfalls with full prevention patterns and the "Looks Done But Isn't" checklist.
+6. **Confidence score values as inline literals drift and become meaningless** — Define a `confidence.ts` constants file with named levels before writing any extractor. Every extractor imports constants, never assigns raw float literals. Prevents confidence values from drifting across languages and losing their semantic meaning.
+
+7. **Graphology graph rebuilt from SQLite on every `get_communities` call causes O(E) latency at scale** — Cache the graphology Graph object in the coordinator behind a dirty flag (`graphDirty: boolean`). Rebuild only when `setEdges()` has been called since the last build. Second call to `get_communities` should be 10x faster than the first.
+
+See `.planning/research/PITFALLS.md` for 12 critical pitfalls with full prevention patterns, warning signs, phase assignments, and the "Looks Done But Isn't" checklist.
 
 ---
 
 ## Implications for Roadmap
 
-Based on research, the implementation follows a strict linear dependency chain. There is no parallelism in the build order — each phase depends on the previous.
+Research establishes a clear phase ordering driven by hard dependencies: schema before code, LanguageConfig before grammars, repository before community detection, community detection before MCP tool. Token budget is fully independent and can slot into any phase but fits naturally as a final polish phase with the full feature set present for integration testing.
 
-### Phase 1: Types and Store
+### Phase 1: Schema Foundation + LanguageConfig Scaffolding
 
-**Rationale:** `types.ts` is the protocol contract that all other phases depend on. `store.ts` is the only Nexus component with no external process dependencies — it can be written and fully unit-tested without a running server or client. This is where the highest-impact pitfalls live (WAL shutdown flush, batch timer accumulation, ring buffer memory, log rotation correctness) and they must be solved before the server is built on top.
+**Rationale:** All downstream phases write to the new schema columns — code that writes `edge_type` fails at runtime against the old schema, making this the hard prerequisite for everything else. LanguageConfig scaffolding (types, registry, regex-fallback port) can be built and tested with zero new npm dependencies, validating the interface before any grammar risk is introduced. These two concerns share the same phase because both are prerequisites for Phase 2 and neither has external dependencies.
 
-**Delivers:** `nexus/types.ts` (NexusEvent union, RepoConnection, path constants) and `nexus/store.ts` (NexusStore class with SQLite schema, ActivityBatcher, RingBuffer<RingEntry>, log append, rotation). Both are fully unit-tested in isolation.
+**Delivers:** Working schema migration (verified on a copy of real `data.db`), complete `src/ast-extractor/` module structure with `types.ts`, `registry.ts`, `languages/regex-fallback.ts` (ports `IMPORT_PATTERNS` verbatim), and `languages/ts-js.ts` (reuses existing parser instances) operational. `confidence.ts` constants file. Lazy grammar loader pattern with try/catch fallback. Grammar availability audit for all 11 target languages documented.
 
-**Addresses features:** SQLite persistence, write batching, 30-day pruning, in-memory ring buffer, fixed-width log format, log rotation, graceful shutdown flush sequence.
+**Addresses features:** LanguageConfig pattern (P1 table stakes), schema extension for confidence + community columns, `confidence.ts` constants
 
-**Avoids pitfalls:** WAL shutdown batch loss (Pitfall 3), batch timer accumulation (Pitfall 4), ring buffer memory bloat (Pitfall 9), log rotation event loss (Pitfall 7).
+**Avoids pitfalls:** Grammar ABI crashes at startup (lazy loading pattern established before any grammar is added), schema NOT NULL default trap, confidence inline literals (constants file defined before any extractor), incremental parse prior-tree corruption (prohibiting code comment in `getParser()`)
 
-**Research flag:** Standard patterns — no deeper research needed. All implementation patterns are in STACK.md with working code.
+**Research flag:** Standard patterns — no deeper research needed. SQLite ALTER TABLE behavior is official-doc confirmed. LanguageConfig pattern is derived directly from existing codebase. Regex-fallback is a straight port of `IMPORT_PATTERNS`.
 
-### Phase 2: Server and Daemon
+### Phase 2: Multi-Language Tree-sitter Extraction
 
-**Rationale:** With types and store complete, the Nexus server can be built and tested as a standalone process. The PID guard, spawn race handling, and connection identity model must be correct before the client can be built against it.
+**Rationale:** With LanguageConfig in place, adding each grammar is a single file plus one registry entry. Languages are added in priority order: Python (highest LLM codebase relevance), Rust, C/C++, Go. Each language is validated with parity tests before switching `isTreeSitterLanguage()`. Richer edge types (re_exports, inherits) for TS/JS are included here since the infrastructure is ready and they require no new npm deps.
 
-**Delivers:** `nexus/server.ts` (NexusServer class: socket accept, NDJSON parsing, connection map, event routing) and `nexus/main.ts` (PID guard with PID written before socket bind, SIGTERM/SIGINT handlers, `EADDRINUSE → process.exit(0)` handler). The Nexus can be started, connected to with raw socket scripts, and verified end-to-end.
+**Delivers:** AST extraction for Python, Rust, C, C++, Go replacing regex. `re_exports` and `inherits` edge types for TS/JS. All edges written with correct `edge_type`, `confidence`, `confidence_source` via the updated `setEdges()` in repository (replaces `setDependencies()` signature — all call sites updated in the same PR).
 
-**Addresses features:** Daemon PID guard, stale socket cleanup, NDJSON framing, connection identity, event routing, graceful shutdown.
+**Addresses features:** Python/Rust/C/C++/Go grammars (P1), re_exports/inherits edge types (P1-P2), confidence labeling on all extracted edges
 
-**Avoids pitfalls:** Multi-instance spawn race (Pitfall 2), socket cleanup race (Pitfall 8), repo:init ordering violations (Pitfall 5).
+**Avoids pitfalls:** Regex parity tests before switching each language, `setDependencies()` signature updated to `DependencyEdge[]` with all call sites in same PR (prevents two-code-paths problem), Go import type handling (all Go imports are package-level, no relative imports)
 
-**Research flag:** Standard patterns — broker/main.ts and broker/server.ts are direct reference implementations. No deeper research needed.
+**Research flag:** One targeted validation — verify PHP grammar export shape (`{ php, php_only }` or direct object) at start of implementation. Medium confidence on this detail. All other grammars are confirmed as direct-object exports.
 
-### Phase 3: Nexus Client
+### Phase 3: Community Detection
 
-**Rationale:** The client API must be finalized before MCP wiring begins — the coordinator, broker client, and mcp-server all import from `nexus/client.ts`. The critical constraint (nexusConnect is void, never async, never throws) must be validated against the running server before integration.
+**Rationale:** Community detection reads from the dependency graph populated in Phase 2. Richer edge types from Phase 2 produce better cluster quality, though import-only communities are functional. The critical design decisions — on-demand vs reactive, dirty-flag cache, representative-based IDs — must be locked in before writing any code to prevent the performance and stability pitfalls that arise from reactive community recompute.
 
-**Delivers:** `nexus/client.ts` (module-level socket state, `nexusConnect()` as void, `emit()` as no-op when disconnected, auto-spawn, 10s reconnect timer unref'd, progress debounce, `repo:init` as first message on every new connection).
+**Delivers:** `graphology` + `graphology-communities-louvain` installed. `src/graph/community.ts` with `recomputeCommunities()` using dirty-flag cache in coordinator. `file_communities` table populated on coordinator init and on edge-delta threshold (>5 changes). `get_communities` MCP tool with representative-based response format (no raw integer IDs). Community auto-labeling by dominant directory of top-importance files.
 
-**Addresses features:** Auto-spawn, graceful degradation, reconnect, progress debounce.
+**Addresses features:** Community detection (P1), `get_communities` MCP tool (P1), community auto-labeling (P2), cross-community coupling metric (P2)
 
-**Avoids pitfalls:** Nexus becomes critical path (Pitfall 1), repo:init ordering on reconnect (Pitfall 5).
+**Avoids pitfalls:** On-demand plus dirty-flag cache (not per-file-change Louvain — prevents event loop stall), non-deterministic Louvain IDs (representative file path as stable identifier), N+1 query trap (batch `getAllEdges()` to build graph, not per-file queries)
 
-**Research flag:** Standard patterns — broker/client.ts is the reference implementation. Key test to write: delete nexus binary, confirm coordinator init completes cleanly with zero error logs.
+**Research flag:** Verify via installed graphology docs that `type: 'directed'` in `new Graph()` produces correct directed modularity in Louvain. Confirmed in research but worth a quick check against the specific installed version.
 
-### Phase 4: MCP Integration
+### Phase 4: MCP Polish (Token Budget + `calls` Edge Type)
 
-**Rationale:** With the client API stable, the three existing files that emit events can be modified. Changes are additive and surgical — no existing logic is modified, only new emit calls are inserted at well-defined points.
+**Rationale:** Token budget is fully independent of all other phases — it touches only `mcp-server.ts` and `createMcpResponse()`. Bundling it with `calls` edge extraction (TS/JS only) and `contains` heuristic keeps the final phase coherent as a polish and completeness sprint. `calls` extraction is the most complex edge type but has no downstream dependencies and can be cut to v1.5 if it exceeds scope.
 
-**Delivers:** Modified `coordinator.ts` (nexusConnect/nexusDisconnect lifecycle, repo:init + repo:disconnect + files:changed events), modified `broker/client.ts` (job:submitted with bulk-skip flag, job:completed, job:error), modified `mcp-server.ts` (timing wrapper for all 11 tool handlers emitting tool:called), updated `package.json` esbuild entry points.
+**Delivers:** `maxTokens` parameter on `list_files` and `find_important_files` with importance-ordered truncation and `{ truncated: true, shown: N, total: M }` metadata. `budgetCap()` helper on all unbounded MCP text responses. Optional `maxResponseTokens` in config schema. `calls` edge type via `call_expression` traversal for TS/JS. `contains` INFERRED edge for test file naming heuristic (score 0.6).
 
-**Addresses features:** Full MCP event emission across all 11 tools, coordinator lifecycle events, broker job events.
+**Addresses features:** MCP token budget cap (P1), `calls` edge type for TS/JS (P2), `contains` heuristic (P2), global config token cap (P2)
 
-**Avoids pitfalls:** resubmitStaleFiles bulk-submit spam (implemented via `_bulkResubmit` flag in broker/client.ts).
+**Avoids pitfalls:** Token budget via item count limit not string slice (prevents invalid/incomplete JSON), valid JSON + `truncated: true` + `totalCount` in all truncated responses, character-count approximation (4 chars/token) — no tokenizer dependency
 
-**Research flag:** Standard patterns — no deeper research needed. All integration points are exactly specified in ARCHITECTURE.md.
-
-### Phase 5: Stats Migration and Cutover
-
-**Rationale:** This phase is deliberately separated from the core build. Running it after Phase 4 is proven means the Nexus is already accumulating real `job:completed` token data before the historical import. Stats migration must use MAX semantics (idempotent, safe to repeat on every startup) rather than a "once only" gate — the "import only if DB is empty" check fails when the DB already has live event data.
-
-**Delivers:** Stats migration on Nexus startup (`stats.json` → `nexus.db` using MAX semantics), MCP `status` tool reads `total_tokens` directly from `nexus.db` via read-only `better-sqlite3` connection (no socket query protocol), removal of `accumulateTokens` calls from broker, removal of `broker/stats.ts`.
-
-**Addresses features:** Historical token data preservation, Nexus as authoritative stats source, `status` tool accuracy post-migration.
-
-**Avoids pitfalls:** Stats migration race (Pitfall 6), query:stats latency regression (Pitfall 10).
-
-**Research flag:** One decision required before coding: confirm the "direct DB read" approach (Option A from Pitfall 10) is acceptable. This eliminates the `query:stats` socket protocol entirely. Option A is strongly recommended — it removes a protocol complexity class and prevents a latency regression.
-
-### Phase 6: End-to-End Verification
-
-**Rationale:** Integration behaviors that can't be verified by phase-level unit tests — multi-instance resilience, tail-f monitoring experience, kill-and-reconnect cycles.
-
-**Delivers:** All items from the PITFALLS.md "Looks Done But Isn't" checklist verified. Key scenarios: 5 simultaneous MCP instances → exactly one Nexus process, SIGTERM with 40 pending events → all 40 in nexus.db, log rotation with 1000-byte threshold → all lines present across rotation boundary, Nexus down → status tool responds in <300ms.
-
-**Research flag:** No research needed — checklist is fully specified in PITFALLS.md.
+**Research flag:** `calls` edge type is rated HIGH complexity in FEATURES.md. If implementation reveals it needs more scope than this phase allows, defer to v1.5 rather than delaying the token budget work, which is straightforward and high-value.
 
 ### Phase Ordering Rationale
 
-- Types before everything: `nexus/types.ts` is imported by client, server, and store. Nothing can be built without it.
-- Store before server: server composes store; store must be tested standalone so failures in store logic are isolated from server logic.
-- Server before client: client integration tests require a running server; the client API (specifically nexusConnect's void return) is validated against the real server before MCP wiring locks in the API.
-- Client before MCP wiring: all three modified files (`coordinator.ts`, `broker/client.ts`, `mcp-server.ts`) import from the same client module. The client API must be final before touching three separate files.
-- Stats migration last: the migration runs on top of a live, proven event pipeline. Running it earlier would be migrating into an unproven store.
+- Schema before extraction code: writing `edge_type` to a schema without that column throws at runtime
+- LanguageConfig + regex-fallback before new grammars: validates the interface with zero npm risk before adding native dependencies
+- Each grammar validated with parity tests before `isTreeSitterLanguage()` is expanded: prevents silent extraction regression cascading into wrong importance scores
+- Community detection after multi-language extraction: richer edge types produce better clusters; import-only communities are functional but complete the story
+- `get_communities` MCP tool last in Phase 3: community data must be reliably populated before the tool returns meaningful results
+- Token budget in Phase 4: no dependencies, benefits from full feature set being present for integration testing
+- `calls` extraction in Phase 4 with an explicit scope guard: highest complexity work goes last where it can be deferred without blocking the milestone
 
 ### Research Flags
 
-Phases needing deeper research during planning: none. All implementation patterns are fully specified with working code samples from direct codebase inspection. The broker implementation is the reference implementation — every Nexus pattern has a 1:1 broker analog.
+Phases with well-documented patterns (no additional research needed):
+- **Phase 1:** SQLite ALTER TABLE behavior is official-doc confirmed. LanguageConfig is derived from live codebase. Zero new npm deps.
+- **Phase 4 (token budget):** Pattern fully specified in ARCHITECTURE.md. No external dependencies. Character-count approximation is the established approach.
 
-Phases with standard patterns (skip research-phase): all six phases. The research was conducted against the live codebase and authoritative design document (NEXUS-PLAN.md). Confidence is HIGH across all areas.
-
-One decision to confirm before Phase 5 begins: whether direct `nexus.db` read (Option A) or socket query protocol (Option B) is used for the `status` tool stats. Research strongly recommends Option A — it eliminates an entire protocol complexity class and a latency regression.
+Phases needing targeted validation before implementation:
+- **Phase 2, PHP grammar export shape:** Run `console.log(Object.keys(_require('tree-sitter-php')))` before writing the PHP extractor to verify `{ php, php_only }` vs direct object. Medium confidence on this detail. (Note: PHP is P3 — only relevant if PHP is pulled into v1.4 scope.)
+- **Phase 3, Louvain directed graph modularity:** Verify `type: 'directed'` in `new Graph()` produces correct behavior with the specific installed version of `graphology-communities-louvain@2.0.2`.
 
 ---
 
@@ -189,20 +181,22 @@ One decision to confirm before Phase 5 begins: whether direct `nexus.db` read (O
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All patterns derived from direct inspection of working production code in the same codebase. Zero new dependencies — every library and API is already in use and confirmed working. |
-| Features | HIGH | NEXUS-PLAN.md is a complete authoritative design document written by the project owner. Feature set is fully specified including anti-features and deferral rationale. |
-| Architecture | HIGH | Broker is the direct reference implementation. Component boundaries, data flow, and integration points were verified against actual source files (`broker/client.ts`, `broker/main.ts`, `broker/server.ts`, `coordinator.ts`). |
-| Pitfalls | HIGH | Ten pitfalls identified from broker implementation post-mortem, Node.js official docs, SQLite WAL official docs, and direct codebase audit. Each has a tested prevention pattern and recovery strategy. |
+| Stack | HIGH | All 13 new package versions verified via live npm registry queries. Grammar peer dep compatibility confirmed. graphology benchmark figures from official docs. One medium-confidence item: PHP grammar export shape — verify at integration. |
+| Features | HIGH | Based on direct codebase inspection of all modified files plus npm registry confirmation of all new packages. Feature dependencies mapped explicitly. Go's "no relative imports" behavior is a verified language characteristic documented in the Go specification. |
+| Architecture | HIGH | Module structure derived from direct source reading of `ast-parser.ts`, `file-utils.ts`, `coordinator.ts`, `repository.ts`, `schema.ts`. SQLite O(1) ALTER TABLE behavior confirmed via official docs. Community detection data flow verified against graphology API docs. |
+| Pitfalls | HIGH | 12 pitfalls sourced from direct codebase audit, official tree-sitter ABI issue threads, official SQLite docs, graphology docs, and arxiv preprints. Each has specific warning signs, phase assignments, and recovery strategies. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Stats query mechanism (Phase 5 decision):** Research identifies two options for how the MCP `status` tool reads token stats after migration. Option A (direct `nexus.db` read with read-only `better-sqlite3`) is recommended and eliminates the `query:stats` protocol entirely. Option B (socket request/response with 200ms timeout) is the fallback. Decide at Phase 5 start and code accordingly.
+- **PHP grammar export shape (MEDIUM confidence):** `tree-sitter-php` may export `{ php, php_only }` similar to `tree-sitter-typescript`'s `{ typescript, tsx }`. Verify at the start of Phase 2 implementation before writing the PHP extractor. PHP is currently P3 (deferred), so this only matters if PHP scope is pulled into v1.4.
 
-- **Direct DB read connection caching:** PITFALLS.md flags that opening a new `Database()` per `status` call adds ~10ms overhead. If `status` is called frequently, the MCP instance should cache the read-only handle. Minor implementation detail but worth noting in Phase 5.
+- **Louvain determinism with seeding:** `graphology-communities-louvain@2.0.2` supports a `rngFunction` option for seeded random initialization. If community stability across re-runs (same graph = same community assignments) is a requirement, verify whether seeding produces stable output in practice. Research assumes non-determinism; the representative-based ID design handles this regardless.
 
-- **`stats.json` retention after migration:** PITFALLS.md recommends never deleting `stats.json` (keep broker writing it as a no-op backup). This means `broker/stats.ts` may not be fully removed in Phase 5 — only the `accumulateTokens` call path is removed. Confirm the exact scope of `broker/stats.ts` removal during Phase 5 planning.
+- **`calls` edge traversal scope for TS/JS:** FEATURES.md rates `calls` edge extraction HIGH complexity. It is scoped to Phase 4 with an explicit guard: if it exceeds available scope, defer to v1.5 and ship the token budget work independently. This is the only feature in the milestone with a concrete deferral trigger.
+
+- **Nexus dashboard community coloring:** FEATURES.md notes this is a frontend-only change (map `community_id` to Cytoscape.js node color palette, map `confidence` to edge opacity). No backend API changes are needed — `community_id` is already in the API response once Phase 3 completes. No specific dashboard implementation research was conducted; treat as standard Cytoscape.js attribute mapping during Phase 3 implementation.
 
 ---
 
@@ -210,29 +204,30 @@ One decision to confirm before Phase 5 begins: whether direct `nexus.db` read (O
 
 ### Primary (HIGH confidence)
 
-- `/home/autopcap/FileScopeMCP/NEXUS-PLAN.md` — authoritative design document: event types, schema, lifecycle, edge cases, phased implementation plan
-- `/home/autopcap/FileScopeMCP/src/broker/client.ts` — reference implementation for module-level socket client, auto-spawn, reconnect, progress debounce
-- `/home/autopcap/FileScopeMCP/src/broker/main.ts` — reference implementation for PID guard, `isPidRunning()`, SIGTERM/SIGINT shutdown
-- `/home/autopcap/FileScopeMCP/src/broker/server.ts` — reference implementation for NexusServer class structure, connection set management
-- `/home/autopcap/FileScopeMCP/src/broker/stats.ts` — stats migration source and cutover surface
-- `/home/autopcap/FileScopeMCP/src/coordinator.ts` — integration point analysis for lifecycle hooks
-- `/home/autopcap/FileScopeMCP/src/db/db.ts` — `createRequire` pattern for better-sqlite3, WAL pragma configuration
-- `/home/autopcap/FileScopeMCP/package.json` — esbuild command structure, confirmed dependency versions
-- [Node.js v22 `node:fs` docs](https://nodejs.org/api/fs.html) — `appendFileSync`, `renameSync`, `statSync` behavior
-- [Node.js v22 `node:net` docs](https://nodejs.org/api/net.html) — `server.close()` semantics, `EADDRINUSE` behavior
-- [better-sqlite3 API docs](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md) — `db.transaction()`, `db.pragma()`, `db.close()`, synchronous write semantics
-- [SQLite WAL mode official docs](https://www.sqlite.org/wal.html) — checkpoint behavior, `wal_checkpoint(TRUNCATE)`, `PRAGMA synchronous` levels, crash safety
+- Live npm registry queries (2026-04-08) — all 13 new package versions and peer dep ranges confirmed
+- [tree-sitter GitHub organization](https://github.com/tree-sitter) — official grammar repos for python, go, c, cpp, java, php, c-sharp, ruby
+- [node-tree-sitter docs v0.25.0](https://tree-sitter.github.io/node-tree-sitter/) — `createRequire` loading pattern, incremental parse semantics
+- [tree-sitter advanced parsing docs](https://tree-sitter.github.io/tree-sitter/using-parsers/3-advanced-parsing.html) — prior tree behavior, multi-language ranges
+- [graphology-communities-louvain official docs](https://graphology.github.io/standard-library/communities-louvain.html) — directed graph support, `resolution` parameter, `louvain.assign()` API, performance benchmarks
+- [SQLite ALTER TABLE documentation](https://www.sqlite.org/lang_altertable.html) — O(1) ADD COLUMN behavior, NOT NULL constraint table-rebuild conditions
+- [tree-sitter Node.js ABI mismatch issues](https://github.com/tree-sitter/node-tree-sitter/issues/169) — NODE_MODULE_VERSION mismatch behavior with prebuilt binaries
+- Direct codebase inspection: `src/change-detector/ast-parser.ts`, `src/db/schema.ts`, `src/db/repository.ts`, `src/coordinator.ts`, `src/file-utils.ts`, `src/mcp-server.ts`, `package.json` — current state confirmed
 
 ### Secondary (MEDIUM confidence)
 
-- [SQLite Optimizations For Ultra High-Performance — PowerSync](https://www.powersync.com/blog/sqlite-optimizations-for-ultra-high-performance) — 50x speedup from batched transactions vs individual inserts; 500ms flush window confirmed
-- [Log Formatting Best Practices — Sematext](https://sematext.com/blog/log-formatting-8-best-practices-for-better-readability/) — fixed-width columns for `tail -f` readability; local timezone for interactive monitoring
-- [Microservices Pattern: Log Aggregation](https://microservices.io/patterns/observability/application-logging.html) — centralized log sink pattern; fire-and-forget event collection
-- [JSON→SQLite migration reruns issue](https://github.com/anomalyco/opencode/issues/16885) — DB file existence is not a safe migration gate; use dedicated migration marker
-- [Batches in SQLite — Turso](https://turso.tech/blog/batches-in-sqlite-838e0961) — write queue pattern with time window debounce
-- [Four Considerations When Designing Systems For Graceful Degradation — New Relic](https://newrelic.com/blog/observability/design-software-for-graceful-degradation) — optional service contract; fire-and-forget drops events without circuit breaker
+- [graphology GitHub repository](https://github.com/graphology/graphology) — performance benchmarks (52ms for 1K nodes vs jLouvain 2,368ms)
+- [Codebase-Memory arxiv preprint](https://arxiv.org/html/2603.27277) — tree-sitter + confidence-scored edges + Louvain in MCP context
+- [DF Louvain: incremental Louvain limitations](https://arxiv.org/abs/2404.19634) — batch-orientation of Louvain algorithm, overhead for incremental updates
+- [tree-sitter packaging challenges blog](https://ayats.org/blog/tree-sitter-packaging) — per-grammar npm availability inconsistency
+- [Automated Software Modularization Using Community Detection (Springer 2015)](https://link.springer.com/chapter/10.1007/978-3-319-23727-5_8) — academic basis for Louvain on dependency graphs
+- [pyan Python static analysis](https://github.com/davidfraser/pyan) — binary confidence scoring approach as pattern for rule-based confidence tiers
+
+### Tertiary (LOW confidence)
+
+- [MCP token bloat discussion](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1576) — response verbosity and token consumption patterns (single community source)
+- [MCP token optimization patterns](https://tetrate.io/learn/ai/mcp/token-optimization-strategies) — truncation-with-count-indicator pattern (single community source, consistent with official MCP guidance)
 
 ---
 
-*Research completed: 2026-03-24*
+*Research completed: 2026-04-08*
 *Ready for roadmap: yes*

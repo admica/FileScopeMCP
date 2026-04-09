@@ -1,5 +1,22 @@
 # Milestones
 
+## v1.4 Deep Graph Intelligence (Shipped: 2026-04-09)
+
+**Phases completed:** 4 phases (25-28), 8 plans, 15 tasks
+**Requirements:** 17/18 satisfied + 1 accepted deviation (AST-05: Go kept on regex per D-06)
+**Stats:** 13 commits | 31 files changed | +5,756 / -286 lines | 1 day (Apr 9, 2026)
+
+**Key accomplishments:**
+
+- Schema migration adds edge_type, confidence, weight columns + file_communities table; typed confidence constants (EXTRACTED 1.0, INFERRED 0.8)
+- LanguageConfig registry with extractEdges() single entry point dispatching to per-extension extractors; setEdges() writes enriched edge rows across all call sites
+- Tree-sitter AST extractors for Python, Rust, C/C++ replacing regex-based parsing with EXTRACTED confidence (1.0) — 19 parity tests
+- TS/JS richer edge types (imports, re_exports, inherits) via extractRicherEdges() + edge weight aggregation by target+edgeType composite key
+- Louvain community detection via graphology with dirty-flag cache, SQLite persistence, and get_communities MCP tool with representative-path identification
+- get_file_summary enriched with edge types and confidence; maxItems token budget on list_files and find_important_files with truncation metadata
+
+---
+
 ## v1.3 Nexus (Shipped: 2026-04-03)
 
 **Phases completed:** 5 phases (20-24), 12 plans
