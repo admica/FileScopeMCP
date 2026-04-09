@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 import { log } from './logger.js';
 import { EXTRACTED, INFERRED, CONFIDENCE_SOURCE_EXTRACTED, CONFIDENCE_SOURCE_INFERRED } from './confidence.js';
 import type { ConfidenceSource } from './confidence.js';
-import { extractSnapshot } from './change-detector/ast-parser.js';
+import { extractRicherEdges } from './change-detector/ast-parser.js';
 
 const _require = createRequire(import.meta.url);
 
@@ -421,9 +421,105 @@ function makeIncludeExtractor(parser: any) {
 // ─── TS/JS AST extractor ───────────────────────────────────────────────────────
 
 /**
+ * Resolves a single TS/JS import path to an EdgeResult with the given edgeType.
+ * Handles package vs. local resolution, multi-extension probing for local files.
+ * Returns null if the import cannot be resolved (template literal, file not found, error).
+ */
+async function resolveTsJsImport(
+  importPath: string,
+  filePath: string,
+  projectRoot: string,
+  edgeType: string
+): Promise<EdgeResult | null> {
+  if (isUnresolvedTemplateLiteral(importPath)) return null;
+
+  try {
+    const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
+    const normalizedResolvedPath = normalizePath(resolvedPath);
+
+    const isPackage =
+      normalizedResolvedPath.includes('node_modules') ||
+      (!importPath.startsWith('.') && !importPath.startsWith('/'));
+
+    if (isPackage) {
+      const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
+      if (!pkgDep.name) {
+        if (importPath.startsWith('@')) {
+          const parts = importPath.split('/');
+          if (parts.length >= 2) {
+            pkgDep.scope = parts[0];
+            pkgDep.name = `${parts[0]}/${parts[1]}`;
+          }
+        } else if (importPath.includes('/')) {
+          pkgDep.name = importPath.split('/')[0];
+        } else {
+          pkgDep.name = importPath;
+        }
+      }
+
+      if (isUnresolvedTemplateLiteral(pkgDep.name)) return null;
+
+      const version = await extractPackageVersion(pkgDep.name, projectRoot);
+
+      return {
+        target: normalizedResolvedPath,
+        edgeType,
+        confidence: EXTRACTED,
+        confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+        weight: 1,
+        isPackage: true,
+        packageName: pkgDep.name || undefined,
+        packageVersion: version,
+      };
+    } else {
+      // Multi-extension probe: try exact path first, then with common extensions
+      const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
+      let resolvedTarget: string | null = null;
+
+      // First try the normalized resolved path directly
+      try {
+        await fsPromises.access(normalizedResolvedPath);
+        resolvedTarget = normalizedResolvedPath;
+      } catch {
+        // Try with extensions appended
+        for (const ext of possibleExtensions) {
+          if (ext === '') continue; // Already tried bare path above
+          const pathToCheck = normalizedResolvedPath + ext;
+          try {
+            await fsPromises.access(pathToCheck);
+            resolvedTarget = pathToCheck;
+            break;
+          } catch { /* try next extension */ }
+        }
+      }
+
+      if (resolvedTarget) {
+        return {
+          target: resolvedTarget,
+          edgeType,
+          confidence: EXTRACTED,
+          confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+          weight: 1,
+          isPackage: false,
+        };
+      }
+      return null;
+    }
+  } catch (resolveError) {
+    log(`[language-config] Error resolving TS/JS import '${importPath}' in ${filePath}: ${resolveError}`);
+    return null;
+  }
+}
+
+/**
  * Extracts dependency edges from a TypeScript/JavaScript file using the AST.
- * Delegates to extractSnapshot() from ast-parser.ts, then resolves and classifies
+ * Delegates to extractRicherEdges() from ast-parser.ts, then resolves and classifies
  * each import path into local (EdgeResult.isPackage=false) or package edges.
+ *
+ * Produces three edge types:
+ * - 'imports'    — regular import_statement and require() calls
+ * - 're_exports' — export_statement nodes with a source (re-exports from another module)
+ * - 'inherits'   — class extends clause where the base class is imported from another file
  *
  * Multi-extension probing for local files: the resolved path is tried first,
  * then with .ts/.tsx/.js/.jsx appended, matching the behavior in the coordinator
@@ -436,93 +532,29 @@ async function extractTsJsEdges(
   content: string,
   projectRoot: string
 ): Promise<EdgeResult[]> {
-  const snapshot = extractSnapshot(filePath, content);
-  if (!snapshot) return [];
+  const richer = extractRicherEdges(filePath, content);
+  if (!richer) return [];
 
-  log(`[language-config] [AST] Found ${snapshot.imports.length} imports in ${filePath}`);
+  log(`[language-config] [AST] Found ${richer.regularImports.length} imports, ${richer.reExportSources.length} re-exports, ${richer.inheritsFrom.length} inherits in ${filePath}`);
 
   const edges: EdgeResult[] = [];
 
-  for (const importPath of snapshot.imports) {
-    if (isUnresolvedTemplateLiteral(importPath)) {
-      log(`[language-config] Skipping unresolved template literal: ${importPath}`);
-      continue;
-    }
+  // Regular imports
+  for (const imp of richer.regularImports) {
+    const edge = await resolveTsJsImport(imp, filePath, projectRoot, 'imports');
+    if (edge) edges.push(edge);
+  }
 
-    try {
-      const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
-      const normalizedResolvedPath = normalizePath(resolvedPath);
+  // Re-exports
+  for (const src of richer.reExportSources) {
+    const edge = await resolveTsJsImport(src, filePath, projectRoot, 're_exports');
+    if (edge) edges.push(edge);
+  }
 
-      const isPackage =
-        normalizedResolvedPath.includes('node_modules') ||
-        (!importPath.startsWith('.') && !importPath.startsWith('/'));
-
-      if (isPackage) {
-        const pkgDep = PackageDependency.fromPath(normalizedResolvedPath);
-        if (!pkgDep.name) {
-          if (importPath.startsWith('@')) {
-            const parts = importPath.split('/');
-            if (parts.length >= 2) {
-              pkgDep.scope = parts[0];
-              pkgDep.name = `${parts[0]}/${parts[1]}`;
-            }
-          } else if (importPath.includes('/')) {
-            pkgDep.name = importPath.split('/')[0];
-          } else {
-            pkgDep.name = importPath;
-          }
-        }
-
-        if (isUnresolvedTemplateLiteral(pkgDep.name)) continue;
-
-        const version = await extractPackageVersion(pkgDep.name, projectRoot);
-
-        edges.push({
-          target: normalizedResolvedPath,
-          edgeType: 'imports',
-          confidence: EXTRACTED,
-          confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
-          weight: 1,
-          isPackage: true,
-          packageName: pkgDep.name || undefined,
-          packageVersion: version,
-        });
-      } else {
-        // Multi-extension probe: try exact path first, then with common extensions
-        const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx', ''];
-        let resolvedTarget: string | null = null;
-
-        // First try the normalized resolved path directly
-        try {
-          await fsPromises.access(normalizedResolvedPath);
-          resolvedTarget = normalizedResolvedPath;
-        } catch {
-          // Try with extensions appended
-          for (const ext of possibleExtensions) {
-            if (ext === '') continue; // Already tried bare path above
-            const pathToCheck = normalizedResolvedPath + ext;
-            try {
-              await fsPromises.access(pathToCheck);
-              resolvedTarget = pathToCheck;
-              break;
-            } catch { /* try next extension */ }
-          }
-        }
-
-        if (resolvedTarget) {
-          edges.push({
-            target: resolvedTarget,
-            edgeType: 'imports',
-            confidence: EXTRACTED,
-            confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
-            weight: 1,
-            isPackage: false,
-          });
-        }
-      }
-    } catch (resolveError) {
-      log(`[language-config] Error resolving TS/JS import '${importPath}' in ${filePath}: ${resolveError}`);
-    }
+  // Inherits (cross-file class extends)
+  for (const { sourceSpecifier } of richer.inheritsFrom) {
+    const edge = await resolveTsJsImport(sourceSpecifier, filePath, projectRoot, 'inherits');
+    if (edge) edges.push(edge);
   }
 
   return edges;
@@ -740,7 +772,7 @@ function buildAstExtractor(
 
 const registry = new Map<string, LanguageConfig>();
 
-// TS/JS: delegate to existing ast-parser.ts extractSnapshot()
+// TS/JS: delegate to extractTsJsEdges() which uses extractRicherEdges() from ast-parser.ts
 for (const ext of ['.ts', '.tsx', '.js', '.jsx']) {
   registry.set(ext, {
     grammarLoader: null,
@@ -849,12 +881,28 @@ export async function extractEdges(
   const ext = path.extname(filePath).toLowerCase();
   const config = registry.get(ext);
   if (!config) return [];
+
+  let rawEdges: EdgeResult[];
   try {
-    return await config.extract(filePath, content, projectRoot);
+    rawEdges = await config.extract(filePath, content, projectRoot);
   } catch (err) {
     log(`[language-config] extractEdges failed for ${filePath}: ${err}`);
     return [];
   }
+
+  // Aggregate duplicate targets by summing weights (D-11/D-12).
+  // Key: target + edgeType (same file can be imported AND re-exported — different edges).
+  const accumulator = new Map<string, EdgeResult>();
+  for (const edge of rawEdges) {
+    const key = `${edge.target}\x00${edge.edgeType}`;
+    const existing = accumulator.get(key);
+    if (existing) {
+      existing.weight += edge.weight;
+    } else {
+      accumulator.set(key, { ...edge });
+    }
+  }
+  return Array.from(accumulator.values());
 }
 
 // Export buildAstExtractor and buildRegexExtractor for tests and external composition.

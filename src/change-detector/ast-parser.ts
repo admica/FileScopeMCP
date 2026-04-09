@@ -107,6 +107,150 @@ function extractSignature(node: any, source: string): string {
   return firstLine;
 }
 
+// ─── Richer edge extraction ────────────────────────────────────────────────
+
+/**
+ * Richer edge classification for dependency extraction.
+ * Used by extractTsJsEdges() in language-config.ts for edge type categorization.
+ */
+export interface RicherEdgeData {
+  /** Raw import specifiers from import_statement and require() nodes */
+  regularImports: string[];
+  /** Raw specifiers from export_statement nodes that have a source field (re-exports) */
+  reExportSources: string[];
+  /** className + sourceSpecifier pairs from extends_clause where class is imported from another file */
+  inheritsFrom: Array<{ className: string; sourceSpecifier: string }>;
+}
+
+/**
+ * Builds a map from imported name to source specifier for a single import_statement.
+ * Handles named imports, default imports, and namespace imports.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildImportNameMap(importNode: any, sourceSpecifier: string, map: Map<string, string>): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function walk(node: any): void {
+    if (node.type === 'import_specifier') {
+      // Named import: import { Foo } from './mod'
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) map.set(nameNode.text as string, sourceSpecifier);
+    } else if (node.type === 'identifier' && node.parent?.type === 'import_clause') {
+      // Default import: import Foo from './mod'
+      map.set(node.text as string, sourceSpecifier);
+    } else if (node.type === 'namespace_import') {
+      // Namespace import: import * as Foo from './mod'
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) map.set(nameNode.text as string, sourceSpecifier);
+    }
+    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+  }
+  walk(importNode);
+}
+
+/**
+ * Parses a TypeScript/JavaScript file and extracts richer edge classification data.
+ * Returns regularImports, reExportSources, and inheritsFrom pairs.
+ *
+ * Unlike extractSnapshot(), this function distinguishes between:
+ * - Regular imports (import_statement, require(), dynamic import)
+ * - Re-export sources (export_statement with source field)
+ * - Inherits-from pairs (class_declaration with extends referencing an imported name)
+ *
+ * Returns null if the file extension is not supported or parsing fails.
+ */
+export function extractRicherEdges(filePath: string, source: string): RicherEdgeData | null {
+  const parser = getParser(filePath);
+  if (!parser) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let tree: any;
+  try {
+    tree = parser.parse(source);
+  } catch (err) {
+    log(`[ast-parser] tree-sitter parse failed for ${filePath}: ${err}`);
+    return null;
+  }
+
+  const regularImports: string[] = [];
+  const reExportSources: string[] = [];
+  const inheritsFrom: Array<{ className: string; sourceSpecifier: string }> = [];
+
+  // Build import name → source specifier map for inherits correlation
+  const importNameToSource = new Map<string, string>();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function visitNode(node: any): void {
+    if (node.type === 'import_statement') {
+      const sourceNode = node.childForFieldName('source');
+      if (sourceNode) {
+        const specifier = getStringFragment(sourceNode);
+        if (specifier) {
+          regularImports.push(specifier);
+          // Build name map for inherits correlation
+          buildImportNameMap(node, specifier, importNameToSource);
+        }
+      }
+    } else if (node.type === 'export_statement') {
+      const sourceNode = node.childForFieldName('source');
+      if (sourceNode) {
+        const specifier = getStringFragment(sourceNode);
+        if (specifier) {
+          reExportSources.push(specifier);
+        }
+      }
+      // Don't return early — still need to recurse for nested nodes
+    } else if (node.type === 'call_expression') {
+      const fnNode = node.childForFieldName('function');
+      if (fnNode && fnNode.type === 'identifier' && fnNode.text === 'require') {
+        const argsNode = node.childForFieldName('arguments');
+        if (argsNode && argsNode.childCount >= 3) {
+          const firstArg = argsNode.child(1);
+          if (firstArg && firstArg.type === 'string') {
+            const fragment = getStringFragment(firstArg);
+            if (fragment) regularImports.push(fragment);
+          }
+        }
+      } else if (fnNode && fnNode.type === 'import') {
+        const argsNode = node.childForFieldName('arguments');
+        if (argsNode && argsNode.childCount >= 3) {
+          const firstArg = argsNode.child(1);
+          if (firstArg && firstArg.type === 'string') {
+            const fragment = getStringFragment(firstArg);
+            if (fragment) regularImports.push(fragment);
+          }
+        }
+      }
+    }
+
+    // Detect class extends referencing an imported name
+    if (node.type === 'class_declaration' || node.type === 'class') {
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child.type === 'class_heritage') {
+          for (let j = 0; j < child.namedChildCount; j++) {
+            const hChild = child.namedChild(j);
+            if (hChild.type === 'extends_clause') {
+              const valueNode = hChild.childForFieldName('value') ?? hChild.namedChild(0);
+              if (valueNode) {
+                const className = valueNode.text as string;
+                const sourceSpec = importNameToSource.get(className);
+                if (sourceSpec) {
+                  inheritsFrom.push({ className, sourceSpecifier: sourceSpec });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < node.childCount; i++) visitNode(node.child(i));
+  }
+
+  visitNode(tree.rootNode);
+  return { regularImports, reExportSources, inheritsFrom };
+}
+
 // ─── Main extraction function ──────────────────────────────────────────────
 
 /**
