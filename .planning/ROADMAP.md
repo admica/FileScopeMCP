@@ -72,7 +72,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full phase details.
 
 - [x] **Phase 25: Schema Foundation + LanguageConfig Scaffolding** - New schema columns, confidence constants, LanguageConfig registry with regex fallback and TS/JS extractor (completed 2026-04-09)
 - [x] **Phase 26: Multi-Language Tree-sitter Extraction** - AST extractors for Python, Rust, C/C++, Go; richer edge types and weights for TS/JS; all edges carry confidence labels (completed 2026-04-09)
-- [ ] **Phase 27: Community Detection** - Louvain clustering via graphology, file_communities table, get_communities MCP tool with dirty-flag cache
+- [x] **Phase 27: Community Detection** - Louvain clustering via graphology, file_communities table, get_communities MCP tool with dirty-flag cache (completed 2026-04-09)
 - [ ] **Phase 28: MCP Polish** - Token budget parameter on list tools, edge types and confidence surfaced in get_file_summary
 
 ## Phase Details
@@ -116,10 +116,10 @@ Plans:
   2. Calling get_communities via MCP returns a list of communities where each community is identified by the path of its highest-importance file (the representative), not a raw integer
   3. After a batch of file changes triggers setEdges(), a second call to get_communities does not re-run Louvain — it returns the cached result; only after a dirty-flag threshold is crossed does Louvain recompute
   4. Community membership is readable from SQLite via the file_communities table; a query by community_id returns all member file paths for that cluster
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 27-01-PLAN.md -- Pure Louvain algorithm module + community repository CRUD and dirty flag
-- [ ] 27-02-PLAN.md -- get_communities MCP tool with dirty-flag orchestration
+- [x] 27-01-PLAN.md -- Pure Louvain algorithm module + community repository CRUD and dirty flag
+- [x] 27-02-PLAN.md -- get_communities MCP tool with dirty-flag orchestration
 
 ### Phase 28: MCP Polish
 **Goal**: List-returning MCP tools support a token budget parameter that truncates results by item count with explicit metadata, and get_file_summary exposes edge types and confidence scores for each dependency
@@ -129,7 +129,10 @@ Plans:
   1. Calling list_files or find_important_files with a maxItems parameter returns at most that many files, ordered by importance, with a truncated: true field and a totalCount field so the caller knows results are incomplete
   2. A truncated response is valid JSON — it is never cut mid-object or mid-string
   3. Calling get_file_summary on a file that has dependency edges returns each edge with its edge_type (e.g., 'imports', 'inherits', 're_exports') and its confidence score
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 28-01-PLAN.md -- getDependenciesWithEdgeMetadata repository function + get_file_summary enrichment
+- [ ] 28-02-PLAN.md -- maxItems parameter on find_important_files and list_files with truncation metadata
 
 ## Progress
 
@@ -161,5 +164,5 @@ Plans:
 | 24. Polish | v1.3 | 3/3 | Complete | 2026-04-03 |
 | 25. Schema Foundation + LanguageConfig Scaffolding | v1.4 | 2/2 | Complete    | 2026-04-09 |
 | 26. Multi-Language Tree-sitter Extraction | v1.4 | 2/2 | Complete    | 2026-04-09 |
-| 27. Community Detection | v1.4 | 0/2 | Not started | - |
-| 28. MCP Polish | v1.4 | 0/? | Not started | - |
+| 27. Community Detection | v1.4 | 2/2 | Complete    | 2026-04-09 |
+| 28. MCP Polish | v1.4 | 0/2 | Not started | - |
