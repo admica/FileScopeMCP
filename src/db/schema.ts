@@ -1,7 +1,7 @@
 // src/db/schema.ts
 // Drizzle ORM table definitions for FileScopeMCP SQLite storage
 // Source: https://orm.drizzle.team/docs/column-types/sqlite
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, real } from 'drizzle-orm/sqlite-core';
 
 // One row per file — flat, no nested children
 // Parent-child relationships reconstructed via path prefix queries
@@ -36,9 +36,24 @@ export const file_dependencies = sqliteTable('file_dependencies', {
   package_name:       text('package_name'),
   package_version:    text('package_version'),
   is_dev_dependency:  integer('is_dev_dependency', { mode: 'boolean' }),
+  // Edge metadata — added in migration 0004
+  edge_type:          text('edge_type').notNull().default('imports'),
+  confidence:         real('confidence').notNull().default(0.8),
+  confidence_source:  text('confidence_source').notNull().default('inferred'),
+  weight:             integer('weight').notNull().default(1),
 }, (t) => [
   index('dep_source_idx').on(t.source_path),
   index('dep_target_idx').on(t.target_path),
+]);
+
+// Community membership — populated by community detection algorithm
+// community_id groups files that are tightly coupled
+export const file_communities = sqliteTable('file_communities', {
+  id:           integer('id').primaryKey({ autoIncrement: true }),
+  community_id: integer('community_id').notNull(),
+  file_path:    text('file_path').notNull(),
+}, (t) => [
+  index('communities_community_id_idx').on(t.community_id),
 ]);
 
 // Schema versioning — single integer row

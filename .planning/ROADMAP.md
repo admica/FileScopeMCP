@@ -6,7 +6,6 @@
 - ✅ **v1.1 Hardening** — Phases 10-15 (shipped 2026-03-20)
 - ✅ **v1.2 LLM Broker** — Phases 16-19 (shipped 2026-03-23)
 - ✅ **v1.3 Nexus** — Phases 20-24 (shipped 2026-04-03)
-- 🚧 **v1.4 Deep Graph Intelligence** — Phases 25-28 (in progress)
 
 ## Phases
 
@@ -66,65 +65,6 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full phase details.
 
 </details>
 
-### 🚧 v1.4 Deep Graph Intelligence (In Progress)
-
-**Milestone Goal:** Replace regex-based dependency parsing with tree-sitter AST extraction, add confidence-labeled edges and community detection to transform the dependency graph into a richer code intelligence layer.
-
-- [ ] **Phase 25: Schema Foundation + LanguageConfig Scaffolding** - New schema columns, confidence constants, LanguageConfig registry with regex fallback and TS/JS extractor
-- [ ] **Phase 26: Multi-Language Tree-sitter Extraction** - AST extractors for Python, Rust, C/C++, Go; richer edge types and weights for TS/JS; all edges carry confidence labels
-- [ ] **Phase 27: Community Detection** - Louvain clustering via graphology, file_communities table, get_communities MCP tool with dirty-flag cache
-- [ ] **Phase 28: MCP Polish** - Token budget parameter on list tools, edge types and confidence surfaced in get_file_summary
-
-## Phase Details
-
-### Phase 25: Schema Foundation + LanguageConfig Scaffolding
-**Goal**: The database schema supports rich dependency edges and community membership, and the LanguageConfig registry is operational with regex fallback and TS/JS extraction — all code that writes edges can run without runtime failures
-**Depends on**: Phase 24 (v1.3 complete)
-**Requirements**: EDGE-01, EDGE-02, AST-01, AST-06
-**Success Criteria** (what must be TRUE):
-  1. The file_dependencies table has edge_type, confidence, confidence_source, and weight columns; existing rows remain intact and are treated as type 'imports' with INFERRED confidence
-  2. The file_communities table exists in schema with community_id index; no data yet
-  3. A confidence.ts constants file defines EXTRACTED (1.0) and INFERRED (0.8) as named exports; no extractor uses raw float literals
-  4. Calling extractEdges() on any file extension dispatches correctly: TS/JS files use the AST extractor, unsupported languages use the regex fallback, and a broken grammar falls back to regex rather than crashing
-  5. All currently-supported languages (Zig, Lua, PHP, C#, Java, Ruby) produce the same dependency results as before through the regex fallback path
-**Plans:** 2 plans
-Plans:
-- [ ] 25-01-PLAN.md -- Schema migration (edge metadata columns + file_communities) and confidence constants
-- [ ] 25-02-PLAN.md -- LanguageConfig registry, setEdges(), and integration wiring into analyzeNewFile/coordinator
-
-### Phase 26: Multi-Language Tree-sitter Extraction
-**Goal**: Python, Rust, C, C++, and Go files have their import edges extracted by tree-sitter AST analysis instead of regex; TS/JS gains richer edge types (imports, re_exports, inherits) and edge weights
-**Depends on**: Phase 25
-**Requirements**: AST-02, AST-03, AST-04, AST-05, AST-07, AST-08, EDGE-03
-**Success Criteria** (what must be TRUE):
-  1. A Python file's imports produce the same resolved paths as the previous regex extractor (parity test passes) and are written to the database with edge_type 'imports' and confidence EXTRACTED (1.0)
-  2. Rust, C/C++, and Go files each pass a parity test against the previous regex extractor before their language is switched to AST extraction
-  3. A TS/JS file with re-export statements produces edges with edge_type 're_exports'; a class extending another produces edge_type 'inherits'
-  4. When a file imports another file multiple times (e.g., two functions imported in separate statements), the edge weight reflects the reference count, not just 1
-  5. All edges in the database carry a non-null confidence label and numeric score; no edge written by any extractor has a NULL confidence field
-**Plans**: TBD
-
-### Phase 27: Community Detection
-**Goal**: Files in the dependency graph are grouped into communities using Louvain clustering; communities are persisted to SQLite and queryable via a new MCP tool that identifies communities by representative file, not by raw integer ID
-**Depends on**: Phase 26
-**Requirements**: COMM-01, COMM-02, COMM-03, COMM-04
-**Success Criteria** (what must be TRUE):
-  1. After coordinator startup, the file_communities table is populated and each file record has a community_id; a file deeply connected to other files in one module shares a community_id with those files
-  2. Calling get_communities via MCP returns a list of communities where each community is identified by the path of its highest-importance file (the representative), not a raw integer
-  3. After a batch of file changes triggers setEdges(), a second call to get_communities does not re-run Louvain — it returns the cached result; only after a dirty-flag threshold is crossed does Louvain recompute
-  4. Community membership is readable from SQLite via the file_communities table; a query by community_id returns all member file paths for that cluster
-**Plans**: TBD
-
-### Phase 28: MCP Polish
-**Goal**: List-returning MCP tools support a token budget parameter that truncates results by item count with explicit metadata, and get_file_summary exposes edge types and confidence scores for each dependency
-**Depends on**: Phase 27
-**Requirements**: MCP-01, MCP-02, EDGE-04
-**Success Criteria** (what must be TRUE):
-  1. Calling list_files or find_important_files with a maxItems parameter returns at most that many files, ordered by importance, with a truncated: true field and a totalCount field so the caller knows results are incomplete
-  2. A truncated response is valid JSON — it is never cut mid-object or mid-string
-  3. Calling get_file_summary on a file that has dependency edges returns each edge with its edge_type (e.g., 'imports', 'inherits', 're_exports') and its confidence score
-**Plans**: TBD
-
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -153,7 +93,3 @@ Plans:
 | 22. Dependency Graph | v1.3 | 2/2 | Complete | 2026-04-02 |
 | 23. System View + Live Activity | v1.3 | 2/2 | Complete | 2026-04-02 |
 | 24. Polish | v1.3 | 3/3 | Complete | 2026-04-03 |
-| 25. Schema Foundation + LanguageConfig Scaffolding | v1.4 | 0/2 | In progress | - |
-| 26. Multi-Language Tree-sitter Extraction | v1.4 | 0/? | Not started | - |
-| 27. Community Detection | v1.4 | 0/? | Not started | - |
-| 28. MCP Polish | v1.4 | 0/? | Not started | - |
