@@ -39,9 +39,9 @@ Three templates ship with the project:
 
 | Template | When to use |
 |----------|-------------|
-| `broker.default.json` | Ollama on localhost (default) |
-| `broker.windows-host.json` | Ollama on Windows host from WSL2 (uses `wsl-host` placeholder, auto-resolved) |
-| `broker.remote-lan.json` | Ollama on a LAN machine by IP |
+| `broker.default.json` | llama-server on localhost:8080 (default) |
+| `broker.windows-host.json` | llama-server on Windows host from WSL2 (uses `wsl-host` placeholder, auto-resolved) |
+| `broker.remote-lan.json` | llama-server on a LAN machine (edit `baseURL`) |
 
 Copy the matching template to `~/.filescope/broker.json` and edit as needed.
 
@@ -71,11 +71,9 @@ vendor/
 
 Loaded once at startup. Use `.filescope/config.json` for programmatic patterns set via MCP tools; use `.filescopeignore` for patterns you want to commit to the repo.
 
-## Custom LLM Model (Modelfile)
+## System Prompt
 
-The `Modelfile` in the repo root defines the `FileScopeMCP-brain` Ollama model — system prompt, base model, and tuned parameters (`temperature: 0.1`, `num_ctx: 32768`). The system prompt teaches the model all three task types (summary, concepts, change_impact) and enforces output format rules.
-
-To modify: edit `Modelfile`, then run `ollama create FileScopeMCP-brain -f Modelfile`. No broker restart needed.
+The broker's system prompt lives in `src/llm/prompts.ts` (constant `SYSTEM_PROMPT`). Edit there and rebuild the broker to change it.
 
 ## Directory Structure
 

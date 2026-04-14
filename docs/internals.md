@@ -70,12 +70,12 @@ Auto-migration: on first run, any legacy JSON tree files are imported into SQLit
 
 ## LLM Broker Architecture
 
-The broker is a standalone Node.js process that owns all Ollama communication:
+The broker is a standalone Node.js process that owns all LLM communication (llama.cpp's `llama-server` or any OpenAI-compatible HTTP API):
 
 - **IPC** — Unix domain socket at `~/.filescope/broker.sock`, NDJSON protocol
 - **Queue** — in-memory priority queue (importance DESC, created_at ASC)
 - **Tiers** — interactive (tier 1) > cascade (tier 2) > background (tier 3)
 - **Dedup** — one pending job per file+type per repo, latest content wins
-- **Timeout** — 120s per job for hung Ollama calls
+- **Timeout** — 120s per job for hung LLM calls
 - **Auto-spawn** — first MCP instance spawns the broker if `broker.sock` is missing
 - **Stats** — per-repo token totals persisted to `~/.filescope/stats.json`

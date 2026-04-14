@@ -23,11 +23,11 @@ FileScopeMCP auto-initializes to the current working directory when Claude Code 
 
 1. Call `status()` — check `broker.brokerConnected`
 2. Check `~/.filescope/broker.log` for connection errors
-3. If using Ollama: `curl http://localhost:11434/v1/models`
+3. If llama-server is running locally: `curl http://localhost:8080/v1/models`
 4. Check `~/.filescope/broker.json` — `baseURL` and `model` must be correct
-5. Run `./setup-llm.sh --status` to verify Ollama and model installation
+5. Run `./setup-llm.sh --status` to verify llama-server reachability
 
-For WSL + Windows issues, see [ollama-setup.md](ollama-setup.md).
+For WSL + Windows issues, see [llm-setup.md](llm-setup.md).
 
 ## Stale PID file ("daemon already running" error)
 

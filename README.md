@@ -19,7 +19,7 @@ Works with **Claude Code**, **Cursor AI**, or as a standalone daemon. Supports 1
 
 **Always fresh** — file watcher + semantic change detection means metadata updates automatically. AST-level diffing for TS/JS, LLM-powered analysis for everything else. Only re-processes what actually changed.
 
-**LLM broker** — a background process coordinates all AI work through Ollama (or any OpenAI-compatible API). Priority queue ensures interactive queries beat background processing. Runs on a single GPU.
+**LLM broker** — a background process coordinates all AI work through llama.cpp's llama-server (or any OpenAI-compatible HTTP API). Priority queue ensures interactive queries beat background processing. Runs on a single GPU.
 
 **Nexus dashboard** — a web UI at `localhost:1234` that lets you visually explore your codebase across all your repos. Interactive dependency graphs, file detail panels, live broker activity, and per-repo health monitoring.
 
@@ -38,7 +38,7 @@ find_important_files(limit: 5)
 status()
 ```
 
-**Want AI summaries?** Set up Ollama with `./setup-llm.sh` — see [docs/ollama-setup.md](docs/ollama-setup.md) for details. Without it, everything else still works.
+**Want AI summaries?** Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. Without it, everything else still works.
 
 Add to your project's `.gitignore`:
 ```
@@ -94,7 +94,7 @@ Everything lives in `.filescope/data.db` (SQLite, WAL mode) per project. The bro
 
 | Doc | What's in it |
 |-----|-------------|
-| [Ollama Setup](docs/ollama-setup.md) | LLM installation — local, WSL, or remote |
+| [LLM Setup](docs/llm-setup.md) | llama.cpp / llama-server installation — local, WSL2+Windows, or remote |
 | [Configuration](docs/configuration.md) | Per-project config, broker config, ignore patterns |
 | [MCP Clients](docs/mcp-clients.md) | Setup for Claude Code, Cursor AI, daemon mode |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
