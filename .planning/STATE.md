@@ -4,8 +4,8 @@ milestone: v1.4
 milestone_name: Deep Graph Intelligence
 status: Milestone archived
 stopped_at: v1.4 milestone complete
-last_updated: "2026-04-09T23:45:00.000Z"
-last_activity: 2026-04-09
+last_updated: "2026-04-14T23:03:07Z"
+last_activity: 2026-04-14
 progress:
   total_phases: 4
   completed_phases: 4
@@ -48,8 +48,9 @@ None.
 | 260323-kgd | Auto-init MCP to CWD, rename set_project_path to set_base_directory | 2026-03-23 | 50b7016 | [260323-kgd](./quick/260323-kgd-auto-init-mcp-to-cwd-rename-set-project-/) |
 | 260324-0yz | Comprehensive documentation update: README and config.example.json for v1.2 | 2026-03-24 | a96b263 | [260324-0yz](./quick/260324-0yz-comprehensive-documentation-update-readm/) |
 | 260402-u6p | Rewrite README.md to accurately reflect current codebase; extract Ollama guides to docs/ollama-setup.md | 2026-04-02 | 539f00b | [260402-u6p](./quick/260402-u6p-rewrite-readme-md-to-accurately-reflect-/) |
+| 260414-otc | Polish setup-llm.sh WSL guide (AMD Vulkan canonical path) and scrub Ollama/11434/Modelfile from all user-facing docs; replace docs/ollama-setup.md with docs/llm-setup.md | 2026-04-14 | 101d8f0 | [260414-otc](./quick/260414-otc-make-sure-the-install-setup-scripts-of-t/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-09
-Stopped at: v1.4 milestone complete — archived to .planning/milestones/
+Last activity: 2026-04-14
+Stopped at: Quick task 260414-otc complete — llama.cpp doc migration fully scrubbed

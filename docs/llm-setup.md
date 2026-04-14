@@ -43,7 +43,7 @@ docker run --gpus all -p 8080:8080 \
   -v $HOME/.cache/llama.cpp:/root/.cache/llama.cpp \
   ghcr.io/ggml-org/llama.cpp:server-cuda \
   -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S \
-  --alias FileScopeMCP-brain -c 32768 -ngl 99 --n-cpu-moe 99 \
+  --alias FileScopeMCP-brain -c 65536 -ngl 99 --n-cpu-moe 99 \
   -fa on --jinja --host 0.0.0.0 --port 8080
 ```
 
@@ -122,14 +122,14 @@ cd C:\llama.cpp  # or the nested subfolder from Step 2
 .\llama-server.exe `
   -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S `
   --alias FileScopeMCP-brain `
-  -c 32768 `
+  -c 65536 `
   -ngl 99 `
   --n-cpu-moe 99 `
   -fa on `
   -b 4096 -ub 4096 `
   --cache-type-k q8_0 --cache-type-v q8_0 `
   --jinja `
-  --mmap --no-mmap-warmup `
+  --no-warmup `
   --host 0.0.0.0 --port 8080 `
   --metrics
 ```
@@ -140,7 +140,9 @@ Flag breakdown:
 - `--n-cpu-moe 99` — claw routed expert FFNs back to CPU RAM, keeping only attention + shared expert on GPU (~2-3GB VRAM)
 - `-fa on` — flash attention
 - `--jinja` — enable the Gemma 4 chat template for `<|think|>` thinking-mode control
-- `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
+- `--no-warmup` — skip the startup dummy inference. Warmup would force-touch every weight page, defeating `--n-cpu-moe`'s on-demand expert paging. (mmap is on by default — no need to specify `--mmap`.)
+- `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. At 64K context this costs ~6-8GB VRAM, which fits comfortably once `--n-cpu-moe 99` has cleared the expert weights off GPU. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
+- `-c 65536` — 64K context. Gemma 4 small models support 128K native, so 64K is well inside the trained range. Bump to 128K if you need it and have the VRAM headroom.
 
 **RAM requirement:** `--n-cpu-moe 99` streams routed experts from system RAM, so keep ~20GB of system RAM free beyond what Windows itself uses.
 

@@ -25,7 +25,7 @@ set -e
 MODEL_HF_REF_DEFAULT="unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S"
 MODEL_ALIAS="FileScopeMCP-brain"    # matches broker.*.json model field
 LLM_PORT=8080
-CONTEXT_SIZE=32768                   # 32K — tune down if VRAM is tight, up if headroom
+CONTEXT_SIZE=65536                   # 64K — fits in ~6-8GB q8_0 KV cache with --n-cpu-moe freeing VRAM
 VRAM_SOFT_MIN_MB=8192                # warn if VRAM < 8GB (not a hard gate)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -86,8 +86,9 @@ Architecture:
     (8 routed + 1 shared expert out of 128), ideal for 16GB VRAM via expert
     offloading to CPU RAM.
   - llama.cpp's -hf flag auto-downloads the GGUF on first run into \$LLAMA_CACHE.
-  - --n-cpu-moe 99 keeps routed experts in system RAM; --mmap + --no-mmap-warmup
-    lets the OS demand-page cold experts from disk.
+  - --n-cpu-moe 99 keeps routed experts in system RAM; --no-warmup skips the
+    startup dummy inference so cold experts stay paged-out (mmap is on by default)
+    until they're actually routed to.
   - --alias $MODEL_ALIAS makes the broker config (broker.*.json) work unchanged.
 
 On WSL2: this script prints Windows-side setup instructions, since llama-server
@@ -304,7 +305,7 @@ llama-server \\
   -b 4096 -ub 4096 \\
   --cache-type-k q8_0 --cache-type-v q8_0 \\
   --jinja \\
-  --mmap --no-mmap-warmup \\
+  --no-warmup \\
   --host 0.0.0.0 --port $LLM_PORT \\
   --metrics
 EOF
@@ -420,7 +421,7 @@ wsl_guide() {
     echo -e "         -b 4096 -ub 4096 \`"
     echo -e "         --cache-type-k q8_0 --cache-type-v q8_0 \`"
     echo -e "         --jinja \`"
-    echo -e "         --mmap --no-mmap-warmup \`"
+    echo -e "         --no-warmup \`"
     echo -e "         --host 0.0.0.0 --port $LLM_PORT \`"
     echo -e "         --metrics${NC}"
     echo ""
@@ -536,7 +537,7 @@ linux_guide() {
       -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 99 -fa on \\
       -b 4096 -ub 4096 \\
       --cache-type-k q8_0 --cache-type-v q8_0 \\
-      --jinja --mmap --no-mmap-warmup \\
+      --jinja --no-warmup \\
       --host 0.0.0.0 --port $LLM_PORT --metrics
     Restart=on-failure
     RestartSec=5s
