@@ -1,32 +1,40 @@
 #!/bin/bash
 # PATH: ./setup-llm.sh
-# Installs Ollama, detects GPU VRAM, selects the best Gemma 4 model,
-# and creates the custom FileScopeMCP-brain model.
-# Safe to run multiple times — idempotent. Skips steps already completed.
+# Configures llama.cpp's llama-server as FileScopeMCP's local LLM backend.
+#
+# Default model: Gemma 4 26B A4B MoE (Unsloth UD-Q5_K_S, ~18GB on disk).
+# Uses llama.cpp's expert offloading (--n-cpu-moe 99) to keep only the
+# attention + shared-expert weights on GPU while routed expert FFNs live
+# in system RAM / mmap'd from the GGUF file on disk. This lets the 26B MoE
+# run on 16GB VRAM, paying the cost only for the ~3.8B active parameters
+# per token (8 routed + 1 shared expert of 128 total).
 #
 # Usage:
-#   ./setup-llm.sh                     # Auto-detect GPU + install
-#   ./setup-llm.sh --model <name>      # Override base model (e.g., gemma4:e2b)
-#   ./setup-llm.sh --status            # Check current setup status
+#   ./setup-llm.sh                     # Print setup guide for your platform
+#   ./setup-llm.sh --launch            # Print the exact llama-server launch command
+#   ./setup-llm.sh --model <hf-ref>    # Override model HF reference
+#   ./setup-llm.sh --status            # Check current setup state
 #   ./setup-llm.sh --help              # Show usage
+#
+# Known-good alternative model (if Gemma 4 throughput is insufficient):
+#   --model unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:UD-Q4_K_XL
 
 set -e
 
 # --- Configuration ---
-BASE_MODEL_FULL="gemma4:e4b"       # For GPUs with >= 12GB VRAM
-BASE_MODEL_LITE="gemma4:e2b"       # For GPUs with < 12GB VRAM
-VRAM_THRESHOLD_MB=12288            # 12 GB — E4B needs ~11GB with 32k context
-CUSTOM_MODEL="FileScopeMCP-brain"
-OLLAMA_API="http://localhost:11434"
+MODEL_HF_REF_DEFAULT="unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S"
+MODEL_ALIAS="FileScopeMCP-brain"    # matches broker.*.json model field
+LLM_PORT=8080
+CONTEXT_SIZE=32768                   # 32K — tune down if VRAM is tight, up if headroom
+VRAM_SOFT_MIN_MB=8192                # warn if VRAM < 8GB (not a hard gate)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Set by detect_vram / select_base_model
+MODEL_HF_REF="$MODEL_HF_REF_DEFAULT"
 VRAM_MB=0
 VRAM_SOURCE=""
 GPU_NAME=""
-BASE_MODEL=""
-MODEL_OVERRIDE=""
-EFFECTIVE_MODELFILE=""
+STATUS_ONLY=false
+LAUNCH_ONLY=false
 
 # --- Colors (degrade gracefully) ---
 GREEN='\033[1;32m'
@@ -42,57 +50,51 @@ warn() { echo -e "${YELLOW}  [!!] $*${NC}"; }
 fail() { echo -e "${RED}  [FAIL] $*${NC}"; }
 die()  { fail "$*"; exit 1; }
 
-# --- Cleanup ---
-cleanup() {
-    if [[ -n "${EFFECTIVE_MODELFILE:-}" ]] && \
-       [[ "$EFFECTIVE_MODELFILE" != "${SCRIPT_DIR}/Modelfile" ]] && \
-       [[ -f "$EFFECTIVE_MODELFILE" ]]; then
-        rm -f "$EFFECTIVE_MODELFILE"
-    fi
-}
-trap cleanup EXIT
-
 # --- Argument parsing ---
-STATUS_ONLY=false
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --status)
             STATUS_ONLY=true
             shift
             ;;
+        --launch)
+            LAUNCH_ONLY=true
+            shift
+            ;;
         --model)
             if [[ -z "${2:-}" ]]; then
-                die "--model requires a value (e.g., --model gemma4:e2b)"
+                die "--model requires a HuggingFace reference (e.g. unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S)"
             fi
-            MODEL_OVERRIDE="$2"
+            MODEL_HF_REF="$2"
             shift 2
             ;;
         --help|-h)
-            echo ""
-            echo "Usage: ./setup-llm.sh [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --model <name>   Override base model (skip auto-detection)"
-            echo "                   Examples: gemma4:e4b, gemma4:e2b, qwen2.5-coder:7b"
-            echo "  --status         Check Ollama/model/GPU status"
-            echo "  --help           Show this help"
-            echo ""
-            echo "Auto-detection:"
-            echo "  Without --model, the script detects your GPU VRAM and picks:"
-            echo "    >= 12GB VRAM → $BASE_MODEL_FULL (better quality)"
-            echo "    <  12GB VRAM → $BASE_MODEL_LITE (fits smaller GPUs)"
-            echo ""
-            echo "  Detection methods (tried in order):"
-            echo "    NVIDIA:    nvidia-smi"
-            echo "    AMD:       rocm-smi, sysfs"
-            echo "    Intel Arc: xpu-smi"
-            echo "    macOS:     sysctl (unified memory)"
-            echo "    WSL:       nvidia-smi, PowerShell registry/WMI"
-            echo ""
-            echo "On WSL2: prints step-by-step instructions for setting up Ollama"
-            echo "on Windows and configuring FileScopeMCP to connect from WSL."
-            echo ""
+            cat <<EOF
+
+Usage: ./setup-llm.sh [OPTIONS]
+
+Options:
+  --launch          Print the exact llama-server launch command to stdout
+  --model <ref>     Override the HuggingFace GGUF reference
+                    Default: $MODEL_HF_REF_DEFAULT
+                    Alternative: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:UD-Q4_K_XL
+  --status          Check llama-server reachability and broker config
+  --help, -h        Show this help
+
+Architecture:
+  - Default model is Gemma 4 26B A4B: 26B total params, ~3.8B active per token
+    (8 routed + 1 shared expert out of 128), ideal for 16GB VRAM via expert
+    offloading to CPU RAM.
+  - llama.cpp's -hf flag auto-downloads the GGUF on first run into \$LLAMA_CACHE.
+  - --n-cpu-moe 99 keeps routed experts in system RAM; --mmap + --no-mmap-warmup
+    lets the OS demand-page cold experts from disk.
+  - --alias $MODEL_ALIAS makes the broker config (broker.*.json) work unchanged.
+
+On WSL2: this script prints Windows-side setup instructions, since llama-server
+needs native GPU access and the broker already bridges to a Windows host via
+broker.windows-host.json (using the 'wsl-host' placeholder).
+
+EOF
             exit 0
             ;;
         *)
@@ -107,8 +109,8 @@ is_wsl() {
 }
 
 # ============================================================================
-# VRAM Detection — multi-vendor, multi-platform
-# Sets: VRAM_MB (int, megabytes), VRAM_SOURCE (string), GPU_NAME (string)
+# VRAM Detection — informational only (no model gating)
+# Sets: VRAM_MB, VRAM_SOURCE, GPU_NAME
 # Returns 0 on success, 1 if detection failed
 # ============================================================================
 detect_vram() {
@@ -116,10 +118,9 @@ detect_vram() {
     VRAM_SOURCE=""
     GPU_NAME=""
 
-    # ---- NVIDIA: nvidia-smi (Linux native + WSL CUDA passthrough) ----
+    # ---- NVIDIA: nvidia-smi ----
     if command -v nvidia-smi &>/dev/null; then
         local vram gpu
-        # sort -rn: if multiple GPUs, pick the largest
         vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null \
             | sort -rn | head -1 | tr -d '[:space:]')
         gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)
@@ -131,14 +132,12 @@ detect_vram() {
         fi
     fi
 
-    # ---- AMD: rocm-smi (Linux with ROCm drivers) ----
+    # ---- AMD: rocm-smi ----
     if command -v rocm-smi &>/dev/null; then
         local vram_line vram_bytes
-        # Match lines with "total" and "memory" but not "used"
         vram_line=$(rocm-smi --showmeminfo vram 2>/dev/null \
             | grep -iE "total.*memory|memory.*total" | grep -vi "used" | head -1)
         if [[ -n "$vram_line" ]]; then
-            # Extract the last number on the line (the byte count)
             vram_bytes=$(echo "$vram_line" | grep -oE '[0-9]+' | tail -1)
             if [[ -n "$vram_bytes" ]] && [[ "$vram_bytes" =~ ^[0-9]+$ ]] && [[ "$vram_bytes" -gt 1000000 ]]; then
                 VRAM_MB=$((vram_bytes / 1048576))
@@ -151,7 +150,7 @@ detect_vram() {
         fi
     fi
 
-    # ---- AMD: sysfs fallback (Linux, no ROCm tools needed) ----
+    # ---- AMD: sysfs fallback ----
     local best_amd_vram=0 best_amd_card=""
     for card_dir in /sys/class/drm/card*/device; do
         [[ -d "$card_dir" ]] || continue
@@ -173,7 +172,6 @@ detect_vram() {
     if [[ $best_amd_vram -gt 0 ]]; then
         VRAM_MB=$best_amd_vram
         VRAM_SOURCE="sysfs"
-        # Try to read the product name
         if [[ -n "$best_amd_card" ]] && [[ -f "${best_amd_card%/device}/device/product_name" ]]; then
             GPU_NAME=$(cat "${best_amd_card%/device}/device/product_name" 2>/dev/null || true)
         fi
@@ -181,7 +179,7 @@ detect_vram() {
         return 0
     fi
 
-    # ---- Intel Arc: xpu-smi (Linux with Intel GPU drivers) ----
+    # ---- Intel Arc ----
     if command -v xpu-smi &>/dev/null; then
         local vram
         vram=$(xpu-smi discovery 2>/dev/null \
@@ -197,13 +195,12 @@ detect_vram() {
         fi
     fi
 
-    # ---- Intel: sysfs fallback (Linux, check for Intel discrete GPU) ----
+    # ---- Intel: sysfs fallback ----
     for card_dir in /sys/class/drm/card*/device; do
         [[ -d "$card_dir" ]] || continue
         [[ -f "$card_dir/vendor" ]] || continue
         local vendor
         vendor=$(cat "$card_dir/vendor" 2>/dev/null || true)
-        # Intel vendor ID 0x8086 — but only discrete GPUs have mem_info_vram_total
         if [[ "$vendor" == "0x8086" ]] && [[ -f "$card_dir/mem_info_vram_total" ]]; then
             local vb
             vb=$(cat "$card_dir/mem_info_vram_total" 2>/dev/null || true)
@@ -219,13 +216,12 @@ detect_vram() {
     # ---- WSL: query Windows host via PowerShell ----
     if is_wsl && command -v powershell.exe &>/dev/null; then
         local gpu_name_ps=""
-        # Try to get GPU name first (fast, tells us what we're working with)
         gpu_name_ps=$(powershell.exe -NoProfile -NonInteractive -Command \
             '(Get-CimInstance Win32_VideoController |
               Sort-Object AdapterRAM -Descending |
               Select-Object -First 1).Name' 2>/dev/null | tr -d '\r\n' || true)
 
-        # Method 1: Registry HardwareInformation.qwMemorySize (64-bit, all vendors)
+        # Registry HardwareInformation.qwMemorySize (64-bit, all vendors)
         local vram
         vram=$(powershell.exe -NoProfile -NonInteractive -Command '
             try {
@@ -241,7 +237,7 @@ detect_vram() {
             return 0
         fi
 
-        # Method 2: WMI AdapterRAM (32-bit field — overflows above 4GB on some drivers)
+        # WMI AdapterRAM fallback (32-bit overflow above 4GB)
         vram=$(powershell.exe -NoProfile -NonInteractive -Command \
             '(Get-CimInstance Win32_VideoController |
               Sort-Object AdapterRAM -Descending |
@@ -250,21 +246,17 @@ detect_vram() {
             VRAM_MB=$((vram / 1048576))
             VRAM_SOURCE="wmi"
             GPU_NAME="${gpu_name_ps:-Windows GPU}"
-            # AdapterRAM is a 32-bit unsigned int — overflows to wrong values above 4GB
             if [[ $VRAM_MB -le 4096 ]] && [[ -n "$gpu_name_ps" ]]; then
-                # Heuristic: if the GPU name suggests a high-end card but WMI says <= 4GB,
-                # it's almost certainly a 32-bit overflow. Fall through to warn + safe default.
                 if echo "$gpu_name_ps" | grep -qiE 'RTX|5060|5070|5080|5090|4060|4070|4080|4090|7900|7800|RX [67]'; then
                     warn "WMI reported ${VRAM_MB}MB but $gpu_name_ps likely has more (32-bit overflow)"
-                    info "Override with: ./setup-llm.sh --model $BASE_MODEL_FULL"
-                    VRAM_MB=0  # force unknown → safe default
+                    VRAM_MB=0
                     return 1
                 fi
             fi
             return 0
         fi
 
-        # Method 3: nvidia-smi.exe on Windows (reachable from some WSL setups)
+        # nvidia-smi.exe fallback
         if command -v nvidia-smi.exe &>/dev/null; then
             vram=$(nvidia-smi.exe --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null \
                 | sort -rn | head -1 | tr -d '[:space:]')
@@ -279,17 +271,14 @@ detect_vram() {
         fi
     fi
 
-    # ---- macOS: unified memory (Apple Silicon shares RAM with GPU) ----
+    # ---- macOS: unified memory ----
     if [[ "$OSTYPE" == "darwin"* ]]; then
         local mem_bytes
         mem_bytes=$(sysctl -n hw.memsize 2>/dev/null || true)
         if [[ -n "$mem_bytes" ]] && [[ "$mem_bytes" =~ ^[0-9]+$ ]] && [[ "$mem_bytes" -gt 0 ]]; then
-            # Apple Silicon shares system RAM — report ~75% as usable for ML
-            # (macOS reserves some for itself, WindowServer, etc.)
             local total_mb=$((mem_bytes / 1048576))
             VRAM_MB=$(( total_mb * 3 / 4 ))
             VRAM_SOURCE="sysctl (unified memory, ~75% of ${total_mb}MB)"
-            # Try to identify the chip
             local chip
             chip=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
             GPU_NAME="${chip:-Apple Silicon}"
@@ -301,216 +290,299 @@ detect_vram() {
 }
 
 # ============================================================================
-# Model Selection — pick base model from VRAM, or use override
-# Sets: BASE_MODEL (string)
+# Launch command — the one-liner every path converges on
 # ============================================================================
-select_base_model() {
-    echo ""
+print_launch_command() {
+    cat <<EOF
+llama-server \\
+  -hf $MODEL_HF_REF \\
+  --alias $MODEL_ALIAS \\
+  -c $CONTEXT_SIZE \\
+  -ngl 99 \\
+  --n-cpu-moe 99 \\
+  -fa on \\
+  -b 4096 -ub 4096 \\
+  --cache-type-k q8_0 --cache-type-v q8_0 \\
+  --jinja \\
+  --mmap --no-mmap-warmup \\
+  --host 0.0.0.0 --port $LLM_PORT \\
+  --metrics
+EOF
+}
 
-    if [[ -n "$MODEL_OVERRIDE" ]]; then
-        BASE_MODEL="$MODEL_OVERRIDE"
-        ok "Using override model: $BASE_MODEL"
-        return 0
-    fi
-
-    info "Detecting GPU and VRAM..."
-
-    if detect_vram; then
+print_vram_advice() {
+    if [[ $VRAM_MB -gt 0 ]]; then
         local vram_gb=$((VRAM_MB / 1024))
-        if [[ $VRAM_MB -ge $VRAM_THRESHOLD_MB ]]; then
-            BASE_MODEL="$BASE_MODEL_FULL"
-            ok "$GPU_NAME — ${vram_gb}GB VRAM (via $VRAM_SOURCE)"
-            ok "Auto-selected: ${CYAN}${BASE_MODEL}${NC} (full model)"
+        if [[ $VRAM_MB -lt $VRAM_SOFT_MIN_MB ]]; then
+            warn "${vram_gb}GB VRAM is below the ${VRAM_SOFT_MIN_MB}MB soft minimum"
+            info "  You may need to lower -c (context) or use a smaller quant"
         else
-            BASE_MODEL="$BASE_MODEL_LITE"
-            ok "$GPU_NAME — ${vram_gb}GB VRAM (via $VRAM_SOURCE)"
-            ok "Auto-selected: ${CYAN}${BASE_MODEL}${NC} (lite model for <$((VRAM_THRESHOLD_MB / 1024))GB VRAM)"
-            info "Override: ./setup-llm.sh --model $BASE_MODEL_FULL"
-        fi
-    else
-        BASE_MODEL="$BASE_MODEL_LITE"
-        warn "Could not detect GPU VRAM"
-        warn "Defaulting to: $BASE_MODEL (safe for most hardware)"
-        info "Override: ./setup-llm.sh --model $BASE_MODEL_FULL"
-    fi
-}
-
-# ============================================================================
-# Modelfile Preparation — patch FROM line if base model differs from file
-# Sets: EFFECTIVE_MODELFILE (path to Modelfile to use for ollama create)
-# ============================================================================
-prepare_modelfile() {
-    local src="${SCRIPT_DIR}/Modelfile"
-    [[ -f "$src" ]] || die "Modelfile not found at $src"
-
-    local current_from
-    current_from=$(awk '/^FROM /{print $2; exit}' "$src")
-
-    if [[ "$current_from" == "$BASE_MODEL" ]]; then
-        EFFECTIVE_MODELFILE="$src"
-    else
-        EFFECTIVE_MODELFILE=$(mktemp "${TMPDIR:-/tmp}/Modelfile.XXXXXX")
-        sed "s|^FROM .*|FROM ${BASE_MODEL}|" "$src" > "$EFFECTIVE_MODELFILE"
-        info "Patched Modelfile: FROM $current_from → FROM $BASE_MODEL"
-    fi
-}
-
-# ============================================================================
-# Ollama helpers
-# ============================================================================
-check_ollama_installed() {
-    command -v ollama &>/dev/null
-}
-
-check_ollama_running() {
-    curl -sf "${OLLAMA_API}/api/tags" &>/dev/null
-}
-
-check_model_available() {
-    local model_name="$1"
-    curl -sf "${OLLAMA_API}/api/tags" 2>/dev/null | grep -q "\"${model_name}"
-}
-
-start_ollama() {
-    info "Starting Ollama service..."
-
-    # Try systemd first (most Linux distros)
-    if command -v systemctl &>/dev/null; then
-        if systemctl is-enabled ollama &>/dev/null 2>&1; then
-            sudo systemctl start ollama 2>/dev/null && { ok "Started via systemd"; return 0; }
+            ok "${vram_gb}GB VRAM — should handle the default config comfortably"
         fi
     fi
-
-    # Fallback: start in background
-    info "Starting Ollama in background..."
-    nohup ollama serve &>/dev/null &
-    OLLAMA_PID=$!
-
-    # Wait for API to become available
-    local retries=0
-    while ! curl -sf "${OLLAMA_API}/api/tags" &>/dev/null; do
-        retries=$((retries + 1))
-        if [[ $retries -ge 15 ]]; then
-            die "Ollama did not start within 15 seconds. Check 'ollama serve' manually."
-        fi
-        sleep 1
-    done
-    ok "Ollama running (PID: $OLLAMA_PID)"
 }
 
 # ============================================================================
-# WSL Guide — prints setup instructions, exits
+# WSL → Windows setup guide
 # ============================================================================
 wsl_guide() {
     echo ""
     echo -e "${YELLOW}═══════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}  WSL2 detected — Ollama should be installed on Windows, not here${NC}"
+    echo -e "${YELLOW}  WSL2 detected — llama.cpp runs on Windows, FileScopeMCP connects${NC}"
+    echo -e "${YELLOW}  from WSL2${NC}"
     echo -e "${YELLOW}═══════════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  WSL2 cannot directly access your GPU for Ollama. Install and run"
-    echo -e "  Ollama natively on Windows so it can use your GPU, then configure"
-    echo -e "  FileScopeMCP to connect across the WSL network boundary."
+    echo -e "  llama-server needs native GPU access, which WSL2 does not fully"
+    echo -e "  provide. The broker already bridges to a Windows host via"
+    echo -e "  broker.windows-host.json — we'll reuse that."
+    echo ""
 
-    # Detect VRAM from WSL to recommend the right model
     info "Detecting Windows GPU..."
     if detect_vram; then
         local vram_gb=$((VRAM_MB / 1024))
         ok "$GPU_NAME — ${vram_gb}GB VRAM (via $VRAM_SOURCE)"
-        if [[ $VRAM_MB -ge $VRAM_THRESHOLD_MB ]]; then
-            BASE_MODEL="$BASE_MODEL_FULL"
-            ok "Recommended model: ${CYAN}${BASE_MODEL}${NC} (full)"
-        else
-            BASE_MODEL="$BASE_MODEL_LITE"
-            ok "Recommended model: ${CYAN}${BASE_MODEL}${NC} (lite for ${vram_gb}GB VRAM)"
-            info "Override: ./setup-llm.sh --model $BASE_MODEL_FULL"
-        fi
+        print_vram_advice
     else
-        if [[ -n "$MODEL_OVERRIDE" ]]; then
-            BASE_MODEL="$MODEL_OVERRIDE"
-            ok "Using override model: $BASE_MODEL"
-        else
-            BASE_MODEL="$BASE_MODEL_LITE"
-            warn "Could not detect Windows GPU VRAM"
-            warn "Defaulting to: $BASE_MODEL (safe for most hardware)"
-            info "Override: ./setup-llm.sh --model $BASE_MODEL_FULL"
-        fi
+        warn "Could not detect Windows GPU VRAM (not a blocker — proceed anyway)"
+    fi
+
+    # Vendor branching for the prebuilt binary choice.
+    local gpu_vendor="unknown"
+    local zip_name="llama-b<NNNN>-bin-win-vulkan-x64.zip"
+    local zip_label="Vulkan build (fallback for unknown GPU)"
+    if echo "$GPU_NAME" | grep -qiE 'radeon|amd|rx [0-9]'; then
+        gpu_vendor="amd"
+        zip_name="llama-b<NNNN>-bin-win-vulkan-x64.zip"
+        zip_label="Vulkan build (AMD — RDNA2/RDNA3)"
+        ok "AMD RDNA2/RDNA3 detected — using Vulkan backend (NOT ROCm)"
+        warn "ROCm on Windows is broken for llama.cpp since build b8152 (Issue #19943)."
+        warn "Use Vulkan — it is also 0-50% faster than ROCm on RDNA2 for MoE models."
+    elif echo "$GPU_NAME" | grep -qiE 'nvidia|rtx|gtx|geforce'; then
+        gpu_vendor="nvidia"
+        zip_name="llama-b<NNNN>-bin-win-cuda-12.X-x64.zip"
+        zip_label="CUDA 12 build (NVIDIA)"
+    elif echo "$GPU_NAME" | grep -qi 'intel'; then
+        gpu_vendor="intel"
+        zip_name="llama-b<NNNN>-bin-win-vulkan-x64.zip"
+        zip_label="Vulkan build (Intel Arc)"
     fi
 
     echo ""
     echo -e "  ${GREEN}On Windows:${NC}"
     echo ""
-    echo -e "  1. Download Ollama from ${CYAN}https://ollama.com/download/windows${NC}"
-    echo -e "     Install it and verify: ${CYAN}ollama --version${NC}"
+    echo -e "  1. Download the llama.cpp Windows release:"
+    echo -e "     ${CYAN}https://github.com/ggml-org/llama.cpp/releases${NC}"
     echo ""
-    echo -e "  2. Configure Ollama to accept connections from WSL."
-    echo -e "     In ${CYAN}PowerShell${NC}:"
-    echo ""
-    echo -e "     ${CYAN}[System.Environment]::SetEnvironmentVariable(\"OLLAMA_HOST\", \"0.0.0.0:11434\", \"User\")${NC}"
-    echo ""
-    echo -e "  3. Restart Ollama so it picks up the new binding."
-    echo -e "     Right-click the Ollama tray icon (bottom-right of taskbar) → ${CYAN}Quit${NC}."
-    echo -e "     Then relaunch Ollama from the Start Menu."
-    echo ""
-    echo -e "     Verify it's listening on all interfaces — in ${CYAN}PowerShell${NC}:"
-    echo ""
-    echo -e "     ${CYAN}netstat -an | findstr 11434${NC}"
-    echo ""
-    echo -e "     You should see ${GREEN}0.0.0.0:11434${NC} (not 127.0.0.1:11434)."
-    echo ""
-    echo -e "  4. Pull the base model."
-    echo -e "     In ${CYAN}PowerShell${NC} or ${CYAN}Command Prompt${NC}:"
-    echo ""
-    echo -e "     ${CYAN}ollama pull ${BASE_MODEL}${NC}"
-    echo ""
-    WINDOWS_USER=$(cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r' || echo '<YourWindowsUser>')
-    echo -e "  5. Copy the Modelfile to Windows and create the custom model."
-    echo -e "     In this ${CYAN}WSL terminal${NC}:"
-    echo ""
-    if [[ "$BASE_MODEL" != "$(awk '/^FROM /{print $2; exit}' "${SCRIPT_DIR}/Modelfile" 2>/dev/null)" ]]; then
-        # Need to patch the Modelfile for the lite model
-        echo -e "     ${CYAN}sed 's|^FROM .*|FROM ${BASE_MODEL}|' ${SCRIPT_DIR}/Modelfile > /tmp/Modelfile.patched${NC}"
-        echo -e "     ${CYAN}cp /tmp/Modelfile.patched /mnt/c/Users/${WINDOWS_USER}/Modelfile${NC}"
-    else
-        echo -e "     ${CYAN}cp ${SCRIPT_DIR}/Modelfile /mnt/c/Users/${WINDOWS_USER}/Modelfile${NC}"
+    echo -e "     Pick: ${YELLOW}${zip_label}${NC}"
+    echo -e "     File: ${CYAN}${zip_name}${NC}"
+    echo -e "     (${CYAN}<NNNN>${NC} is the latest build number on the releases page.)"
+    if [[ "$gpu_vendor" == "nvidia" ]]; then
+        echo -e "     The CUDA 12 toolkit is NOT required for the prebuilt binary."
     fi
     echo ""
-    echo -e "     Then in ${CYAN}PowerShell${NC}:"
+    echo -e "  2. Extract the zip to ${CYAN}C:\\llama.cpp${NC}"
+    echo -e "     Right-click → ${CYAN}Extract All${NC} → enter ${CYAN}C:\\llama.cpp${NC}"
     echo ""
-    echo -e "     ${CYAN}cd \$env:USERPROFILE${NC}"
-    echo -e "     ${CYAN}ollama create ${CUSTOM_MODEL} -f Modelfile${NC}"
+    echo -e "     The zip may or may not create a nested subfolder like"
+    echo -e "     ${CYAN}C:\\llama.cpp\\llama-bNNNN-bin-win-vulkan-x64${NC}. Find the folder"
+    echo -e "     that actually contains ${CYAN}llama-server.exe${NC} with PowerShell:"
+    echo ""
+    echo -e "     ${CYAN}Get-ChildItem -Recurse -Filter llama-server.exe C:\\llama.cpp${NC}"
+    echo ""
+    echo -e "  3. Add a Windows Firewall rule to allow inbound TCP on port $LLM_PORT."
+    echo -e "     In ${CYAN}PowerShell (Admin)${NC}:"
+    echo ""
+    echo -e "     ${CYAN}New-NetFirewallRule -DisplayName 'llama-server $LLM_PORT' \`"
+    echo -e "       -Direction Inbound -Action Allow -Protocol TCP -LocalPort $LLM_PORT${NC}"
+    echo ""
+    echo -e "     This rule should cover Private and Public profiles if your WSL2"
+    echo -e "     interface is on a Public profile (usually it is Private)."
+    echo ""
+    echo -e "  4. Launch llama-server."
+    echo ""
+    echo -e "     ${YELLOW}IMPORTANT:${NC} ${YELLOW}cd into the folder that contains llama-server.exe${NC}"
+    echo -e "     before running it. PowerShell will not find the executable"
+    echo -e "     otherwise — it is not on PATH."
+    echo ""
+    echo -e "     In ${CYAN}PowerShell${NC} (adjust the path to match step 2):"
+    echo ""
+    echo -e "     ${CYAN}cd C:\\llama.cpp${NC}   ${YELLOW}# or the nested subfolder from step 2${NC}"
+    echo ""
+    echo -e "     ${YELLOW}# -ngl 99 offloads all layers to GPU;${NC}"
+    echo -e "     ${YELLOW}# --n-cpu-moe 99 claws routed experts back to CPU RAM${NC}"
+    echo -e "     ${CYAN}.\\llama-server.exe \`"
+    echo -e "         -hf $MODEL_HF_REF \`"
+    echo -e "         --alias $MODEL_ALIAS \`"
+    echo -e "         -c $CONTEXT_SIZE \`"
+    echo -e "         -ngl 99 \`"
+    echo -e "         --n-cpu-moe 99 \`"
+    echo -e "         -fa on \`"
+    echo -e "         -b 4096 -ub 4096 \`"
+    echo -e "         --cache-type-k q8_0 --cache-type-v q8_0 \`"
+    echo -e "         --jinja \`"
+    echo -e "         --mmap --no-mmap-warmup \`"
+    echo -e "         --host 0.0.0.0 --port $LLM_PORT \`"
+    echo -e "         --metrics${NC}"
+    echo ""
+    warn "--n-cpu-moe 99 means weights stream from system RAM — keep ~20GB RAM free beyond what Windows uses."
+    echo ""
+    echo -e "     First run downloads the GGUF (~18GB) into ${CYAN}\$env:LLAMA_CACHE${NC}"
+    echo -e "     or the default llama.cpp cache dir. Subsequent runs start instantly."
+    echo ""
+    echo -e "     If PowerShell reports ${RED}'llama-server.exe is not recognized'${NC},"
+    echo -e "     you are not in the right folder. Re-run step 2's Get-ChildItem"
+    echo -e "     command and cd to wherever it lists the exe."
     echo ""
     echo -e "  ${GREEN}Back in WSL:${NC}"
     echo ""
-    echo -e "  6. Copy the broker config template:"
+    echo -e "  5. Install the WSL-host broker config:"
     echo ""
     echo -e "     ${CYAN}mkdir -p ~/.filescope${NC}"
     echo -e "     ${CYAN}cp ${SCRIPT_DIR}/broker.windows-host.json ~/.filescope/broker.json${NC}"
     echo ""
-    echo -e "  7. Verify the connection:"
+    echo -e "     The 'wsl-host' placeholder in broker.windows-host.json is"
+    echo -e "     auto-resolved by the broker at startup (src/broker/config.ts"
+    echo -e "     runs 'ip route show default' to find the Windows host IP)."
+    echo -e "     No manual editing required."
     echo ""
     GATEWAY_IP=$(ip route show default 2>/dev/null | awk '{print $3}')
+    echo -e "  6. Verify the connection:"
+    echo ""
     if [[ -n "$GATEWAY_IP" ]]; then
-        echo -e "     ${CYAN}curl http://${GATEWAY_IP}:11434/v1/models${NC}"
-        echo ""
-        echo -e "     (Your Windows host IP is ${GREEN}${GATEWAY_IP}${NC})"
+        echo -e "     ${CYAN}curl http://${GATEWAY_IP}:${LLM_PORT}/v1/models${NC}"
+        echo -e "     (Windows host IP: ${GREEN}${GATEWAY_IP}${NC})"
     else
-        echo -e "     ${CYAN}curl http://\$(ip route show default | awk '{print \$3}'):11434/v1/models${NC}"
+        echo -e "     ${CYAN}curl http://\$(ip route show default | awk '{print \$3}'):${LLM_PORT}/v1/models${NC}"
     fi
     echo ""
-    echo -e "  8. Restart Claude Code, then verify the full pipeline:"
+    echo -e "     You should see a JSON response listing ${GREEN}${MODEL_ALIAS}${NC}"
+    echo -e "     in the ${CYAN}data[].id${NC} field."
+    echo ""
+    echo -e "  7. Restart Claude Code, then verify the full pipeline:"
     echo ""
     echo -e "     ${CYAN}./setup-llm.sh --status${NC}"
     echo ""
-    echo -e "     All items should show ${GREEN}[OK]${NC}. If Ollama or the model shows"
-    echo -e "     ${RED}[FAIL]${NC}, revisit the steps above."
-    echo ""
-    echo -e "  ${YELLOW}If curl fails:${NC} Check that Windows Firewall allows port 11434."
-    echo -e "  See the README for firewall instructions and full troubleshooting."
+    echo -e "  ${YELLOW}If curl fails:${NC}"
+    echo -e "    - Is llama-server still running in the Windows PowerShell window?"
+    echo -e "    - Is the firewall rule from step 3 active? (Test with ${CYAN}Test-NetConnection${NC} from another Windows host)"
+    echo -e "    - Is it listening on 0.0.0.0:$LLM_PORT (not 127.0.0.1)? Check with ${CYAN}netstat -an | findstr $LLM_PORT${NC}"
+    echo -e "    - Is the GGUF done downloading? llama-server blocks the HTTP port until the model is loaded. First run can take 5-10 min on a fast connection."
     echo ""
 }
 
 # ============================================================================
-# Status — show current setup state
+# Native Linux guide
+# ============================================================================
+linux_guide() {
+    echo ""
+    echo -e "${GREEN}=== FileScopeMCP LLM Setup (Native Linux) ===${NC}"
+    echo ""
+
+    info "Detecting GPU..."
+    if detect_vram; then
+        local vram_gb=$((VRAM_MB / 1024))
+        ok "$GPU_NAME — ${vram_gb}GB VRAM (via $VRAM_SOURCE)"
+        print_vram_advice
+    else
+        warn "Could not detect GPU VRAM — proceeding anyway"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}Install llama.cpp:${NC}"
+    echo ""
+    echo -e "  ${CYAN}Option A (recommended): build from source with CUDA${NC}"
+    echo -e "    ${CYAN}git clone https://github.com/ggml-org/llama.cpp${NC}"
+    echo -e "    ${CYAN}cd llama.cpp${NC}"
+    echo -e "    ${CYAN}cmake -B build -DGGML_CUDA=ON${NC}"
+    echo -e "    ${CYAN}cmake --build build --config Release -j${NC}"
+    echo -e "    Binary: ${CYAN}./build/bin/llama-server${NC}"
+    echo ""
+    echo -e "  ${CYAN}Option B: Docker (CUDA)${NC}"
+    echo -e "    ${CYAN}docker run --gpus all -p ${LLM_PORT}:${LLM_PORT} \\${NC}"
+    echo -e "    ${CYAN}  -v \$HOME/.cache/llama.cpp:/root/.cache/llama.cpp \\${NC}"
+    echo -e "    ${CYAN}  ghcr.io/ggml-org/llama.cpp:server-cuda \\${NC}"
+    echo -e "    ${CYAN}  -hf $MODEL_HF_REF \\${NC}"
+    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 99 \\${NC}"
+    echo -e "    ${CYAN}  -fa on --jinja --host 0.0.0.0 --port $LLM_PORT${NC}"
+    echo ""
+    echo -e "  ${GREEN}Launch llama-server (same command for both options):${NC}"
+    echo ""
+    print_launch_command
+    echo ""
+    echo -e "  ${GREEN}Verify + configure broker:${NC}"
+    echo ""
+    echo -e "    ${CYAN}curl http://localhost:${LLM_PORT}/v1/models${NC}"
+    echo -e "    ${CYAN}mkdir -p ~/.filescope${NC}"
+    echo ""
+    echo -e "    The broker will auto-copy ${CYAN}broker.default.json${NC} to"
+    echo -e "    ${CYAN}~/.filescope/broker.json${NC} on first launch."
+    echo ""
+    echo -e "  ${GREEN}Run as a systemd service (optional):${NC}"
+    echo ""
+    echo -e "    Create ${CYAN}/etc/systemd/system/llama-server.service${NC}:"
+    echo ""
+    cat <<EOF
+    [Unit]
+    Description=llama.cpp server for FileScopeMCP
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=$USER
+    Environment="CUDA_VISIBLE_DEVICES=0"
+    ExecStart=/path/to/llama-server \\
+      -hf $MODEL_HF_REF \\
+      --alias $MODEL_ALIAS \\
+      -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 99 -fa on \\
+      -b 4096 -ub 4096 \\
+      --cache-type-k q8_0 --cache-type-v q8_0 \\
+      --jinja --mmap --no-mmap-warmup \\
+      --host 0.0.0.0 --port $LLM_PORT --metrics
+    Restart=on-failure
+    RestartSec=5s
+
+    [Install]
+    WantedBy=multi-user.target
+EOF
+    echo ""
+    echo -e "    ${CYAN}sudo systemctl daemon-reload${NC}"
+    echo -e "    ${CYAN}sudo systemctl enable --now llama-server${NC}"
+    echo ""
+}
+
+# ============================================================================
+# macOS guide
+# ============================================================================
+macos_guide() {
+    echo ""
+    echo -e "${GREEN}=== FileScopeMCP LLM Setup (macOS) ===${NC}"
+    echo ""
+
+    if detect_vram; then
+        ok "$GPU_NAME — $((VRAM_MB / 1024))GB unified memory (via $VRAM_SOURCE)"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}Install llama.cpp (Metal backend is default):${NC}"
+    echo ""
+    if command -v brew &>/dev/null; then
+        echo -e "    ${CYAN}brew install llama.cpp${NC}"
+    else
+        echo -e "    Install Homebrew first: ${CYAN}https://brew.sh${NC}"
+        echo -e "    Then: ${CYAN}brew install llama.cpp${NC}"
+    fi
+    echo ""
+    echo -e "  ${GREEN}Launch llama-server:${NC}"
+    echo ""
+    print_launch_command
+    echo ""
+    echo -e "  Broker will auto-copy ${CYAN}broker.default.json${NC} to ${CYAN}~/.filescope/broker.json${NC}"
+    echo -e "  on first launch."
+    echo ""
+}
+
+# ============================================================================
+# Status — check llama-server reachability + broker config
 # ============================================================================
 show_status() {
     echo ""
@@ -520,241 +592,109 @@ show_status() {
     # GPU / VRAM
     info "GPU detection..."
     if detect_vram; then
-        local vram_gb=$((VRAM_MB / 1024))
-        ok "$GPU_NAME — ${vram_gb}GB VRAM (via $VRAM_SOURCE)"
-        if [[ $VRAM_MB -ge $VRAM_THRESHOLD_MB ]]; then
-            info "  Recommended model: $BASE_MODEL_FULL (full)"
-        else
-            info "  Recommended model: $BASE_MODEL_LITE (lite for <$((VRAM_THRESHOLD_MB / 1024))GB)"
-        fi
+        ok "$GPU_NAME — $((VRAM_MB / 1024))GB VRAM (via $VRAM_SOURCE)"
+        print_vram_advice
     else
         warn "Could not detect GPU VRAM"
     fi
 
-    # Detect environment
-    local api_url="$OLLAMA_API"
+    # Determine expected llama-server URL
+    local api_url="http://localhost:${LLM_PORT}"
+    local env_label="local"
     if is_wsl; then
         local host_ip
         host_ip=$(ip route show default 2>/dev/null | awk '{print $3}')
         if [[ -n "$host_ip" ]]; then
-            api_url="http://${host_ip}:11434"
-            info "WSL2 detected — checking Ollama on Windows host (${host_ip})"
-        else
-            warn "WSL2 detected but could not determine Windows host IP"
-        fi
-    else
-        # Ollama installed locally?
-        if check_ollama_installed; then
-            OLLAMA_VER=$(ollama --version 2>/dev/null || echo "unknown")
-            ok "Ollama installed: $OLLAMA_VER"
-        else
-            fail "Ollama not installed"
+            api_url="http://${host_ip}:${LLM_PORT}"
+            env_label="WSL → Windows host (${host_ip})"
         fi
     fi
 
-    # Ollama running?
-    if curl -sf "${api_url}/api/tags" &>/dev/null; then
-        ok "Ollama API responding at ${api_url}"
-    else
-        fail "Ollama not responding at ${api_url}"
-        if is_wsl; then
-            echo ""
-            warn "Troubleshooting:"
-            info "  1. Is Ollama running on Windows? (Start it from the Start Menu or run: ollama serve)"
-            info "  2. Is OLLAMA_HOST set to 0.0.0.0:11434? (Check with: netstat -an | findstr 11434)"
-            info "  3. Is Windows Firewall blocking port 11434? (See README for firewall rule)"
-        fi
-    fi
-
-    # Model available?
-    if curl -sf "${api_url}/api/tags" &>/dev/null; then
-        echo ""
-        info "Installed models:"
-        curl -sf "${api_url}/api/tags" 2>/dev/null | \
-            grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | \
+    echo ""
+    info "Checking llama-server (${env_label})..."
+    if curl -sf "${api_url}/v1/models" >/dev/null 2>&1; then
+        ok "llama-server reachable at ${api_url}"
+        local models
+        models=$(curl -sf "${api_url}/v1/models" 2>/dev/null | \
+            grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//')
+        if [[ -n "$models" ]]; then
+            info "  Served model IDs:"
             while read -r m; do
-                if [[ "$m" == "$CUSTOM_MODEL" ]] || [[ "$m" == "${CUSTOM_MODEL}:latest" ]]; then
-                    echo -e "    ${GREEN}* $m (FileScopeMCP)${NC}"
-                elif [[ "$m" == "$BASE_MODEL_FULL" ]] || [[ "$m" == "${BASE_MODEL_FULL}:latest" ]] || \
-                     [[ "$m" == "$BASE_MODEL_LITE" ]] || [[ "$m" == "${BASE_MODEL_LITE}:latest" ]]; then
-                    echo -e "    ${GREEN}  $m (base)${NC}"
+                if [[ "$m" == "$MODEL_ALIAS" ]]; then
+                    echo -e "    ${GREEN}* $m (expected by broker)${NC}"
                 else
                     echo -e "    ${CYAN}  $m${NC}"
                 fi
-            done
+            done <<< "$models"
 
-        if ! curl -sf "${api_url}/api/tags" 2>/dev/null | grep -q "\"${CUSTOM_MODEL}"; then
-            echo ""
-            warn "Custom model '$CUSTOM_MODEL' not created yet"
-            if is_wsl; then
-                info "Create it on Windows:"
-                info "  ollama create $CUSTOM_MODEL -f Modelfile"
-            else
-                info "Run ./setup-llm.sh to create it from the Modelfile"
+            if ! echo "$models" | grep -q "^${MODEL_ALIAS}$"; then
+                warn "llama-server is not serving '${MODEL_ALIAS}'"
+                info "  Add ${CYAN}--alias $MODEL_ALIAS${NC} to the llama-server launch command"
             fi
         fi
+    else
+        fail "llama-server NOT reachable at ${api_url}"
+        echo ""
+        info "Troubleshooting:"
+        info "  1. Is llama-server running on the target host?"
+        info "  2. Is it bound to 0.0.0.0 (not 127.0.0.1)?"
+        info "  3. If WSL2: is the Windows firewall allowing port $LLM_PORT?"
+        info "  4. Run ./setup-llm.sh without --status for the full setup guide"
     fi
 
     # Broker config
     echo ""
     if [[ -f "$HOME/.filescope/broker.json" ]]; then
         local broker_url
-        broker_url=$(grep -o '"baseURL"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.filescope/broker.json" | sed 's/.*"baseURL"[[:space:]]*:[[:space:]]*"//;s/"//')
+        broker_url=$(grep -o '"baseURL"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.filescope/broker.json" \
+            | sed 's/.*"baseURL"[[:space:]]*:[[:space:]]*"//;s/"//')
         ok "Broker config: ~/.filescope/broker.json"
         info "  baseURL: $broker_url"
         if is_wsl && [[ "$broker_url" == *"localhost"* ]]; then
-            warn "  baseURL points to localhost — this won't work from WSL!"
-            info "  Fix: cp $(cd "$(dirname "$0")" && pwd)/broker.windows-host.json ~/.filescope/broker.json"
+            warn "  baseURL points to localhost — WSL broker must use wsl-host bridge"
+            info "  Fix: cp ${SCRIPT_DIR}/broker.windows-host.json ~/.filescope/broker.json"
+        fi
+        if [[ -n "$broker_url" ]] && [[ "$broker_url" != *":${LLM_PORT}"* ]]; then
+            warn "  baseURL does not use port $LLM_PORT — stale config?"
+            info "  Re-copy the matching template from ${SCRIPT_DIR} (broker.default.json / broker.windows-host.json / broker.remote-lan.json)"
         fi
     else
         warn "No broker config at ~/.filescope/broker.json"
         if is_wsl; then
-            info "  Fix: cp $(cd "$(dirname "$0")" && pwd)/broker.windows-host.json ~/.filescope/broker.json"
+            info "  Fix: cp ${SCRIPT_DIR}/broker.windows-host.json ~/.filescope/broker.json"
         else
             info "  One will be auto-created from broker.default.json on first broker start"
         fi
     fi
 
-    # Modelfile FROM check
     echo ""
-    local modelfile_from
-    modelfile_from=$(awk '/^FROM /{print $2; exit}' "${SCRIPT_DIR}/Modelfile" 2>/dev/null || echo "?")
-    info "Modelfile base: $modelfile_from"
-
+    info "Model (for --alias): $MODEL_ALIAS"
+    info "HF reference:        $MODEL_HF_REF"
     echo ""
 }
 
 # ============================================================================
-# Status-only mode
+# Dispatch
 # ============================================================================
+
+if $LAUNCH_ONLY; then
+    print_launch_command
+    exit 0
+fi
+
 if $STATUS_ONLY; then
     show_status
     exit 0
 fi
 
-# ============================================================================
-# WSL check — print guide and exit
-# ============================================================================
 if is_wsl; then
     wsl_guide
     exit 0
 fi
 
-# ============================================================================
-# Main install flow (Linux / macOS native)
-# ============================================================================
-echo ""
-echo -e "${GREEN}=== FileScopeMCP LLM Setup ===${NC}"
-
-# Step 1: Detect GPU VRAM + select model
-select_base_model
-
-echo ""
-echo -e "  Base model:   ${CYAN}${BASE_MODEL}${NC}"
-echo -e "  Custom model: ${CYAN}${CUSTOM_MODEL}${NC}"
-echo ""
-
-# Step 2: Install Ollama
-echo ""
-if check_ollama_installed; then
-    OLLAMA_VER=$(ollama --version 2>/dev/null || echo "unknown")
-    ok "Ollama already installed: $OLLAMA_VER"
-else
-    info "Installing Ollama..."
-
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS — check for brew first, otherwise direct install
-        if command -v brew &>/dev/null; then
-            brew install ollama 2>&1 | tail -3
-        else
-            curl -fsSL https://ollama.com/install.sh | sh
-        fi
-    else
-        # Linux (including WSL)
-        curl -fsSL https://ollama.com/install.sh | sh
-    fi
-
-    if check_ollama_installed; then
-        OLLAMA_VER=$(ollama --version 2>/dev/null || echo "unknown")
-        ok "Ollama installed: $OLLAMA_VER"
-    else
-        die "Ollama installation failed. Visit https://ollama.com/download for manual install."
-    fi
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    macos_guide
+    exit 0
 fi
 
-# Step 3: Ensure Ollama is running
-echo ""
-if check_ollama_running; then
-    ok "Ollama already running"
-else
-    start_ollama
-fi
-
-# Step 4: Pull base model
-echo ""
-if check_model_available "$BASE_MODEL"; then
-    ok "Base model '$BASE_MODEL' already available"
-else
-    info "Pulling base model '$BASE_MODEL'... (this may take several minutes on first run)"
-    echo ""
-    ollama pull "$BASE_MODEL"
-
-    if check_model_available "$BASE_MODEL"; then
-        echo ""
-        ok "Base model '$BASE_MODEL' ready"
-    else
-        die "Failed to pull model '$BASE_MODEL'. Check your internet connection and try: ollama pull $BASE_MODEL"
-    fi
-fi
-
-# Step 5: Create custom model from Modelfile
-echo ""
-prepare_modelfile
-
-if check_model_available "$CUSTOM_MODEL"; then
-    ok "Custom model '$CUSTOM_MODEL' already exists"
-    info "To rebuild: ollama rm $CUSTOM_MODEL && ./setup-llm.sh"
-else
-    info "Creating custom model '$CUSTOM_MODEL' from Modelfile..."
-    ollama create "$CUSTOM_MODEL" -f "$EFFECTIVE_MODELFILE"
-
-    if check_model_available "$CUSTOM_MODEL"; then
-        ok "Custom model '$CUSTOM_MODEL' created"
-    else
-        die "Failed to create custom model. Try: ollama create $CUSTOM_MODEL -f $EFFECTIVE_MODELFILE"
-    fi
-fi
-
-# Step 6: Verify end-to-end
-echo ""
-info "Verifying LLM endpoint..."
-RESPONSE=$(curl -sf "${OLLAMA_API}/v1/models" 2>/dev/null)
-if [[ -n "$RESPONSE" ]]; then
-    ok "OpenAI-compatible API responding at ${OLLAMA_API}/v1"
-else
-    warn "OpenAI-compatible endpoint did not respond — older Ollama version?"
-    info "FileScopeMCP will still work if Ollama is running"
-fi
-
-# Done
-echo ""
-echo -e "${GREEN}=== LLM Setup Complete ===${NC}"
-echo ""
-echo -e "  GPU:            ${CYAN}${GPU_NAME:-unknown}${NC}"
-if [[ $VRAM_MB -gt 0 ]]; then
-    echo -e "  VRAM:           ${CYAN}$((VRAM_MB / 1024))GB${NC} (detected via ${VRAM_SOURCE})"
-fi
-echo -e "  Ollama API:     ${CYAN}${OLLAMA_API}${NC}"
-echo -e "  Base model:     ${CYAN}${BASE_MODEL}${NC}"
-echo -e "  Custom model:   ${CYAN}${CUSTOM_MODEL}${NC}"
-echo ""
-echo -e "  FileScopeMCP auto-connects to the broker on startup."
-echo -e "  LLM is enabled by default — no manual setup needed."
-echo ""
-echo -e "  ${CYAN}Other commands:${NC}"
-echo -e "    ./setup-llm.sh --status              # Check setup status"
-echo -e "    ./setup-llm.sh --model gemma4:e4b    # Force a specific model"
-echo -e "    ollama list                           # List installed models"
-echo -e "    ollama rm $CUSTOM_MODEL               # Remove custom model"
-echo -e "    ollama rm $BASE_MODEL                 # Remove base model"
-echo ""
+linux_guide
