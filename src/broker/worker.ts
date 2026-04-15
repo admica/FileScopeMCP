@@ -1,6 +1,6 @@
 // src/broker/worker.ts
 // Serial LLM job processor for the FileScopeMCP broker.
-// Dequeues jobs from a PriorityQueue, dispatches to Ollama via adapter/prompts,
+// Dequeues jobs from a PriorityQueue, dispatches to the LLM via the ai SDK,
 // enforces per-job timeout via AbortController, and reports results via callbacks.
 // Exports: BrokerWorker
 
@@ -8,14 +8,30 @@ import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { buildSummaryPrompt, buildConceptsPrompt, buildChangeImpactPrompt } from '../llm/prompts.js';
+import {
+  SYSTEM_PROMPT,
+  buildSummaryPrompt,
+  buildConceptsPrompt,
+  buildChangeImpactPrompt,
+} from '../llm/prompts.js';
 import { log } from '../logger.js';
 import type { QueueJob, JobResult } from './types.js';
 import type { PriorityQueue } from './queue.js';
 
-/** Strip ```json ... ``` fences that small models add despite instructions. */
-function stripMarkdownFences(text: string): string {
-  return text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+/**
+ * Normalize raw LLM output before consumption:
+ *  1. Strip <think>...</think> / <thought>...</thought> blocks — Gemma 4 and
+ *     Qwen3-class models may emit these even when thinking is nominally off.
+ *  2. Strip ```json ... ``` fences that small models add despite instructions.
+ */
+function normalizeOutput(text: string): string {
+  const noThink = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, '');
+  return noThink
+    .replace(/^```(?:json)?\s*\n?/i, '')
+    .replace(/\n?```\s*$/i, '')
+    .trim();
 }
 import type { BrokerConfig } from './config.js';
 
@@ -37,7 +53,7 @@ function createLLMModel(config: BrokerConfig['llm']): LanguageModel {
       const provider = createOpenAICompatible({
         name: 'custom',
         baseURL: config.baseURL!,
-        apiKey: config.apiKey ?? 'ollama',
+        apiKey: config.apiKey ?? 'llama',
       });
       return provider(config.model);
     }
@@ -133,7 +149,7 @@ export class BrokerWorker {
         log(`Completed job ${job.id} (${job.jobType}) for ${job.filePath} — ${result.totalTokens} tokens`);
       } catch (err: any) {
         const isTimeout = err.name === 'AbortError';
-        const code = isTimeout ? 'timeout' : 'ollama_error';
+        const code = isTimeout ? 'timeout' : 'llm_error';
         const message = isTimeout
           ? `Job timed out after ${this.config.jobTimeoutMs}ms`
           : String(err.message || err);
@@ -174,12 +190,12 @@ export class BrokerWorker {
   // ─── Private: job dispatch ────────────────────────────────────────────────
 
   /**
-   * Dispatches a single job to Ollama.
-   * Mirrors pipeline.ts runJob() pattern but:
+   * Dispatches a single job to the LLM backend.
    * 1. Uses job.fileContent instead of reading from disk (content arrives from client).
    * 2. Uses job.payload for change_impact diff text.
    * 3. Threads abortSignal through every generateText call.
-   * 4. Re-throws AbortError before fallback attempt (Pitfall 5 from RESEARCH.md).
+   * 4. Injects SYSTEM_PROMPT on every request (previously baked into an Ollama
+   *    Modelfile; now lives in source and travels with each call).
    */
   private async runJob(job: QueueJob, signal: AbortSignal): Promise<JobResult> {
     const maxOutputTokens = this.config.llm.maxTokensPerCall ?? 1024;
@@ -188,21 +204,23 @@ export class BrokerWorker {
       case 'summary': {
         const { text, usage } = await generateText({
           model: this.model,
+          system: SYSTEM_PROMPT,
           prompt: buildSummaryPrompt(job.filePath, job.fileContent),
           maxOutputTokens,
           abortSignal: signal,
         });
-        return { text: text.trim(), totalTokens: usage?.totalTokens ?? 0 };
+        return { text: normalizeOutput(text), totalTokens: usage?.totalTokens ?? 0 };
       }
 
       case 'concepts': {
         const { text, usage } = await generateText({
           model: this.model,
+          system: SYSTEM_PROMPT,
           prompt: buildConceptsPrompt(job.filePath, job.fileContent),
           maxOutputTokens,
           abortSignal: signal,
         });
-        const conceptsParsed = JSON.parse(stripMarkdownFences(text.trim()));
+        const conceptsParsed = JSON.parse(normalizeOutput(text));
         return { text: JSON.stringify(conceptsParsed), totalTokens: usage?.totalTokens ?? 0 };
       }
 
@@ -212,11 +230,12 @@ export class BrokerWorker {
         }
         const { text, usage } = await generateText({
           model: this.model,
+          system: SYSTEM_PROMPT,
           prompt: buildChangeImpactPrompt(job.filePath, job.payload),
           maxOutputTokens,
           abortSignal: signal,
         });
-        const impactParsed = JSON.parse(stripMarkdownFences(text.trim()));
+        const impactParsed = JSON.parse(normalizeOutput(text));
         return { text: JSON.stringify(impactParsed), totalTokens: usage?.totalTokens ?? 0 };
       }
 

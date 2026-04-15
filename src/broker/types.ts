@@ -40,7 +40,7 @@ export type ResultMessage = {
 export type ErrorMessage = {
   type: 'error';
   id: string;
-  code: 'timeout' | 'queue_full' | 'ollama_error' | 'parse_error';
+  code: 'timeout' | 'queue_full' | 'llm_error' | 'parse_error';
   message: string;
   repoPath?: string;
   filePath?: string;
