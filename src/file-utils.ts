@@ -81,7 +81,7 @@ const RUBY_IMPORT_RE = /(require_relative|require)\s*\(?\s*['"]([^'"]+)['"]\s*\)
 // import extraction via extractSnapshot() from change-detector/ast-parser.ts (CHNG-04).
 // All other languages continue to use the regex patterns below.
 export const IMPORT_PATTERNS: { [key: string]: RegExp } = {
-  '.py': /(?:import\s+[\w.]+|from\s+[\w.]+\s+import\s+[\w*]+)/g,
+  '.py': /(?:import\s+([\w.]+)|from\s+([\w.]+)\s+import\s+[\w*]+)/g,
   '.c': /#include\s+["<]([^">]+)[">]/g,
   '.cpp': /#include\s+["<]([^">]+)[">]/g,
   '.cc': /#include\s+["<]([^">]+)[">]/g,
@@ -90,12 +90,12 @@ export const IMPORT_PATTERNS: { [key: string]: RegExp } = {
   '.hpp': /#include\s+["<]([^">]+)[">]/g,
   '.hh': /#include\s+["<]([^">]+)[">]/g,
   '.hxx': /#include\s+["<]([^">]+)[">]/g,
-  '.rs': /use\s+[\w:]+|mod\s+\w+/g,
-  '.lua': /require\s*\(['"][^'"]+['"]\)/g,
-  '.zig': /@import\s*\(['"][^'"]+['"]\)|const\s+[\w\s,{}]+\s*=\s*@import\s*\(['"][^'"]+['"]\)/g,
+  '.rs': /use\s+([\w:]+)|mod\s+(\w+)/g,
+  '.lua': /require\s*\(?['"]([^'"]+)['"]\)?/g,
+  '.zig': /@import\s*\(?['"]([^'"]+)['"]\)?|const\s+[\w\s,{}]+\s*=\s*@import\s*\(?['"]([^'"]+)['"]\)?/g,
   '.php': /(?:(?:require|require_once|include|include_once)\s*\(?["']([^"']+)["']\)?)|(?:use\s+([A-Za-z0-9\\]+(?:\s+as\s+[A-Za-z0-9]+)?);)/g,
-  '.cs': /using\s+[\w.]+;/g,
-  '.java': /import\s+[\w.]+;/g
+  '.cs': /using\s+([\w.]+);/g,
+  '.java': /import\s+([\w.]+);/g
 };
 
 /**
