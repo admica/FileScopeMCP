@@ -38,11 +38,15 @@
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
+  // Color map is keyed by community id (as string).
+  // 'none' = files with no community assignment.
   function buildColorMap(nodeList: GraphNode[]): Record<string, string> {
-    const dirs = [...new Set(nodeList.map(n => n.directory).filter(Boolean))].sort();
-    const map: Record<string, string> = { '': ROOT_COLOR };
-    dirs.forEach((dir, i) => {
-      map[dir] = DIRECTORY_COLORS[i % DIRECTORY_COLORS.length];
+    const ids = [...new Set(
+      nodeList.map(n => n.communityId).filter((id): id is number => id !== null)
+    )].sort((a, b) => a - b);
+    const map: Record<string, string> = { none: ROOT_COLOR };
+    ids.forEach((id, i) => {
+      map[String(id)] = DIRECTORY_COLORS[i % DIRECTORY_COLORS.length];
     });
     return map;
   }
@@ -52,21 +56,48 @@
     edgeList: GraphEdge[],
     colorMap: Record<string, string>
   ): cytoscape.ElementDefinition[] {
-    const nodeEls: cytoscape.ElementDefinition[] = nodeList.map(n => ({
-      data: {
+    // Live communities = those with at least one child in the (filtered) node set.
+    // Empty communities (no surviving children after filter) are not emitted.
+    const liveCommunities = new Set<number>();
+    for (const n of nodeList) {
+      if (n.communityId !== null) liveCommunities.add(n.communityId);
+    }
+
+    // Compound parent nodes — one per live community.
+    // IDs use prefix `community_` to avoid collision with file paths (which contain `/`).
+    const parentEls: cytoscape.ElementDefinition[] = Array.from(liveCommunities)
+      .sort((a, b) => a - b)
+      .map(id => ({
+        data: {
+          id: `community_${id}`,
+          name: `Community ${id}`,
+          color: colorMap[String(id)] ?? ROOT_COLOR,
+        },
+      }));
+
+    // Child nodes — `parent` data ref groups them inside their community bubble.
+    // Files with no community render as free nodes (no parent ref, ROOT_COLOR).
+    const nodeEls: cytoscape.ElementDefinition[] = nodeList.map(n => {
+      const data: Record<string, unknown> = {
         id: n.path,
         name: n.name,
         importance: n.importance,
-        color: colorMap[n.directory] ?? ROOT_COLOR,
+        degree: n.degree,
+        color: n.communityId !== null
+          ? (colorMap[String(n.communityId)] ?? ROOT_COLOR)
+          : ROOT_COLOR,
         directory: n.directory,
         hasSummary: n.hasSummary,
         isStale: n.isStale,
-      },
-    }));
+      };
+      if (n.communityId !== null) data.parent = `community_${n.communityId}`;
+      return { data };
+    });
+
     const edgeEls: cytoscape.ElementDefinition[] = edgeList.map((e, i) => ({
       data: { id: `e${i}`, source: e.source, target: e.target },
     }));
-    return [...nodeEls, ...edgeEls];
+    return [...parentEls, ...nodeEls, ...edgeEls];
   }
 
   function filterGraph(
@@ -105,10 +136,12 @@
       elements: buildElements(filtered.nodes, filtered.edges, colorMap),
       style: [
         {
-          selector: 'node',
+          // node:childless = file nodes only (excludes compound parents).
+          // Size scales with degree (in+out edge count) — hubs become visibly larger.
+          selector: 'node:childless',
           style: {
-            'width': (ele: cytoscape.NodeSingular) => 12 + ele.data('importance') * 3,
-            'height': (ele: cytoscape.NodeSingular) => 12 + ele.data('importance') * 3,
+            'width': (ele: cytoscape.NodeSingular) => 14 + Math.sqrt(ele.data('degree') ?? 0) * 6,
+            'height': (ele: cytoscape.NodeSingular) => 14 + Math.sqrt(ele.data('degree') ?? 0) * 6,
             'background-color': 'data(color)',
             'label': 'data(name)',
             'font-size': 10,
@@ -117,6 +150,26 @@
             'text-halign': 'center',
             'text-margin-y': 4,
             'min-zoomed-font-size': 8,
+          },
+        },
+        {
+          // node:parent = community bubble. No width/height set → auto-fits children + padding.
+          selector: 'node:parent',
+          style: {
+            'background-color': 'data(color)',
+            'background-opacity': 0.08,
+            'border-width': 1,
+            'border-style': 'dashed',
+            'border-color': '#4b5563',
+            'shape': 'round-rectangle',
+            'padding': 20,
+            'label': 'data(name)',
+            'font-size': 11,
+            'color': '#9ca3af',
+            'text-valign': 'top',
+            'text-halign': 'center',
+            'text-margin-y': -6,
+            'min-zoomed-font-size': 6,
           },
         },
         {
@@ -157,7 +210,22 @@
           },
         },
       ],
-      layout: { name: 'fcose', animate: true, randomize: false, nodeSeparation: 75 } as cytoscape.LayoutOptions,
+      layout: {
+        name: 'fcose',
+        animate: true,
+        randomize: true,                 // breaks the deterministic staircase seed
+        quality: 'proof',
+        nodeRepulsion: 4500,
+        idealEdgeLength: 60,
+        gravity: 0.25,
+        gravityRangeCompound: 1.5,       // pulls communities toward each other
+        gravityCompound: 1.0,            // pulls children inside their community bubble
+        numIter: 2500,
+        packComponents: true,
+        tilingPaddingVertical: 10,
+        tilingPaddingHorizontal: 10,
+        nodeSeparation: 75,
+      } as cytoscape.LayoutOptions,
       userZoomingEnabled: true,
       userPanningEnabled: true,
       boxSelectionEnabled: false,
@@ -173,10 +241,13 @@
     // ─── Node hover: highlight neighborhood, dim others ────────────────────
     cy.on('mouseover', 'node', (e) => {
       const node = e.target;
+      if (node.isParent()) return; // skip community bubbles
       const neighborhood = node.closedNeighborhood();
-      cy!.elements().difference(neighborhood).addClass('dimmed');
+      // Keep parent bubbles of the highlighted set visible (not dimmed)
+      const keep = neighborhood.union(neighborhood.parents());
+      cy!.elements().difference(keep).addClass('dimmed');
       neighborhood.addClass('highlighted');
-      tooltipText = `${node.data('name')} (${node.data('importance')})`;
+      tooltipText = `${node.data('name')} (deg ${node.data('degree')})`;
       tooltipVisible = true;
     });
 
@@ -198,6 +269,7 @@
 
     // ─── Node click: navigate to file detail ──────────────────────────────
     cy.on('tap', 'node', (e) => {
+      if (e.target.isParent()) return; // ignore community bubble clicks
       onSelectFile(e.target.id());
     });
 
@@ -239,7 +311,22 @@
     const colorMap = buildColorMap(filtered.nodes);
     cy.elements().remove();
     cy.add(buildElements(filtered.nodes, filtered.edges, colorMap));
-    cy.layout({ name: 'fcose', animate: true, randomize: false, nodeSeparation: 75 } as cytoscape.LayoutOptions).run();
+    cy.layout({
+      name: 'fcose',
+      animate: true,
+      randomize: true,
+      quality: 'proof',
+      nodeRepulsion: 4500,
+      idealEdgeLength: 60,
+      gravity: 0.25,
+      gravityRangeCompound: 1.5,
+      gravityCompound: 1.0,
+      numIter: 2500,
+      packComponents: true,
+      tilingPaddingVertical: 10,
+      tilingPaddingHorizontal: 10,
+      nodeSeparation: 75,
+    } as cytoscape.LayoutOptions).run();
     // Highlight selected node if any
     if (selectedPath) {
       const sel = cy.$id(selectedPath);

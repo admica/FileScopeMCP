@@ -173,6 +173,8 @@ export type GraphNode = {
   directory: string;   // top-level directory (e.g. "src", "tests"); "" for root-level files
   hasSummary: boolean;
   isStale: boolean;
+  communityId: number | null; // from file_communities; null = unassigned
+  degree: number;             // in + out edge count within this graph
 };
 
 export type GraphEdge = {
@@ -374,34 +376,53 @@ export function getGraphData(
   }
   const edges = db.prepare(edgeQuery).all(...edgeParams) as GraphEdge[];
 
-  // Collect unique file paths referenced by edges
+  // Collect unique file paths and compute degree (in + out) per node in a single pass
   const pathSet = new Set<string>();
-  for (const e of edges) { pathSet.add(e.source); pathSet.add(e.target); }
+  const degreeMap = new Map<string, number>();
+  for (const e of edges) {
+    pathSet.add(e.source);
+    pathSet.add(e.target);
+    degreeMap.set(e.source, (degreeMap.get(e.source) ?? 0) + 1);
+    degreeMap.set(e.target, (degreeMap.get(e.target) ?? 0) + 1);
+  }
   if (pathSet.size === 0) return { nodes: [], edges: [] };
 
-  // Nodes: fetch metadata for all referenced files
+  // Nodes: fetch metadata + community membership for all referenced files
+  // LEFT JOIN file_communities so files without a community still appear (community_id = null).
   // Note: SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999.
   // The 500-node performance cap (D-12) keeps this well under limit.
   const paths = Array.from(pathSet);
   const placeholders = paths.map(() => '?').join(',');
   const fileRows = db.prepare(`
-    SELECT path, name, importance,
-           (summary IS NOT NULL) AS has_summary,
-           (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
-            OR change_impact_stale_since IS NOT NULL) AS is_stale
-    FROM files WHERE path IN (${placeholders}) AND is_directory = 0
+    SELECT f.path, f.name, f.importance,
+           (f.summary IS NOT NULL) AS has_summary,
+           (f.summary_stale_since IS NOT NULL OR f.concepts_stale_since IS NOT NULL
+            OR f.change_impact_stale_since IS NOT NULL) AS is_stale,
+           fc.community_id
+    FROM files f
+    LEFT JOIN file_communities fc ON fc.file_path = f.path
+    WHERE f.path IN (${placeholders}) AND f.is_directory = 0
   `).all(...paths) as Array<{
     path: string; name: string; importance: number | null;
-    has_summary: number; is_stale: number;
+    has_summary: number; is_stale: number; community_id: number | null;
   }>;
 
-  const nodes: GraphNode[] = fileRows.map(r => ({
+  // Dedupe defensively: if a file somehow has multiple file_communities rows,
+  // keep the first occurrence (FK exists but no uniqueness constraint).
+  const rowByPath = new Map<string, typeof fileRows[number]>();
+  for (const r of fileRows) {
+    if (!rowByPath.has(r.path)) rowByPath.set(r.path, r);
+  }
+
+  const nodes: GraphNode[] = Array.from(rowByPath.values()).map(r => ({
     path: r.path,
     name: r.name,
     importance: r.importance ?? 0,
     directory: r.path.includes('/') ? r.path.split('/')[0] : '',
     hasSummary: Boolean(r.has_summary),
     isStale: Boolean(r.is_stale),
+    communityId: r.community_id ?? null,
+    degree: degreeMap.get(r.path) ?? 0,
   }));
 
   return { nodes, edges };

@@ -95,6 +95,8 @@ export type GraphNode = {
   directory: string;
   hasSummary: boolean;
   isStale: boolean;
+  communityId: number | null;
+  degree: number;
 };
 
 export type GraphEdge = { source: string; target: string };
