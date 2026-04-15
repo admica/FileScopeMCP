@@ -48,14 +48,14 @@ function checkPidGuard(): void {
   }
 }
 
-// ─── Ollama connectivity check ────────────────────────────────────────────────
+// ─── LLM connectivity check ───────────────────────────────────────────────────
 
-/** Checks if Ollama is reachable. Warns if not but always continues (self-healing). */
-async function checkOllamaConnectivity(baseURL?: string): Promise<boolean> {
-  const url = baseURL || 'http://localhost:11434';
+/** Checks if the LLM server is reachable. Warns if not but always continues (self-healing). */
+async function checkLLMConnectivity(baseURL?: string): Promise<boolean> {
+  const url = baseURL || 'http://localhost:8880';
   try {
-    // Strip /v1 suffix for health check (Ollama health endpoint is at root)
-    const healthURL = url.replace(/\/v1\/?$/, '');
+    // llama-server exposes /v1/models on the OpenAI-compatible endpoint
+    const healthURL = url.replace(/\/v1\/?$/, '') + '/v1/models';
     const res = await fetch(healthURL, { signal: AbortSignal.timeout(5000) });
     return res.ok;
   } catch {
@@ -88,12 +88,12 @@ async function main(): Promise<void> {
   log(`  Node:      ${process.version}`);
   log(`  Started:   ${new Date().toISOString()}`);
 
-  // 5. Ollama connectivity check (warn if unreachable, continue anyway)
-  const ollamaOk = await checkOllamaConnectivity(config.llm.baseURL);
-  if (ollamaOk) {
-    log(`  Ollama:    reachable at ${config.llm.baseURL || 'http://localhost:11434'}`);
+  // 5. LLM connectivity check (warn if unreachable, continue anyway)
+  const llmOk = await checkLLMConnectivity(config.llm.baseURL);
+  if (llmOk) {
+    log(`  LLM:       reachable at ${config.llm.baseURL || 'http://localhost:8880'}`);
   } else {
-    log(`  Ollama:    UNREACHABLE at ${config.llm.baseURL || 'http://localhost:11434'} (will retry per-job)`);
+    log(`  LLM:       UNREACHABLE at ${config.llm.baseURL || 'http://localhost:8880'} (will retry per-job)`);
   }
 
   // 6. Create and start server

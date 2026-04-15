@@ -24,7 +24,7 @@ set -e
 # --- Configuration ---
 MODEL_HF_REF_DEFAULT="unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S"
 MODEL_ALIAS="FileScopeMCP-brain"    # matches broker.*.json model field
-LLM_PORT=8080
+LLM_PORT=8880
 CONTEXT_SIZE=65536                   # 64K — fits in ~6-8GB q8_0 KV cache with --n-cpu-moe freeing VRAM
 VRAM_SOFT_MIN_MB=8192                # warn if VRAM < 8GB (not a hard gate)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -39,7 +39,7 @@ Three templates ship with the project:
 
 | Template | When to use |
 |----------|-------------|
-| `broker.default.json` | llama-server on localhost:8080 (default) |
+| `broker.default.json` | llama-server on localhost:8880 (default) |
 | `broker.windows-host.json` | llama-server on Windows host from WSL2 (uses `wsl-host` placeholder, auto-resolved) |
 | `broker.remote-lan.json` | llama-server on a LAN machine (edit `baseURL`) |
 

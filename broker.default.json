@@ -2,7 +2,7 @@
   "llm": {
     "provider": "openai-compatible",
     "model": "FileScopeMCP-brain",
-    "baseURL": "http://localhost:11434/v1",
+    "baseURL": "http://localhost:8880/v1",
     "maxTokensPerCall": 1024
   },
   "jobTimeoutMs": 300000,

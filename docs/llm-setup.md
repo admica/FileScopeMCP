@@ -39,12 +39,12 @@ cmake --build build --config Release -j
 Or run the CUDA Docker image:
 
 ```bash
-docker run --gpus all -p 8080:8080 \
+docker run --gpus all -p 8880:8880 \
   -v $HOME/.cache/llama.cpp:/root/.cache/llama.cpp \
   ghcr.io/ggml-org/llama.cpp:server-cuda \
   -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S \
   --alias FileScopeMCP-brain -c 65536 -ngl 99 --n-cpu-moe 99 \
-  -fa on --jinja --host 0.0.0.0 --port 8080
+  -fa on --jinja --host 0.0.0.0 --port 8880
 ```
 
 Run `./setup-llm.sh --launch` to print the exact launch command for the native binary.
@@ -67,7 +67,7 @@ Verify with:
 ./setup-llm.sh --status
 ```
 
-No broker config changes are needed — the default `broker.default.json` template points at `localhost:8080`, and the broker auto-copies it to `~/.filescope/broker.json` on first start if the file is missing.
+No broker config changes are needed — the default `broker.default.json` template points at `localhost:8880`, and the broker auto-copies it to `~/.filescope/broker.json` on first start if the file is missing.
 
 ---
 
@@ -102,13 +102,13 @@ Get-ChildItem -Recurse -Filter llama-server.exe C:\llama.cpp
 
 Note the exact folder — you will `cd` into it in Step 4.
 
-### Step 3: Open port 8080 in Windows Firewall
+### Step 3: Open port 8880 in Windows Firewall
 
 In an elevated PowerShell (Run as Administrator):
 
 ```powershell
-New-NetFirewallRule -DisplayName "llama-server 8080" `
-  -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
+New-NetFirewallRule -DisplayName "llama-server 8880" `
+  -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8880
 ```
 
 If your WSL2 network interface is on the Public profile (unusual — usually Private), ensure the rule covers both.
@@ -130,7 +130,7 @@ cd C:\llama.cpp  # or the nested subfolder from Step 2
   --cache-type-k q8_0 --cache-type-v q8_0 `
   --jinja `
   --no-warmup `
-  --host 0.0.0.0 --port 8080 `
+  --host 0.0.0.0 --port 8880 `
   --metrics
 ```
 
@@ -160,7 +160,7 @@ The `wsl-host` placeholder in `broker.windows-host.json` is auto-resolved by the
 ### Step 6: Verify from WSL
 
 ```bash
-curl http://$(ip route show default | awk '{print $3}'):8080/v1/models
+curl http://$(ip route show default | awk '{print $3}'):8880/v1/models
 ```
 
 Expected: JSON with `data[].id` containing `FileScopeMCP-brain`.
@@ -181,7 +181,7 @@ Or call `status()` from an MCP tool in Claude Code.
 
 llama-server runs on a different machine on your network.
 
-**1. On the remote machine:** Launch llama-server with the full flag set from Step 4 above, ensuring `--host 0.0.0.0 --port 8080 --alias FileScopeMCP-brain` are present.
+**1. On the remote machine:** Launch llama-server with the full flag set from Step 4 above, ensuring `--host 0.0.0.0 --port 8880 --alias FileScopeMCP-brain` are present.
 
 **2. In WSL / on the FileScopeMCP machine:**
 
@@ -197,7 +197,7 @@ cp ~/FileScopeMCP/broker.remote-lan.json ~/.filescope/broker.json
   "llm": {
     "provider": "openai-compatible",
     "model": "FileScopeMCP-brain",
-    "baseURL": "http://YOUR_SERVER_IP:8080/v1",
+    "baseURL": "http://YOUR_SERVER_IP:8880/v1",
     "maxTokensPerCall": 1024
   },
   "jobTimeoutMs": 120000,
@@ -208,7 +208,7 @@ cp ~/FileScopeMCP/broker.remote-lan.json ~/.filescope/broker.json
 **4. Verify connectivity:**
 
 ```bash
-curl http://<remote-ip>:8080/v1/models
+curl http://<remote-ip>:8880/v1/models
 ```
 
 **5. Restart Claude Code.**
@@ -228,10 +228,10 @@ Check the PowerShell window it was launched in. If you closed that window, llama
 In a Windows terminal:
 
 ```powershell
-netstat -an | findstr 8080
+netstat -an | findstr 8880
 ```
 
-You should see `0.0.0.0:8080`. If you see `127.0.0.1:8080`, you forgot `--host 0.0.0.0` on the launch command.
+You should see `0.0.0.0:8880`. If you see `127.0.0.1:8880`, you forgot `--host 0.0.0.0` on the launch command.
 
 ### 3. Can WSL reach the Windows host?
 
@@ -239,7 +239,7 @@ From WSL:
 
 ```bash
 ip route show default | awk '{print $3}'
-curl http://$(ip route show default | awk '{print $3}'):8080/v1/models
+curl http://$(ip route show default | awk '{print $3}'):8880/v1/models
 ```
 
 If `curl` hangs or returns "Connection refused":
@@ -253,7 +253,7 @@ If `curl` hangs or returns "Connection refused":
 cat ~/.filescope/broker.json
 ```
 
-`baseURL` should contain `wsl-host:8080` (auto-resolved at startup) or the literal Windows host IP on port 8080. If it points at a different port or still has `localhost`, re-copy the template:
+`baseURL` should contain `wsl-host:8880` (auto-resolved at startup) or the literal Windows host IP on port 8880. If it points at a different port or still has `localhost`, re-copy the template:
 
 ```bash
 cp ~/FileScopeMCP/broker.windows-host.json ~/.filescope/broker.json
