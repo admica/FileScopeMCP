@@ -28,6 +28,7 @@ import {
   setCommunities,
   getCommunities,
   getCommunityForFile,
+  searchFiles,
 } from './db/repository.js';
 import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
 import { detectCycles } from './cycle-detection.js';
@@ -362,16 +363,26 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     }
   });
 
-  server.tool("scan_all", "Queue all files for LLM summarization. Intensive — use when you need full codebase intelligence.", {
+  server.tool("scan_all", "Queue files for LLM summarization. Use remaining_only to skip already-summarized files.", {
     min_importance: z.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
-  }, async ({ min_importance }) => {
+    remaining_only: z.boolean().optional().default(false).describe("When true, only queue files that have never been summarized"),
+  }, async ({ min_importance, remaining_only }) => {
     if (!coordinator.isInitialized()) return projectPathNotSetError;
     if (!brokerIsConnected()) {
       return { content: [{ type: "text", text: "Error: Broker not connected. Check LLM config in .filescope/config.json (llm.enabled must be true)." }], isError: true };
     }
-    const marked = markAllStale(Date.now(), min_importance);
+    const marked = markAllStale(Date.now(), min_importance, remaining_only);
     resubmitStaleFiles();
-    return createMcpResponse({ queued: marked, min_importance, message: marked > 0 ? `Queued ${marked} files for LLM processing.` : "All files already queued or processed." });
+    return createMcpResponse({ queued: marked, min_importance, remaining_only, message: marked > 0 ? `Queued ${marked} files for LLM processing.` : "All files already queued or processed." });
+  });
+
+  server.tool("search", "Search file metadata — symbols, purpose, summaries, and paths", {
+    query: z.string().describe("Search term to match against symbols, purpose, summaries, and paths"),
+    maxItems: z.number().optional().describe("Max results (default 10)"),
+  }, async ({ query, maxItems }) => {
+    if (!coordinator.isInitialized()) return projectPathNotSetError;
+    const response = searchFiles(query, maxItems ?? 10);
+    return createMcpResponse(response);
   });
 
   server.tool("status", "System health: broker connection, queue depth, LLM processing progress, file watching, and project info", {}, async () => {

@@ -27,7 +27,9 @@ beforeAll(async () => {
       summary_stale_since INTEGER,
       concepts_stale_since INTEGER,
       change_impact_stale_since INTEGER,
-      exports_snapshot TEXT
+      exports_snapshot TEXT,
+      concepts TEXT,
+      change_impact TEXT
     );
     CREATE TABLE IF NOT EXISTS file_dependencies (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +68,9 @@ afterAll(async () => {
 // Helper: insert a file row into the DB
 function insertFile(filePath: string, opts?: {
   summary?: string;
+  importance?: number;
+  concepts?: string;
+  change_impact?: string;
   summary_stale_since?: number | null;
   concepts_stale_since?: number | null;
   change_impact_stale_since?: number | null;
@@ -73,11 +78,14 @@ function insertFile(filePath: string, opts?: {
   const sqlite = getSqlite();
   const name = filePath.split('/').pop() ?? filePath;
   sqlite
-    .prepare('INSERT OR REPLACE INTO files (path, name, is_directory, summary, summary_stale_since, concepts_stale_since, change_impact_stale_since) VALUES (?, ?, 0, ?, ?, ?, ?)')
+    .prepare('INSERT OR REPLACE INTO files (path, name, is_directory, importance, summary, concepts, change_impact, summary_stale_since, concepts_stale_since, change_impact_stale_since) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)')
     .run(
       filePath,
       name,
+      opts?.importance ?? 0,
       opts?.summary ?? null,
+      opts?.concepts ?? null,
+      opts?.change_impact ?? null,
       opts?.summary_stale_since ?? null,
       opts?.concepts_stale_since ?? null,
       opts?.change_impact_stale_since ?? null,
@@ -92,7 +100,7 @@ function clearTables(): void {
 
 // ─── getStaleness tests ────────────────────────────────────────────────────────
 
-import { getStaleness, markStale, getDependenciesWithEdgeMetadata } from './db/repository.js';
+import { getStaleness, markStale, getDependenciesWithEdgeMetadata, searchFiles } from './db/repository.js';
 
 describe('getStaleness', () => {
   it('returns all nulls for a fresh file (no staleness set)', () => {
@@ -517,14 +525,210 @@ describe('COMPAT-01: MCP tool names and schemas remain identical', () => {
       'set_file_summary',
       'set_file_importance',
       'scan_all',
+      'search',
       'status',
       'exclude_and_remove',
       'detect_cycles',
       'get_cycles_for_file',
+      'get_communities',
     ];
 
     for (const toolName of expectedTools) {
       expect(src).toContain(`server.tool("${toolName}"`);
     }
+  });
+});
+
+// ─── searchFiles tests ──────────────────────────────────────────────────────
+
+describe('searchFiles', () => {
+  const conceptsJson = (overrides: Partial<{
+    functions: string[];
+    classes: string[];
+    interfaces: string[];
+    exports: string[];
+    purpose: string;
+  }> = {}) => JSON.stringify({
+    functions: [],
+    classes: [],
+    interfaces: [],
+    exports: [],
+    purpose: 'default purpose',
+    ...overrides,
+  });
+
+  it('symbol match returns matchRank 100', () => {
+    clearTables();
+    insertFile('/src/repo.ts', {
+      importance: 8,
+      concepts: conceptsJson({ functions: ['searchFiles', 'getFile'], purpose: 'repository layer' }),
+    });
+
+    const result = searchFiles('searchFiles');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].path).toBe('/src/repo.ts');
+    expect(result.results[0].matchRank).toBe(100);
+  });
+
+  it('class match returns matchRank 100', () => {
+    clearTables();
+    insertFile('/src/engine.ts', {
+      concepts: conceptsJson({ classes: ['CascadeEngine'] }),
+    });
+
+    const result = searchFiles('CascadeEngine');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].matchRank).toBe(100);
+  });
+
+  it('purpose match returns matchRank 50', () => {
+    clearTables();
+    insertFile('/src/auth.ts', {
+      concepts: conceptsJson({ purpose: 'handles user authentication and session tokens' }),
+    });
+
+    const result = searchFiles('authentication');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].matchRank).toBe(50);
+  });
+
+  it('affectedAreas match returns matchRank 50', () => {
+    clearTables();
+    insertFile('/src/migration.ts', {
+      change_impact: JSON.stringify({
+        riskLevel: 'high',
+        affectedAreas: ['database', 'authentication'],
+        breakingChanges: [],
+        summary: 'schema migration',
+      }),
+    });
+
+    const result = searchFiles('authentication');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].matchRank).toBe(50);
+  });
+
+  it('summary match returns matchRank 20', () => {
+    clearTables();
+    insertFile('/src/utils.ts', {
+      summary: 'Utility functions for handling staleness tracking',
+    });
+
+    const result = searchFiles('staleness');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].matchRank).toBe(20);
+  });
+
+  it('path match returns matchRank 10', () => {
+    clearTables();
+    insertFile('/src/broker/client.ts');
+
+    const result = searchFiles('broker');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].matchRank).toBe(10);
+  });
+
+  it('ranks symbol > purpose > summary > path', () => {
+    clearTables();
+    insertFile('/src/other/broker.ts', { importance: 1 }); // path match = 10
+    insertFile('/src/summary.ts', { importance: 2, summary: 'manages broker connections' }); // summary match = 20
+    insertFile('/src/purpose.ts', { importance: 3, concepts: conceptsJson({ purpose: 'broker orchestration layer' }) }); // purpose = 50
+    insertFile('/src/symbols.ts', { importance: 4, concepts: conceptsJson({ functions: ['initBroker'] }) }); // symbol = 100
+
+    const result = searchFiles('broker');
+
+    expect(result.results.length).toBeGreaterThanOrEqual(4);
+    expect(result.results[0].path).toBe('/src/symbols.ts');
+    expect(result.results[1].path).toBe('/src/purpose.ts');
+    expect(result.results[2].path).toBe('/src/summary.ts');
+    expect(result.results[3].path).toBe('/src/other/broker.ts');
+  });
+
+  it('empty query returns empty results without hitting DB', () => {
+    clearTables();
+    insertFile('/src/a.ts');
+
+    expect(searchFiles('').results).toEqual([]);
+    expect(searchFiles('   ').results).toEqual([]);
+  });
+
+  it('no matches returns empty results', () => {
+    clearTables();
+    insertFile('/src/a.ts', { summary: 'does something' });
+
+    const result = searchFiles('zzzznonexistent');
+
+    expect(result.results).toEqual([]);
+  });
+
+  it('maxItems truncation sets truncated flag', () => {
+    clearTables();
+    insertFile('/src/a.ts', { summary: 'test file alpha' });
+    insertFile('/src/b.ts', { summary: 'test file beta' });
+    insertFile('/src/c.ts', { summary: 'test file gamma' });
+
+    const result = searchFiles('test', 2);
+
+    expect(result.results).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('no truncation flag when all results fit', () => {
+    clearTables();
+    insertFile('/src/a.ts', { summary: 'test file' });
+
+    const result = searchFiles('test', 10);
+
+    expect(result.results).toHaveLength(1);
+    expect(result.truncated).toBeUndefined();
+  });
+
+  it('case-insensitive matching', () => {
+    clearTables();
+    insertFile('/src/auth.ts', {
+      concepts: conceptsJson({ functions: ['AuthMiddleware'] }),
+    });
+
+    const result = searchFiles('authmiddleware');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].matchRank).toBe(100);
+  });
+
+  it('files without concepts match on path and summary only', () => {
+    clearTables();
+    insertFile('/src/auth.ts', { summary: 'authentication helpers' });
+
+    const result = searchFiles('auth');
+
+    expect(result.results).toHaveLength(1);
+    // Should match on both path (10) and summary (20), CASE picks highest = 20
+    expect(result.results[0].matchRank).toBe(20);
+  });
+
+  it('returns purpose from concepts when available', () => {
+    clearTables();
+    insertFile('/src/repo.ts', {
+      concepts: conceptsJson({ functions: ['getFile'], purpose: 'database access layer' }),
+    });
+
+    const result = searchFiles('getFile');
+
+    expect(result.results[0].purpose).toBe('database access layer');
+  });
+
+  it('returns null purpose when concepts not available', () => {
+    clearTables();
+    insertFile('/src/config.ts', { summary: 'config loading' });
+
+    const result = searchFiles('config');
+
+    expect(result.results[0].purpose).toBeNull();
   });
 });

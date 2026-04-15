@@ -494,6 +494,85 @@ export function getLlmProgress(): {
   };
 }
 
+// ─── Search ───────────────────────────────────────────────────────────────────
+
+const SEARCH_SQL = `
+SELECT path, name, importance,
+  json_extract(concepts, '$.purpose') AS purpose,
+  CASE
+    WHEN concepts IS NOT NULL AND (
+      EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.functions')) WHERE value LIKE @pattern)
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.classes')) WHERE value LIKE @pattern)
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.interfaces')) WHERE value LIKE @pattern)
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.exports')) WHERE value LIKE @pattern)
+    ) THEN 100
+    WHEN (concepts IS NOT NULL AND json_extract(concepts, '$.purpose') LIKE @pattern)
+      OR (change_impact IS NOT NULL AND
+        EXISTS(SELECT 1 FROM json_each(json_extract(change_impact, '$.affectedAreas')) WHERE value LIKE @pattern))
+      THEN 50
+    WHEN summary LIKE @pattern THEN 20
+    WHEN path LIKE @pattern THEN 10
+    ELSE 0
+  END AS match_rank
+FROM files
+WHERE is_directory = 0
+  AND (
+    path LIKE @pattern
+    OR (summary IS NOT NULL AND summary LIKE @pattern)
+    OR (concepts IS NOT NULL AND (
+      json_extract(concepts, '$.purpose') LIKE @pattern
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.functions')) WHERE value LIKE @pattern)
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.classes')) WHERE value LIKE @pattern)
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.interfaces')) WHERE value LIKE @pattern)
+      OR EXISTS(SELECT 1 FROM json_each(json_extract(concepts, '$.exports')) WHERE value LIKE @pattern)
+    ))
+    OR (change_impact IS NOT NULL AND
+      EXISTS(SELECT 1 FROM json_each(json_extract(change_impact, '$.affectedAreas')) WHERE value LIKE @pattern))
+  )
+ORDER BY match_rank DESC, importance DESC
+LIMIT @limit
+`;
+
+/**
+ * Searches across all stored file metadata: symbols, purpose, summaries, and paths.
+ * Returns results ranked by match quality (symbol > purpose > summary > path).
+ */
+export function searchFiles(query: string, maxItems: number = 10): {
+  results: Array<{ path: string; importance: number; purpose: string | null; matchRank: number }>;
+  query: string;
+  truncated?: boolean;
+} {
+  if (!query || !query.trim()) {
+    return { results: [], query: query || '' };
+  }
+
+  const sqlite = getSqlite();
+  const pattern = `%${query.trim()}%`;
+  const limit = maxItems + 1;
+
+  const rows = sqlite.prepare(SEARCH_SQL).all({ pattern, limit }) as Array<{
+    path: string;
+    name: string;
+    importance: number | null;
+    purpose: string | null;
+    match_rank: number;
+  }>;
+
+  const truncated = rows.length > maxItems;
+  const resultRows = truncated ? rows.slice(0, maxItems) : rows;
+
+  return {
+    results: resultRows.map(r => ({
+      path: r.path,
+      importance: r.importance ?? 0,
+      purpose: r.purpose ?? null,
+      matchRank: r.match_rank,
+    })),
+    query: query.trim(),
+    ...(truncated && { truncated: true }),
+  };
+}
+
 /**
  * Marks all 3 staleness columns to `timestamp` for every file in `filePaths`.
  * Uses a raw prepared statement inside a transaction for atomicity and speed.
@@ -516,20 +595,27 @@ export function markStale(filePaths: string[], timestamp: number): void {
 
 /**
  * Marks all non-directory files at or above minImportance as stale.
+ * When remainingOnly is true, only marks files that have never been summarized.
  * Returns the number of files marked.
  */
-export function markAllStale(timestamp: number, minImportance: number = 1): number {
+export function markAllStale(timestamp: number, minImportance: number = 1, remainingOnly: boolean = false): number {
   const sqlite = getSqlite();
+  const where = remainingOnly
+    ? `WHERE is_directory = 0
+       AND importance >= ?
+       AND summary IS NULL
+       AND summary_stale_since IS NULL`
+    : `WHERE is_directory = 0
+       AND importance >= ?
+       AND (summary_stale_since IS NULL
+         OR concepts_stale_since IS NULL
+         OR change_impact_stale_since IS NULL)`;
   const result = sqlite.prepare(
     `UPDATE files
      SET summary_stale_since = ?,
          concepts_stale_since = ?,
          change_impact_stale_since = ?
-     WHERE is_directory = 0
-       AND importance >= ?
-       AND (summary_stale_since IS NULL
-         OR concepts_stale_since IS NULL
-         OR change_impact_stale_since IS NULL)`
+     ${where}`
   ).run(timestamp, timestamp, timestamp, minImportance);
   return result.changes;
 }
