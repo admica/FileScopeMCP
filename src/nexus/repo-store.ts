@@ -1,7 +1,7 @@
 // src/nexus/repo-store.ts
 // Per-repo read-only better-sqlite3 connection management for Nexus.
-// Exports: RepoState, openRepo, getRepos, getDb, closeAll, recheckOffline, removeRepo,
-//          getRepoStats, getStaleCount, getTreeEntries, getFileDetail, getDirDetail
+// Exports: RepoState, openRepo, getRepos, getDb, getRepoState, closeAll, recheckOffline, removeRepo,
+//          getRepoStats, getStaleCount, getTreeEntries, getFileDetail, getDirDetail, getGraphData
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -62,6 +62,14 @@ export function getRepos(): RepoState[] {
 export function getDb(repoName: string): InstanceType<typeof Database> | null {
   const state = repos.get(repoName);
   return state?.db ?? null;
+}
+
+/**
+ * Look up the full RepoState by name.
+ * Returns null if repo not found.
+ */
+export function getRepoState(repoName: string): RepoState | null {
+  return repos.get(repoName) ?? null;
 }
 
 /**
@@ -184,14 +192,26 @@ export type GraphEdge = {
 
 export type GraphData = { nodes: GraphNode[]; edges: GraphEdge[] };
 
+// ─── Path helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Strip the repoBasePath prefix from an absolute path stored in the DB.
+ * Returns the relative path, or the original value if prefix is not present.
+ */
+function stripPrefix(absPath: string, basePath: string): string {
+  return absPath.startsWith(basePath + '/') ? absPath.slice(basePath.length + 1) : absPath;
+}
+
 // ─── Tree / Detail Query Functions ───────────────────────────────────────────
 
 /**
  * Return direct children of a directory (or root-level entries when parentPath is '').
  * Results sorted: directories first, then alphabetically by name.
+ * repoBasePath is the absolute repo root — DB stores absolute paths.
  */
 export function getTreeEntries(
   db: InstanceType<typeof Database>,
+  repoBasePath: string,
   parentPath: string
 ): { entries: TreeEntryRow[] } {
   let rows: Array<{
@@ -204,15 +224,16 @@ export function getTreeEntries(
   }>;
 
   if (parentPath === '') {
+    // Root level: files directly under repoBasePath (no extra slash after prefix)
     rows = db.prepare(`
       SELECT path, name, is_directory, importance,
              (summary IS NOT NULL) AS has_summary,
              (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
               OR change_impact_stale_since IS NOT NULL) AS is_stale
       FROM files
-      WHERE path NOT LIKE '%/%'
+      WHERE path LIKE ? AND path NOT LIKE ?
       ORDER BY is_directory DESC, name ASC
-    `).all() as typeof rows;
+    `).all(`${repoBasePath}/%`, `${repoBasePath}/%/%`) as typeof rows;
   } else {
     rows = db.prepare(`
       SELECT path, name, is_directory, importance,
@@ -222,11 +243,11 @@ export function getTreeEntries(
       FROM files
       WHERE path LIKE ? AND path NOT LIKE ?
       ORDER BY is_directory DESC, name ASC
-    `).all(`${parentPath}/%`, `${parentPath}/%/%`) as typeof rows;
+    `).all(`${repoBasePath}/${parentPath}/%`, `${repoBasePath}/${parentPath}/%/%`) as typeof rows;
   }
 
   const entries: TreeEntryRow[] = rows.map((r) => ({
-    path: r.path,
+    path: stripPrefix(r.path, repoBasePath),
     name: r.name,
     isDir: Boolean(r.is_directory),
     importance: r.importance ?? 0,
@@ -240,17 +261,21 @@ export function getTreeEntries(
 /**
  * Return full file metadata for a single file, including parsed JSON blobs and dependency info.
  * Returns null if the file is not found or is a directory.
+ * repoBasePath is the absolute repo root — DB stores absolute paths.
  */
 export function getFileDetail(
   db: InstanceType<typeof Database>,
+  repoBasePath: string,
   filePath: string
 ): object | null {
+  const absPath = repoBasePath + '/' + filePath;
+
   const row = db.prepare(`
     SELECT path, name, importance, summary, mtime,
            summary_stale_since, concepts_stale_since, change_impact_stale_since,
            exports_snapshot, concepts, change_impact
     FROM files WHERE path = ? AND is_directory = 0
-  `).get(filePath) as {
+  `).get(absPath) as {
     path: string;
     name: string;
     importance: number | null;
@@ -274,20 +299,20 @@ export function getFileDetail(
   const dependencies = db.prepare(`
     SELECT target_path AS path, dependency_type AS type
     FROM file_dependencies WHERE source_path = ? AND dependency_type = 'local_import'
-  `).all(filePath) as { path: string; type: string }[];
+  `).all(absPath) as { path: string; type: string }[];
 
   const dependents = db.prepare(`
     SELECT source_path AS path
     FROM file_dependencies WHERE target_path = ? AND dependency_type = 'local_import'
-  `).all(filePath) as { path: string }[];
+  `).all(absPath) as { path: string }[];
 
   const packageDeps = db.prepare(`
     SELECT package_name AS name, package_version AS version, is_dev_dependency AS isDev
     FROM file_dependencies WHERE source_path = ? AND dependency_type = 'package_import'
-  `).all(filePath) as { name: string; version: string; isDev: number }[];
+  `).all(absPath) as { name: string; version: string; isDev: number }[];
 
   return {
-    path: row.path,
+    path: stripPrefix(row.path, repoBasePath),
     name: row.name,
     importance: row.importance ?? 0,
     summary: row.summary,
@@ -299,19 +324,23 @@ export function getFileDetail(
       concepts: row.concepts_stale_since,
       changeImpact: row.change_impact_stale_since,
     },
-    dependencies,
-    dependents,
+    dependencies: dependencies.map((d) => ({ ...d, path: stripPrefix(d.path, repoBasePath) })),
+    dependents: dependents.map((d) => ({ path: stripPrefix(d.path, repoBasePath) })),
     packageDeps: packageDeps.map((p) => ({ ...p, isDev: Boolean(p.isDev) })),
   };
 }
 
 /**
  * Return aggregate stats and top files for a directory (all descendants, not just direct children).
+ * repoBasePath is the absolute repo root — DB stores absolute paths.
  */
 export function getDirDetail(
   db: InstanceType<typeof Database>,
+  repoBasePath: string,
   dirPath: string
 ): object {
+  const absDir = repoBasePath + '/' + dirPath;
+
   const agg = db.prepare(`
     SELECT
       COUNT(*) AS total_files,
@@ -322,7 +351,7 @@ export function getDirDetail(
                        OR change_impact_stale_since IS NOT NULL) AS stale_count
     FROM files
     WHERE is_directory = 0 AND path LIKE ?
-  `).get(`${dirPath}/%`) as {
+  `).get(`${absDir}/%`) as {
     total_files: number;
     avg_importance: number | null;
     with_summary: number;
@@ -335,7 +364,7 @@ export function getDirDetail(
     WHERE is_directory = 0 AND path LIKE ?
     ORDER BY importance DESC
     LIMIT 10
-  `).all(`${dirPath}/%`) as { path: string; name: string; importance: number | null }[];
+  `).all(`${absDir}/%`) as { path: string; name: string; importance: number | null }[];
 
   const totalFiles = agg.total_files ?? 0;
   const withSummary = agg.with_summary ?? 0;
@@ -349,7 +378,7 @@ export function getDirDetail(
     avgImportance: Math.round(avgImportanceRaw * 10) / 10,
     pctWithSummary: totalFiles > 0 ? Math.round((withSummary / totalFiles) * 100) : 0,
     pctStale: totalFiles > 0 ? Math.round((staleCount / totalFiles) * 100) : 0,
-    topFiles: topFiles.map((f) => ({ path: f.path, name: f.name, importance: f.importance ?? 0 })),
+    topFiles: topFiles.map((f) => ({ path: stripPrefix(f.path, repoBasePath), name: f.name, importance: f.importance ?? 0 })),
   };
 }
 
@@ -358,9 +387,11 @@ export function getDirDetail(
 /**
  * Return all local_import edges and their endpoint file metadata for the dependency graph.
  * Optional dirFilter limits to edges where at least one endpoint is under that subtree.
+ * repoBasePath is the absolute repo root — DB stores absolute paths.
  */
 export function getGraphData(
   db: InstanceType<typeof Database>,
+  repoBasePath: string,
   dirFilter?: string
 ): GraphData {
   // Edges: all local_import dependencies (optionally filtered by subtree)
@@ -371,12 +402,19 @@ export function getGraphData(
   `;
   const edgeParams: string[] = [];
   if (dirFilter) {
+    const absDirFilter = `${repoBasePath}/${dirFilter}/%`;
     edgeQuery += ` AND (source_path LIKE ? OR target_path LIKE ?)`;
-    edgeParams.push(`${dirFilter}/%`, `${dirFilter}/%`);
+    edgeParams.push(absDirFilter, absDirFilter);
   }
-  const edges = db.prepare(edgeQuery).all(...edgeParams) as GraphEdge[];
+  const rawEdges = db.prepare(edgeQuery).all(...edgeParams) as GraphEdge[];
 
-  // Collect unique file paths and compute degree (in + out) per node in a single pass
+  // Strip absolute prefix from edge paths
+  const edges: GraphEdge[] = rawEdges.map((e) => ({
+    source: stripPrefix(e.source, repoBasePath),
+    target: stripPrefix(e.target, repoBasePath),
+  }));
+
+  // Collect unique file paths (relative) and compute degree (in + out) per node in a single pass
   const pathSet = new Set<string>();
   const degreeMap = new Map<string, number>();
   for (const e of edges) {
@@ -387,12 +425,12 @@ export function getGraphData(
   }
   if (pathSet.size === 0) return { nodes: [], edges: [] };
 
-  // Nodes: fetch metadata + community membership for all referenced files
+  // Nodes: fetch metadata + community membership for all referenced files using absolute paths
   // LEFT JOIN file_communities so files without a community still appear (community_id = null).
   // Note: SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999.
   // The 500-node performance cap (D-12) keeps this well under limit.
-  const paths = Array.from(pathSet);
-  const placeholders = paths.map(() => '?').join(',');
+  const absPaths = Array.from(pathSet).map((p) => repoBasePath + '/' + p);
+  const placeholders = absPaths.map(() => '?').join(',');
   const fileRows = db.prepare(`
     SELECT f.path, f.name, f.importance,
            (f.summary IS NOT NULL) AS has_summary,
@@ -402,7 +440,7 @@ export function getGraphData(
     FROM files f
     LEFT JOIN file_communities fc ON fc.file_path = f.path
     WHERE f.path IN (${placeholders}) AND f.is_directory = 0
-  `).all(...paths) as Array<{
+  `).all(...absPaths) as Array<{
     path: string; name: string; importance: number | null;
     has_summary: number; is_stale: number; community_id: number | null;
   }>;
@@ -414,16 +452,19 @@ export function getGraphData(
     if (!rowByPath.has(r.path)) rowByPath.set(r.path, r);
   }
 
-  const nodes: GraphNode[] = Array.from(rowByPath.values()).map(r => ({
-    path: r.path,
-    name: r.name,
-    importance: r.importance ?? 0,
-    directory: r.path.includes('/') ? r.path.split('/')[0] : '',
-    hasSummary: Boolean(r.has_summary),
-    isStale: Boolean(r.is_stale),
-    communityId: r.community_id ?? null,
-    degree: degreeMap.get(r.path) ?? 0,
-  }));
+  const nodes: GraphNode[] = Array.from(rowByPath.values()).map(r => {
+    const relPath = stripPrefix(r.path, repoBasePath);
+    return {
+      path: relPath,
+      name: r.name,
+      importance: r.importance ?? 0,
+      directory: relPath.includes('/') ? relPath.split('/')[0] : '',
+      hasSummary: Boolean(r.has_summary),
+      isStale: Boolean(r.is_stale),
+      communityId: r.community_id ?? null,
+      degree: degreeMap.get(relPath) ?? 0,
+    };
+  });
 
   return { nodes, edges };
 }
