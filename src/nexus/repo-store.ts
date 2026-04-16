@@ -214,39 +214,49 @@ export function getTreeEntries(
   repoBasePath: string,
   parentPath: string
 ): { entries: TreeEntryRow[] } {
-  let rows: Array<{
-    path: string;
-    name: string;
-    is_directory: number;
-    importance: number | null;
-    has_summary: number;
-    is_stale: number;
+  const absPrefix = parentPath === '' ? repoBasePath : `${repoBasePath}/${parentPath}`;
+
+  // Fetch direct file children (no deeper slashes)
+  const fileRows = db.prepare(`
+    SELECT path, name, is_directory, importance,
+           (summary IS NOT NULL) AS has_summary,
+           (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
+            OR change_impact_stale_since IS NOT NULL) AS is_stale
+    FROM files
+    WHERE path LIKE ? AND path NOT LIKE ?
+    ORDER BY name ASC
+  `).all(`${absPrefix}/%`, `${absPrefix}/%/%`) as Array<{
+    path: string; name: string; is_directory: number;
+    importance: number | null; has_summary: number; is_stale: number;
   }>;
 
-  if (parentPath === '') {
-    // Root level: files directly under repoBasePath (no extra slash after prefix)
-    rows = db.prepare(`
-      SELECT path, name, is_directory, importance,
-             (summary IS NOT NULL) AS has_summary,
-             (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
-              OR change_impact_stale_since IS NOT NULL) AS is_stale
-      FROM files
-      WHERE path LIKE ? AND path NOT LIKE ?
-      ORDER BY is_directory DESC, name ASC
-    `).all(`${repoBasePath}/%`, `${repoBasePath}/%/%`) as typeof rows;
-  } else {
-    rows = db.prepare(`
-      SELECT path, name, is_directory, importance,
-             (summary IS NOT NULL) AS has_summary,
-             (summary_stale_since IS NOT NULL OR concepts_stale_since IS NOT NULL
-              OR change_impact_stale_since IS NOT NULL) AS is_stale
-      FROM files
-      WHERE path LIKE ? AND path NOT LIKE ?
-      ORDER BY is_directory DESC, name ASC
-    `).all(`${repoBasePath}/${parentPath}/%`, `${repoBasePath}/${parentPath}/%/%`) as typeof rows;
+  // Synthesize directory entries from files that live deeper than direct children.
+  // Extract unique immediate subdirectory names under absPrefix.
+  const prefixLen = absPrefix.length + 1; // +1 for trailing '/'
+  const dirNames = new Set<string>();
+  const dirRows = db.prepare(`
+    SELECT path FROM files
+    WHERE path LIKE ? AND is_directory = 0
+  `).all(`${absPrefix}/%/%`) as Array<{ path: string }>;
+
+  for (const r of dirRows) {
+    // path = absPrefix + '/' + segment + '/...'
+    const nextSlash = r.path.indexOf('/', prefixLen);
+    if (nextSlash !== -1) {
+      dirNames.add(r.path.slice(prefixLen, nextSlash));
+    }
   }
 
-  const entries: TreeEntryRow[] = rows.map((r) => ({
+  const dirEntries: TreeEntryRow[] = Array.from(dirNames).sort().map((name) => ({
+    path: parentPath === '' ? name : `${parentPath}/${name}`,
+    name,
+    isDir: true,
+    importance: 0,
+    hasSummary: false,
+    isStale: false,
+  }));
+
+  const fileEntries: TreeEntryRow[] = fileRows.map((r) => ({
     path: stripPrefix(r.path, repoBasePath),
     name: r.name,
     isDir: Boolean(r.is_directory),
@@ -255,7 +265,8 @@ export function getTreeEntries(
     isStale: Boolean(r.is_stale),
   }));
 
-  return { entries };
+  // Directories first, then files (both already sorted by name)
+  return { entries: [...dirEntries, ...fileEntries] };
 }
 
 /**
