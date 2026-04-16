@@ -14,7 +14,8 @@ import type { StatusResponse } from '../broker/types.js';
 import { readStats } from '../broker/stats.js';
 import { getRecentLines, addSseClient } from './log-tailer.js';
 import { readRegistry, writeRegistry } from './discover.js';
-import { getRepos, getDb, getStaleCount, removeRepo, openRepo, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
+import { getRepos, getDb, getRepoState, getStaleCount, removeRepo, openRepo, getRepoStats, getTreeEntries, getFileDetail, getDirDetail, getGraphData } from './repo-store.js';
+import type { RepoState } from './repo-store.js';
 
 // ─── Broker socket query ──────────────────────────────────────────────────────
 
@@ -75,6 +76,14 @@ export async function createServer(options: {
     const parsed = JSON.parse(raw);
     brokerModelName = parsed?.llm?.model ?? 'unknown';
   } catch { /* broker.json may not exist */ }
+
+  // ─── Shared repo resolver ─────────────────────────────────────────────────
+
+  function resolveRepo(repoName: string): { db: NonNullable<RepoState['db']>; basePath: string } | null {
+    const state = getRepoState(repoName);
+    if (!state?.db || !state.online) return null;
+    return { db: state.db, basePath: state.path };
+  }
 
   // ─── API Routes ───────────────────────────────────────────────────────────
 
@@ -167,12 +176,12 @@ export async function createServer(options: {
   app.get<{ Params: { repoName: string } }>(
     '/api/project/:repoName/stats',
     async (req, reply) => {
-      const db = getDb(req.params.repoName);
-      if (!db) {
+      const repo = resolveRepo(req.params.repoName);
+      if (!repo) {
         reply.code(404);
         return { error: 'Repo not found or offline' };
       }
-      return getRepoStats(db);
+      return getRepoStats(repo.db);
     }
   );
 
@@ -180,12 +189,12 @@ export async function createServer(options: {
   app.get<{ Params: { repoName: string } }>(
     '/api/project/:repoName/tree',
     async (req, reply) => {
-      const db = getDb(req.params.repoName);
-      if (!db) {
+      const repo = resolveRepo(req.params.repoName);
+      if (!repo) {
         reply.code(404);
         return { error: 'Repo not found or offline' };
       }
-      return getTreeEntries(db, '');
+      return getTreeEntries(repo.db, repo.basePath, '');
     }
   );
 
@@ -193,12 +202,12 @@ export async function createServer(options: {
   app.get<{ Params: { repoName: string; '*': string } }>(
     '/api/project/:repoName/tree/*',
     async (req, reply) => {
-      const db = getDb(req.params.repoName);
-      if (!db) {
+      const repo = resolveRepo(req.params.repoName);
+      if (!repo) {
         reply.code(404);
         return { error: 'Repo not found or offline' };
       }
-      return getTreeEntries(db, req.params['*']);
+      return getTreeEntries(repo.db, repo.basePath, req.params['*']);
     }
   );
 
@@ -206,12 +215,12 @@ export async function createServer(options: {
   app.get<{ Params: { repoName: string; '*': string } }>(
     '/api/project/:repoName/file/*',
     async (req, reply) => {
-      const db = getDb(req.params.repoName);
-      if (!db) {
+      const repo = resolveRepo(req.params.repoName);
+      if (!repo) {
         reply.code(404);
         return { error: 'Repo not found or offline' };
       }
-      const result = getFileDetail(db, req.params['*']);
+      const result = getFileDetail(repo.db, repo.basePath, req.params['*']);
       if (!result) {
         reply.code(404);
         return { error: 'File not found' };
@@ -224,12 +233,12 @@ export async function createServer(options: {
   app.get<{ Params: { repoName: string; '*': string } }>(
     '/api/project/:repoName/dir/*',
     async (req, reply) => {
-      const db = getDb(req.params.repoName);
-      if (!db) {
+      const repo = resolveRepo(req.params.repoName);
+      if (!repo) {
         reply.code(404);
         return { error: 'Repo not found or offline' };
       }
-      return getDirDetail(db, req.params['*']);
+      return getDirDetail(repo.db, repo.basePath, req.params['*']);
     }
   );
 
@@ -237,13 +246,13 @@ export async function createServer(options: {
   app.get<{ Params: { repoName: string }; Querystring: { dir?: string } }>(
     '/api/project/:repoName/graph',
     async (req, reply) => {
-      const db = getDb(req.params.repoName);
-      if (!db) {
+      const repo = resolveRepo(req.params.repoName);
+      if (!repo) {
         reply.code(404);
         return { error: 'Repo not found or offline' };
       }
       const dirFilter = req.query.dir;
-      return getGraphData(db, dirFilter);
+      return getGraphData(repo.db, repo.basePath, dirFilter);
     }
   );
 
