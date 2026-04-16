@@ -37,9 +37,17 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.git",
   "**/.svn",
   "**/.hg",
+  // Agent / planning tool workspaces (full repo clones — catastrophic duplication)
+  "**/.claude/worktrees",
+  "**/.planning/workspaces",
+  "**/.gsd/workspaces",
+  "**/.filescope",
   // Node / JS / TS
   "**/node_modules",
   "**/package-lock.json",
+  "**/yarn.lock",
+  "**/pnpm-lock.yaml",
+  "**/bun.lockb",
   "**/.next",
   "**/.nuxt",
   "**/.angular",
@@ -55,6 +63,9 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.yarn",
   "**/*.js.map",
   "**/*.ts.map",
+  "**/*.tsbuildinfo",
+  "**/*.min.js",
+  "**/*.min.css",
   // Python
   "**/__pycache__",
   "**/*.pyc",
@@ -65,9 +76,19 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.venv_*",
   "**/.tox",
   "**/.pytest_cache",
+  "**/.mypy_cache",
+  "**/.ruff_cache",
+  "**/.pyre",
+  "**/.dmypy.json",
   "**/.eggs",
   "**/*.egg-info",
   "**/.ipynb_checkpoints",
+  "**/poetry.lock",
+  "**/Pipfile.lock",
+  "**/uv.lock",
+  // Ruby / PHP
+  "**/Gemfile.lock",
+  "**/composer.lock",
   // Rust
   "**/target",
   "**/*.rlib",
@@ -76,6 +97,7 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.rustup",
   // Go
   "**/vendor",
+  "**/go.sum",
   // C / C++
   "**/cmake-build-*",
   "**/CMakeFiles",
@@ -97,6 +119,10 @@ const DEFAULT_EXCLUDES: string[] = [
   // Zig
   "**/zig-cache",
   "**/zig-out",
+  // Infrastructure / IaC
+  "**/.terraform",
+  "**/*.tfstate",
+  "**/*.tfstate.backup",
   // Build outputs
   "**/dist",
   "**/build",
@@ -117,8 +143,10 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.idea",
   "**/.cursor",
   "**/.cursorrules",
+  "**/.history",
   // Environment / secrets
   "**/.env*",
+  "**/.direnv",
   // Caches
   "**/cache",
   "**/.cache",
@@ -126,6 +154,33 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.firebase",
   "**/.output",
   "**/.local",
+  // Images
+  "**/*.png",
+  "**/*.jpg",
+  "**/*.jpeg",
+  "**/*.gif",
+  "**/*.ico",
+  "**/*.webp",
+  // Fonts
+  "**/*.woff",
+  "**/*.woff2",
+  "**/*.ttf",
+  "**/*.eot",
+  "**/*.otf",
+  // Media
+  "**/*.mp4",
+  "**/*.mov",
+  "**/*.mp3",
+  "**/*.wav",
+  "**/*.pdf",
+  // Archives
+  "**/*.zip",
+  "**/*.tar",
+  "**/*.gz",
+  "**/*.7z",
+  "**/*.rar",
+  "**/*.jar",
+  "**/*.war",
 ];
 
 const DEFAULT_CONFIG: Config = {

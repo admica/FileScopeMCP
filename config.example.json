@@ -9,7 +9,7 @@
     "enabled": true,
     "ignoreDotFiles": true,
     "autoRebuildTree": true,
-    "maxWatchedDirectories": 1000,
+    "maxWatchedDirectories": 500,
     "watchForNewFiles": true,
     "watchForDeleted": true,
     "watchForChanged": true
