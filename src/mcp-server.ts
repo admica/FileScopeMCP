@@ -115,38 +115,18 @@ class StdioTransport implements Transport {
   }
 }
 
-// Helper function to create MCP responses
-function createMcpResponse(content: any, isError = false): ToolResponse {
-  let formattedContent;
+type ErrorCode = "NOT_INITIALIZED" | "INVALID_PATH" | "BROKER_DISCONNECTED" | "NOT_FOUND" | "OPERATION_FAILED";
 
-  if (Array.isArray(content) && content.every(item =>
-    typeof item === 'object' &&
-    ('type' in item) &&
-    (item.type === 'text' || item.type === 'image' || item.type === 'resource'))) {
-    // Content is already in correct format
-    formattedContent = content;
-  } else if (Array.isArray(content)) {
-    // For arrays of non-formatted items, convert each item to a proper object
-    formattedContent = content.map(item => ({
-      type: "text",
-      text: typeof item === 'string' ? item : JSON.stringify(item, null, 2)
-    }));
-  } else if (typeof content === 'string') {
-    formattedContent = [{
-      type: "text",
-      text: content
-    }];
-  } else {
-    // Convert objects or other types to string
-    formattedContent = [{
-      type: "text",
-      text: typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content)
-    }];
-  }
-
+function mcpError(code: ErrorCode, message: string): ToolResponse {
   return {
-    content: formattedContent,
-    isError
+    content: [{ type: "text", text: JSON.stringify({ ok: false, error: code, message }) }],
+    isError: true,
+  };
+}
+
+function mcpSuccess(data: Record<string, unknown>): ToolResponse {
+  return {
+    content: [{ type: "text", text: JSON.stringify({ ok: true, ...data }) }],
   };
 }
 
@@ -158,11 +138,7 @@ const serverInfo = {
 };
 
 // Create the MCP server
-const server = new McpServer(serverInfo, {
-  capabilities: {
-    tools: { listChanged: true }
-  }
-});
+const server = new McpServer(serverInfo);
 
 /**
  * Register all MCP tool handlers on `server`. Each handler delegates to
@@ -170,34 +146,49 @@ const server = new McpServer(serverInfo, {
  * pure DB reads/writes.
  */
 function registerTools(server: McpServer, coordinator: ServerCoordinator): void {
-  const projectPathNotSetError = createMcpResponse(
-    "Project path not set. Please call 'set_base_directory' to point at a different directory, or restart with --base-dir.",
-    true
-  );
-
-  server.tool("set_base_directory", "Override the base directory to analyze a subdirectory or different project path", {
-    path: z.string().describe("The absolute path to the project directory"),
-  }, async (params: { path: string }) => {
-    return await coordinator.init(params.path);
+  server.registerTool("set_base_directory", {
+    title: "Set Base Directory",
+    description: "Override the base directory for analysis. Initializes the file watcher, database, and broker connection for the specified path. Call this first if --base-dir was not passed at startup. Subsequent calls re-initialize to a new directory.",
+    inputSchema: {
+      path: z.string().describe("The absolute path to the project directory"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ path: dirPath }) => {
+    return await coordinator.init(dirPath);
   });
 
-  server.tool("list_files", "List all files in the project with their importance rankings", {
-    maxItems: z.number().optional().describe("Cap response to N files sorted by importance. Omit for full tree.")
-  }, async (params: { maxItems?: number }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("list_files", {
+    title: "List Files",
+    description: "List all tracked files with importance rankings. Without maxItems: returns a nested directory tree structure. With maxItems: returns a flat list of the N most important files sorted by importance descending, with truncation metadata. Call status first to verify initialization.",
+    inputSchema: {
+      maxItems: z.number().optional().describe("Cap response to N files sorted by importance. Omit for full tree."),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ maxItems }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
-    // D-06: no maxItems = tree structure (current behavior preserved)
-    if (params.maxItems === undefined) {
-      return createMcpResponse(coordinator.getFileTree());
+    // no maxItems = tree structure (current behavior preserved)
+    if (maxItems === undefined) {
+      return mcpSuccess({ tree: coordinator.getFileTree() as unknown as Record<string, unknown> });
     }
 
-    // D-05, D-07: flat list sorted by importance descending
+    // flat list sorted by importance descending
     const allFiles = getAllFiles().filter(f => !f.isDirectory);
     const sorted = allFiles.sort((a, b) => (b.importance || 0) - (a.importance || 0));
-    const isTruncated = sorted.length > params.maxItems;
-    const results = isTruncated ? sorted.slice(0, params.maxItems) : sorted;
+    const isTruncated = sorted.length > maxItems;
+    const results = isTruncated ? sorted.slice(0, maxItems) : sorted;
 
-    return createMcpResponse({
+    return mcpSuccess({
       files: results.map(file => {
         const fileStale = getStaleness(file.path);
         return {
@@ -214,25 +205,33 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     });
   });
 
-  server.tool("find_important_files", "Find the most important files in the project", {
-    maxItems: z.number().optional().describe("Maximum number of files to return (default: 10)"),
-    minImportance: z.number().optional().describe("Minimum importance score (0-10)")
-  }, async (params: { maxItems?: number, minImportance?: number }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("find_important_files", {
+    title: "Find Important Files",
+    description: "Find the highest-importance files in the project. Returns files sorted by importance descending with dependency counts and staleness flags. Use this over list_files when you need the top N files by importance with relationship metadata. Precondition: server must be initialized.",
+    inputSchema: {
+      maxItems: z.number().optional().describe("Maximum number of files to return (default: 10)"),
+      minImportance: z.number().optional().describe("Minimum importance score (0-10)"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ maxItems, minImportance }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
-    const maxItems = params.maxItems || 10;
-    const minImportance = params.minImportance || 0;
+    const maxCount = maxItems || 10;
+    const minImp = minImportance || 0;
 
-    // Use repository to get all files from DB
     const allFiles = getAllFiles().filter(f => !f.isDirectory);
 
-    // Filter by minimum importance and sort by importance (descending)
     const allMatching = allFiles
-      .filter(file => (file.importance || 0) >= minImportance)
+      .filter(file => (file.importance || 0) >= minImp)
       .sort((a, b) => (b.importance || 0) - (a.importance || 0));
 
-    const isTruncated = allMatching.length > maxItems;
-    const results = isTruncated ? allMatching.slice(0, maxItems) : allMatching;
+    const isTruncated = allMatching.length > maxCount;
+    const results = isTruncated ? allMatching.slice(0, maxCount) : allMatching;
 
     const items = results.map(file => {
       const fileStale = getStaleness(file.path);
@@ -248,23 +247,33 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       };
     });
 
-    return createMcpResponse({
+    return mcpSuccess({
       files: items,
       ...(isTruncated && { truncated: true }),
       ...(isTruncated && { totalCount: allMatching.length }),
     });
   });
 
-  server.tool("get_file_summary", "Get full file intel: summary, importance, dependencies, concepts, change impact, and staleness", {
-    filepath: z.string().describe("The path to the file to check")
-  }, async (params: { filepath: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("get_file_summary", {
+    title: "Get File Summary",
+    description: "Get full intelligence for a single file: LLM-generated summary, importance score (0-10), dependency list with edge types (imports/inherits/re_exports) and confidence scores, dependents, package dependencies, concepts, change impact analysis, and staleness flags. Use this before editing a file to understand its role and relationships. Returns NOT_FOUND if the file is not in the scan database.",
+    inputSchema: {
+      filepath: z.string().describe("The path to the file to check"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ filepath }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
-    const normalizedPath = normalizePath(params.filepath);
+    const normalizedPath = normalizePath(filepath);
     const node = getFile(normalizedPath);
 
     if (!node) {
-      return createMcpResponse(`File not found: ${params.filepath}`, true);
+      return mcpError("NOT_FOUND", `File not found in database: ${filepath}`);
     }
 
     const isStale = coordinator.checkFileFreshness(normalizedPath);
@@ -273,7 +282,7 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     const llmData = sqlite
       .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
       .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
-    return createMcpResponse({
+    return mcpSuccess({
       path: node.path,
       ...(isStale && { stale: true }),
       importance: node.importance || 0,
@@ -293,106 +302,155 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     });
   });
 
-  server.tool("set_file_summary", "Set the summary of a specific file", {
-    filepath: z.string().describe("The path to the file to update"),
-    summary: z.string().describe("The summary text to set")
-  }, async (params: { filepath: string, summary: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("set_file_summary", {
+    title: "Set File Summary",
+    description: "Manually set or override the LLM-generated summary for a file. Use when the auto-generated summary is inaccurate or you want to annotate a file with custom context. Idempotent: repeated calls with the same summary are safe. Returns NOT_FOUND if the file is not tracked.",
+    inputSchema: {
+      filepath: z.string().describe("The path to the file to update"),
+      summary: z.string().describe("The summary text to set"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ filepath, summary }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
-    const normalizedPath = normalizePath(params.filepath);
+    const normalizedPath = normalizePath(filepath);
     const node = getFile(normalizedPath);
 
     if (!node) {
-      return createMcpResponse(`File not found: ${params.filepath}`, true);
+      return mcpError("NOT_FOUND", `File not found in database: ${filepath}`);
     }
 
-    // Update summary and persist to DB
-    node.summary = params.summary;
+    node.summary = summary;
     upsertFile(node);
 
-    return createMcpResponse({
-      message: `Summary updated for ${params.filepath}`,
+    return mcpSuccess({
+      message: `Summary updated for ${filepath}`,
       path: normalizedPath,
-      summary: params.summary
+      summary,
     });
   });
 
-  server.tool("set_file_importance", "Manually set the importance ranking of a specific file", {
-    filepath: z.string().describe("The path to the file to update"),
-    importance: z.number().min(0).max(10).describe("The importance value to set (0-10)")
-  }, async (params: { filepath: string, importance: number }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("set_file_importance", {
+    title: "Set File Importance",
+    description: "Manually set the importance ranking (0-10) for a file. Overrides the auto-calculated importance. Falls back to basename matching if the exact path is not found. Idempotent: repeated calls with the same value are safe.",
+    inputSchema: {
+      filepath: z.string().describe("The path to the file to update"),
+      importance: z.number().min(0).max(10).describe("The importance value to set (0-10)"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ filepath, importance }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
     try {
-      log('set_file_importance called with params: ' + JSON.stringify(params));
+      log('set_file_importance called with params: ' + JSON.stringify({ filepath, importance }));
 
-      const normalizedPath = normalizePath(params.filepath);
+      const normalizedPath = normalizePath(filepath);
       const node = getFile(normalizedPath);
 
       if (!node) {
         // Try basename match in all DB files
         const allFiles = getAllFiles().filter(f => !f.isDirectory);
-        const basename = path.basename(params.filepath);
+        const basename = path.basename(filepath);
         const matchedNode = allFiles.find(f => path.basename(f.path) === basename);
 
         if (!matchedNode) {
           log('File not found by any method');
-          return createMcpResponse(`File not found: ${params.filepath}`, true);
+          return mcpError("NOT_FOUND", `File not found in database: ${filepath}`);
         }
 
-        matchedNode.importance = Math.min(10, Math.max(0, params.importance));
+        matchedNode.importance = Math.min(10, Math.max(0, importance));
         upsertFile(matchedNode);
 
-        return createMcpResponse({
+        return mcpSuccess({
           message: `Importance updated for ${matchedNode.path}`,
           path: matchedNode.path,
-          importance: matchedNode.importance
+          importance: matchedNode.importance,
         });
       }
 
-      node.importance = Math.min(10, Math.max(0, params.importance));
+      node.importance = Math.min(10, Math.max(0, importance));
       upsertFile(node);
 
-      return createMcpResponse({
-        message: `Importance updated for ${params.filepath}`,
-        path: params.filepath,
-        importance: params.importance
+      return mcpSuccess({
+        message: `Importance updated for ${filepath}`,
+        path: filepath,
+        importance,
       });
     } catch (error) {
       log('Error in set_file_importance: ' + error);
-      return createMcpResponse(`Failed to set file importance: ` + error, true);
+      return mcpError("OPERATION_FAILED", `Failed to set file importance: ${error}`);
     }
   });
 
-  server.tool("scan_all", "Queue files for LLM summarization. Use remaining_only to skip already-summarized files.", {
-    min_importance: z.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
-    remaining_only: z.boolean().optional().default(false).describe("When true, only queue files that have never been summarized"),
+  server.registerTool("scan_all", {
+    title: "Scan All",
+    description: "Queue files for LLM summarization via the broker. Uses min_importance to filter low-value files (default 1, skips zero-importance). Set remaining_only=true to skip already-summarized files. Requires an active broker connection (llm.enabled=true in config). Returns BROKER_DISCONNECTED if the broker is unreachable.",
+    inputSchema: {
+      min_importance: z.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
+      remaining_only: z.boolean().optional().default(false).describe("When true, only queue files that have never been summarized"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   }, async ({ min_importance, remaining_only }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
     if (!brokerIsConnected()) {
-      return { content: [{ type: "text", text: "Error: Broker not connected. Check LLM config in .filescope/config.json (llm.enabled must be true)." }], isError: true };
+      return mcpError("BROKER_DISCONNECTED", "Broker not connected. Check LLM config in .filescope/config.json (llm.enabled must be true).");
     }
     const marked = markAllStale(Date.now(), min_importance, remaining_only);
     resubmitStaleFiles();
-    return createMcpResponse({ queued: marked, min_importance, remaining_only, message: marked > 0 ? `Queued ${marked} files for LLM processing.` : "All files already queued or processed." });
+    return mcpSuccess({ queued: marked, min_importance, remaining_only, message: marked > 0 ? `Queued ${marked} files for LLM processing.` : "All files already queued or processed." });
   });
 
-  server.tool("search", "Search file metadata — symbols, purpose, summaries, and paths", {
-    query: z.string().describe("Search term to match against symbols, purpose, summaries, and paths"),
-    maxItems: z.number().optional().describe("Max results (default 10)"),
+  server.registerTool("search", {
+    title: "Search",
+    description: "Search file metadata across symbols (function/class/interface names), purpose descriptions, LLM summaries, and file paths. Returns results ranked: symbol match (100) > purpose match (50) > summary match (20) > path match (10). Use this to find files by what they do, not just their name.",
+    inputSchema: {
+      query: z.string().describe("Search term to match against symbols, purpose, summaries, and paths"),
+      maxItems: z.number().optional().describe("Max results (default 10)"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   }, async ({ query, maxItems }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
     const response = searchFiles(query, maxItems ?? 10);
-    return createMcpResponse(response);
+    return mcpSuccess(response as unknown as Record<string, unknown>);
   });
 
-  server.tool("status", "System health: broker connection, queue depth, LLM processing progress, file watching, and project info", {}, async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("status", {
+    title: "Status",
+    description: "Get system health: broker connection state, LLM processing queue depth and progress, file watching status, and project info (root path, file count, last update time). Call this to verify initialization state and diagnose issues.",
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async () => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
     const broker = await coordinator.getBrokerStatus();
     const config = coordinator.getCurrentConfig();
     const appConfig = getConfig();
     const fileCount = getAllFiles().length;
     const llmProgress = getLlmProgress();
-    return createMcpResponse({
+    return mcpSuccess({
       project: {
         root: coordinator.getProjectRoot(),
         baseDirectory: config?.baseDirectory ?? null,
@@ -413,9 +471,19 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     });
   });
 
-  server.tool("exclude_and_remove", "Exclude and remove a file or pattern from the file tree", {
-    filepath: z.string().describe("The path or pattern of the file to exclude and remove")
-  }, async (params: { filepath: string }) => {
+  server.registerTool("exclude_and_remove", {
+    title: "Exclude and Remove",
+    description: "Permanently exclude a file or glob pattern from tracking and remove it from the database. DESTRUCTIVE: this deletes metadata and cannot be undone without a re-scan. Adds the pattern to .filescopeignore. Use for generated files, build artifacts, or false positives.",
+    inputSchema: {
+      filepath: z.string().describe("The path or pattern of the file to exclude and remove"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  }, async ({ filepath }) => {
     try {
       if (!coordinator.isInitialized()) {
         // Attempt to initialize with a default config if possible
@@ -424,50 +492,69 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
           const projectPath = baseDirArg.split('=')[1];
           await coordinator.init(projectPath);
         } else {
-          return projectPathNotSetError;
+          return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
         }
       }
 
-      log('exclude_and_remove called with params: ' + JSON.stringify(params));
+      log('exclude_and_remove called with params: ' + JSON.stringify({ filepath }));
 
-      // Bridge: get a temporary tree from DB, pass to excludeAndRemoveFile (which persists to DB)
       const tempTree = coordinator.getFileTree();
       log('Current file tree root: ' + tempTree.path);
 
-      await excludeAndRemoveFile(params.filepath, tempTree, coordinator.getProjectRoot()!);
+      await excludeAndRemoveFile(filepath, tempTree, coordinator.getProjectRoot()!);
 
-      return createMcpResponse({
-        message: `File or pattern excluded and removed: ${params.filepath}`
+      return mcpSuccess({
+        message: `File or pattern excluded and removed: ${filepath}`,
       });
     } catch (error) {
       log('Error in exclude_and_remove: ' + error);
-      return createMcpResponse(`Failed to exclude and remove file or pattern: ` + error, true);
+      return mcpError("OPERATION_FAILED", `Failed to exclude and remove: ${error}`);
     }
   });
 
-  server.tool("detect_cycles", "Detect all circular dependency groups in the project's file graph", {}, async () => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("detect_cycles", {
+    title: "Detect Cycles",
+    description: "Detect all circular dependency groups in the project's local import graph. Returns an array of cycle groups (each group is an array of file paths forming a cycle), total cycle count, and total files involved. Use to identify tightly-coupled modules that may need refactoring.",
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async () => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
     const edges = getAllLocalImportEdges();
     const cycles = detectCycles(edges);
     const totalFilesInCycles = cycles.reduce((sum, group) => sum + group.length, 0);
 
-    return createMcpResponse({
+    return mcpSuccess({
       cycles,
       totalCycles: cycles.length,
       totalFilesInCycles,
     });
   });
 
-  server.tool("get_cycles_for_file", "Get cycle groups containing a specific file", {
-    filepath: z.string().describe("Absolute path to the file"),
-  }, async (params: { filepath: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("get_cycles_for_file", {
+    title: "Get Cycles For File",
+    description: "Get all dependency cycle groups that include a specific file. Returns only the cycles containing the specified file path, useful for understanding a single file's circular dependency involvement. Returns NOT_FOUND if the file is not tracked.",
+    inputSchema: {
+      filepath: z.string().describe("Absolute path to the file"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ filepath }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
-    const normalizedPath = normalizePath(params.filepath);
+    const normalizedPath = normalizePath(filepath);
     const node = getFile(normalizedPath);
     if (!node) {
-      return createMcpResponse(`File not found: ${params.filepath}`, true);
+      return mcpError("NOT_FOUND", `File not found in database: ${filepath}`);
     }
 
     const edges = getAllLocalImportEdges();
@@ -475,28 +562,37 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
     const filtered = allCycles.filter(group => group.includes(normalizedPath));
     const totalFilesInCycles = filtered.reduce((sum, group) => sum + group.length, 0);
 
-    return createMcpResponse({
+    return mcpSuccess({
       cycles: filtered,
       totalCycles: filtered.length,
       totalFilesInCycles,
     });
   });
 
-  server.tool("get_communities", "Get file communities detected by Louvain clustering. Returns groups of tightly-coupled files identified by their highest-importance representative file.", {
-    file_path: z.string().optional().describe("Optional: filter to the community containing this file path"),
-  }, async (params: { file_path?: string }) => {
-    if (!coordinator.isInitialized()) return projectPathNotSetError;
+  server.registerTool("get_communities", {
+    title: "Get Communities",
+    description: "Get file communities detected by Louvain clustering on the local import graph. Returns groups of tightly-coupled files identified by their highest-importance representative. Optionally filter to the community containing a specific file. Communities are lazily recomputed only when the dependency graph changes.",
+    inputSchema: {
+      file_path: z.string().optional().describe("Optional: filter to the community containing this file path"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  }, async ({ file_path }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
 
-    // Lazy recomputation: only run Louvain when edges have changed (D-11, D-12)
+    // Lazy recomputation: only run Louvain when edges have changed
     if (isCommunitiesDirty()) {
       const edges = getAllLocalImportEdgesWithWeights();
       if (edges.length === 0) {
-        // No local import edges — clear dirty flag, return empty
         clearCommunitiesDirty();
-        if (params.file_path) {
-          return createMcpResponse(`No communities detected (no local import edges). File not in any community: ${params.file_path}`, true);
+        if (file_path) {
+          return mcpError("NOT_FOUND", "No communities detected (no local import edges).");
         }
-        return createMcpResponse({ communities: [], totalCommunities: 0 });
+        return mcpSuccess({ communities: [], totalCommunities: 0 });
       }
       const allFiles = getAllFiles();
       const importances = new Map(allFiles.map(f => [f.path, f.importance ?? 0]));
@@ -505,24 +601,22 @@ function registerTools(server: McpServer, coordinator: ServerCoordinator): void 
       clearCommunitiesDirty();
     }
 
-    // file_path parameter: return single community (D-15)
-    if (params.file_path) {
-      const normalizedPath = normalizePath(params.file_path);
+    if (file_path) {
+      const normalizedPath = normalizePath(file_path);
       const community = getCommunityForFile(normalizedPath);
       if (!community) {
-        return createMcpResponse(`File not found in any community: ${params.file_path}`, true);
+        return mcpError("NOT_FOUND", `File not found in any community: ${file_path}`);
       }
-      return createMcpResponse({
+      return mcpSuccess({
         representative: community.representative,
         members: community.members,
         size: community.size,
       });
     }
 
-    // No file_path: return all communities sorted by size descending (D-15)
     const allCommunities = getCommunities();
     const sorted = allCommunities.sort((a, b) => b.size - a.size);
-    return createMcpResponse({
+    return mcpSuccess({
       communities: sorted.map(c => ({
         representative: c.representative,
         members: c.members,
