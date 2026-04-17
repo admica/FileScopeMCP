@@ -83,7 +83,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full phase details.
 
 **Milestone Goal:** Make FileScopeMCP bulletproof and zero-config for LLM agents — comprehensive testing, MCP spec compliance, and hardened lifecycle management.
 
-- [ ] **Phase 29: Broker Lifecycle Hardening** - Eliminate crash cleanup gaps and spawn timing races in the broker
+- [x] **Phase 29: Broker Lifecycle Hardening** - Eliminate crash cleanup gaps and spawn timing races in the broker (completed 2026-04-17)
 - [ ] **Phase 30: MCP Spec Compliance** - Migrate tool registration to current SDK API and fix false capability declarations
 - [ ] **Phase 31: Test Infrastructure** - Close the protocol-layer test gap with transport, lifecycle, and subsystem tests
 - [ ] **Phase 32: Zero-Config Auto-Registration** - Replace broken install script with `.mcp.json` and CLI-based registration
@@ -100,10 +100,10 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full phase details.
   3. Broker accepts new connections only after draining all in-progress jobs on graceful SIGTERM shutdown
   4. MCP server startup succeeds reliably on a loaded machine — broker socket existence is polled rather than a fixed sleep
   5. Attempting to start a second concurrent broker instance produces a clear error message rather than silent failure
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 29-01-PLAN.md — Config schema extension + main.ts liveness fix, crash handlers, shutdown wiring
-- [ ] 29-02-PLAN.md — Server drain timeout + client spawn poll loop
+- [x] 29-01-PLAN.md — Config schema extension + main.ts liveness fix, crash handlers, shutdown wiring
+- [x] 29-02-PLAN.md — Server drain timeout + client spawn poll loop
 
 ### Phase 30: MCP Spec Compliance
 **Goal**: All MCP tools are registered via the current SDK API with correct annotations and truthful capability declarations
@@ -114,7 +114,10 @@ Plans:
   2. The `tools: { listChanged: true }` capability is removed or backed by an actual `sendToolListChanged()` call — MCP clients that cache tool lists get correct behavior
   3. Read-only tools carry `readOnlyHint: true` and the destructive tool carries `destructiveHint: true` per the MCP 2025-11-25 spec
   4. Tool error responses return structured `{ ok: false, error: "CODE", message: "..." }` objects that LLM agents can parse programmatically
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 30-01-PLAN.md — Migrate all 13 tools to registerTool() with annotations, enriched descriptions, and structured error/success responses
+- [ ] 30-02-PLAN.md — Update test file assertions from server.tool( to server.registerTool( pattern
 
 ### Phase 31: Test Infrastructure
 **Goal**: Protocol-layer and subsystem test gaps are closed; CI catches regressions before they reach agents
@@ -170,7 +173,7 @@ Plans:
 | 26. Multi-Language Tree-sitter Extraction | v1.4 | 2/2 | Complete | 2026-04-09 |
 | 27. Community Detection | v1.4 | 2/2 | Complete | 2026-04-09 |
 | 28. MCP Polish | v1.4 | 2/2 | Complete | 2026-04-09 |
-| 29. Broker Lifecycle Hardening | v1.5 | 0/2 | Not started | - |
-| 30. MCP Spec Compliance | v1.5 | 0/TBD | Not started | - |
+| 29. Broker Lifecycle Hardening | v1.5 | 2/2 | Complete    | 2026-04-17 |
+| 30. MCP Spec Compliance | v1.5 | 0/2 | Not started | - |
 | 31. Test Infrastructure | v1.5 | 0/TBD | Not started | - |
 | 32. Zero-Config Auto-Registration | v1.5 | 0/TBD | Not started | - |
