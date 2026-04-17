@@ -60,21 +60,25 @@ export class BrokerServer {
   }
 
   /**
-   * Graceful shutdown sequence (BROKER-10, RESEARCH.md Pattern 5):
+   * Graceful shutdown sequence (BRKR-03, D-01):
    * 1. Stop worker (prevents new job pickup).
-   * 2. Await current job completion (or its timeout abort).
+   * 2. Await current job completion OR drain timeout — whichever comes first.
    * 3. Destroy all client connections.
    * 4. Close server (stop accepting new connections).
    */
-  async shutdown(): Promise<void> {
+  async shutdown(drainTimeoutMs: number = 15_000): Promise<void> {
     // 1. Stop worker — prevents new job pickup
     this.worker.stop();
 
-    // 2. Await current job completion (or timeout abort)
+    // 2. Await current job completion with drain timeout (D-01)
     const pending = this.worker.getCurrentJobPromise();
     if (pending) {
-      log('Waiting for current job to finish...');
-      await pending;
+      log(`Waiting for current job to finish (drain timeout: ${drainTimeoutMs}ms)...`);
+      const drainTimeout = new Promise<void>(resolve => {
+        const t = setTimeout(resolve, drainTimeoutMs);
+        t.unref(); // Don't prevent process exit if job finishes first
+      });
+      await Promise.race([pending, drainTimeout]);
     }
 
     // 3. Destroy all client connections
