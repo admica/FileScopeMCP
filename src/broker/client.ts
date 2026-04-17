@@ -15,6 +15,11 @@ import { writeLlmResult, clearStaleness } from '../db/repository.js';
 import { getSqlite } from '../db/db.js';
 import { log } from '../logger.js';
 
+// ─── Spawn readiness poll defaults (D-03, D-04) ─────────────────────────────
+
+const SPAWN_POLL_INTERVAL_MS = 1_000;
+const SPAWN_MAX_WAIT_MS = 10_000;
+
 // ─── Module-level state ───────────────────────────────────────────────────────
 
 let socket: net.Socket | null = null;
@@ -141,8 +146,10 @@ async function spawnBrokerIfNeeded(): Promise<void> {
     const distBrokerDir = path.dirname(fileURLToPath(import.meta.url));
     const brokerBin = path.resolve(distBrokerDir, 'main.js');
     spawn(process.execPath, [brokerBin], { detached: true, stdio: 'ignore' }).unref();
-    // Give the broker 500ms to bind the socket before we try to connect
-    await new Promise<void>(r => setTimeout(r, 500));
+    const ready = await waitForSocket(SOCK_PATH, SPAWN_POLL_INTERVAL_MS, SPAWN_MAX_WAIT_MS);
+    if (!ready) {
+      log('[broker-client] Warning: broker socket did not appear within timeout');
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log(`[broker-client] Warning: failed to spawn broker: ${msg}`);
@@ -307,4 +314,22 @@ function clearReconnectTimer(): void {
     clearInterval(reconnectTimer);
     reconnectTimer = null;
   }
+}
+
+/**
+ * Polls for the broker socket file to appear after spawning.
+ * Returns true when the socket exists, false if the deadline expires.
+ * Uses async sleep between checks to avoid blocking the event loop (Pitfall 4).
+ */
+async function waitForSocket(
+  sockPath: string,
+  pollIntervalMs: number,
+  maxWaitMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (existsSync(sockPath)) return true;
+    await new Promise<void>(r => setTimeout(r, pollIntervalMs));
+  }
+  return existsSync(sockPath); // one final check at deadline
 }
