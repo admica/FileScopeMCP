@@ -29,8 +29,11 @@ const BrokerLLMSchema = z.object({
 
 export const BrokerConfigSchema = z.object({
   llm: BrokerLLMSchema,
-  jobTimeoutMs: z.number().int().positive().default(120000),
-  maxQueueSize: z.number().int().positive().default(1000),
+  jobTimeoutMs: z.number().int().positive().default(120_000),
+  maxQueueSize: z.number().int().positive().default(1_000),
+  drainTimeoutMs: z.number().int().positive().default(15_000),        // D-01: graceful drain timeout (10-30s range)
+  spawnPollIntervalMs: z.number().int().positive().default(1_000),    // D-04: poll interval for socket readiness
+  spawnMaxWaitMs: z.number().int().positive().default(10_000),        // D-04: max wait for socket to appear
 });
 
 export type BrokerConfig = z.infer<typeof BrokerConfigSchema>;
