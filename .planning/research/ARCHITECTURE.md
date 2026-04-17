@@ -1,536 +1,496 @@
 # Architecture Research
 
-**Domain:** Tree-sitter AST extraction, confidence-labeled edges, community detection, MCP token budgeting — integrated into existing FileScopeMCP per-repo daemon
-**Researched:** 2026-04-08
-**Confidence:** HIGH (built from direct source reading + verified external research)
+**Domain:** Production hardening of an existing MCP server + standalone LLM broker
+**Researched:** 2026-04-17
+**Confidence:** HIGH
 
 ---
 
-## Standard Architecture
-
-### System Overview (v1.4 additions labeled NEW or MODIFIED)
+## Existing System Overview
 
 ```
- chokidar watcher
-       |
-       v
- coordinator.ts  ─── handleFileEvent()
-       |                    |
-       |           [ast-extractor/]          NEW module directory
-       |           LanguageConfig registry
-       |           extractEdges(filePath, content)
-       |                    |
-       |           Returns: Edge[] with type, weight, confidence
-       |
-       v
- file-utils.ts
- updateFileNodeOnChange() / addFileNode()    MODIFIED: calls extractEdges()
-       |
-       v
- db/repository.ts  ─── setEdges()           MODIFIED: replaces setDependencies()
-       |
-       v
- db/schema.ts  ─── file_dependencies        MODIFIED: +4 columns
-               ─── file_communities          NEW table
-       |
-       v
- [graph/community.ts]                        NEW module
-       |     graphology directed graph built from DB edges
-       |     graphology-communities-louvain clustering
-       |     persistCommunities() → file_communities table
-       |
-       v
- mcp-server.ts  ─── get_community tool      NEW tool
-                    budget-capped responses  MODIFIED tools
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        Claude Code (MCP host)                                 │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │             MCP stdio JSON-RPC (per-repo process)                    │    │
+│  └─────────────────────────┬────────────────────────────────────────────┘    │
+└───────────────────────────-┼─────────────────────────────────────────────────┘
+                             │ stdin/stdout
+┌────────────────────────────▼─────────────────────────────────────────────────┐
+│                    dist/mcp-server.js (MCP mode)                              │
+│                                                                               │
+│  StdioTransport  ──▶  McpServer (SDK v1.27.1)                                │
+│                         │                                                     │
+│                         ▼  registerTools() — 14 tools via server.tool()      │
+│                    ServerCoordinator                                           │
+│                    ┌─────────────────────────────────────────┐                │
+│                    │  AsyncMutex (serializes tree mutations)  │                │
+│                    │  FileWatcher (chokidar, 2s debounce)    │                │
+│                    │  ChangeDetector (AST + LLM diff)        │                │
+│                    │  CascadeEngine                           │                │
+│                    │  BrokerClient (connect/submit)           │                │
+│                    └──────────────────┬──────────────────────┘                │
+│                                      │                                        │
+│                    ┌─────────────────▼──────────────────────┐                │
+│                    │  SQLite (.filescope/data.db)             │                │
+│                    │  drizzle-orm + better-sqlite3, WAL mode  │                │
+│                    │  tables: files, file_dependencies,       │                │
+│                    │          file_communities, schema_version│                │
+│                    └─────────────────────────────────────────┘                │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       │ Unix socket IPC (NDJSON)
+                                       │ ~/.filescope/broker.sock
+┌──────────────────────────────────────▼───────────────────────────────────────┐
+│                    dist/broker/main.js (singleton daemon)                     │
+│                                                                               │
+│  BrokerServer (net.Server)                                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │  PriorityQueue (binary heap, dedup map, lazy deletion)               │    │
+│  │  BrokerWorker (serial Ollama calls via Vercel AI SDK)                │    │
+│  │  PID guard + stale socket cleanup on startup                         │    │
+│  │  Stats persistence (~/.filescope/stats.json)                         │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  Lifecycle files:                                                             │
+│    ~/.filescope/broker.sock   — Unix domain socket                           │
+│    ~/.filescope/broker.pid    — PID file (live guard)                        │
+│    ~/.filescope/broker.log    — structured log                               │
+│    ~/.filescope/broker.json   — config (auto-copied from broker.default.json)│
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
-
-### Component Responsibilities
-
-| Component | Responsibility | Status |
-|-----------|---------------|--------|
-| `src/ast-extractor/` | LanguageConfig registry, per-language AST edge extraction, confidence assignment | NEW |
-| `src/ast-extractor/languages/ts-js.ts` | TS/JS edges via existing tree-sitter parsers (import, re-export) | NEW |
-| `src/ast-extractor/languages/python.ts` | Python import edges via tree-sitter-python grammar | NEW |
-| `src/ast-extractor/languages/rust.ts` | Rust use/mod edges via tree-sitter-rust grammar | NEW |
-| `src/ast-extractor/languages/go.ts` | Go import edges via tree-sitter-go grammar (replaces regex for Go) | NEW |
-| `src/ast-extractor/languages/regex-fallback.ts` | All remaining languages via existing IMPORT_PATTERNS regex | EXTRACTED |
-| `src/graph/community.ts` | Build graphology graph from DB edges, run Louvain, persist assignments | NEW |
-| `src/db/schema.ts` | Add `edge_type`, `weight`, `confidence`, `confidence_source` to file_dependencies; add `file_communities` table | MODIFIED |
-| `src/db/repository.ts` | Add `setEdges()`, `getAllEdges()`, `getCommunityForFile()`, `getCommunityMembers()`, `batchSetCommunities()` | MODIFIED |
-| `src/file-utils.ts` | `analyzeNewFile()` delegates to `extractEdges()` instead of inline regex/AST chains | MODIFIED |
-| `src/coordinator.ts` | Pass 2 calls `extractEdges()`; `recomputeCommunities()` after batch and on edge change | MODIFIED |
-| `src/mcp-server.ts` | Add `get_community` tool; add `budgetCap()` to all text responses | MODIFIED |
-| `src/change-detector/ast-parser.ts` | No change — owns export snapshots and semantic diff, orthogonal concern | UNCHANGED |
 
 ---
 
-## Recommended Project Structure
+## Component Responsibilities (Existing)
+
+| Component | Responsibility | Key Files |
+|-----------|---------------|-----------|
+| `StdioTransport` | Custom stdio JSON-RPC transport with 10MB buffer guard | `src/mcp-server.ts` |
+| `McpServer` (SDK) | MCP protocol, tool dispatch, `listChanged` notification | `src/mcp-server.ts` |
+| `ServerCoordinator` | All orchestration state: init, file tree, watcher, broker connect | `src/coordinator.ts` |
+| `registerTools()` | Binds 14 MCP tools to coordinator methods + repository calls | `src/mcp-server.ts` |
+| `AsyncMutex` | Serializes all tree mutations (watcher + integrity sweep) | `src/coordinator.ts` |
+| `FileWatcher` | chokidar wrapper, 2s debounce, `.filescopeignore` support | `src/file-watcher.ts` |
+| `ChangeDetector` | Tree-sitter AST diff for TS/JS/Python/Rust/C/C++; LLM fallback | `src/change-detector/` |
+| `CascadeEngine` | BFS staleness propagation through dependency graph | `src/cascade/cascade-engine.ts` |
+| `BrokerClient` | Unix socket client, reconnect loop, auto-spawn broker if absent | `src/broker/client.ts` |
+| `BrokerServer` | Net.Server over Unix socket, routes submit/status to queue+worker | `src/broker/server.ts` |
+| `PriorityQueue` | Binary heap with dedup map (repoPath+filePath+jobType), lazy deletion | `src/broker/queue.ts` |
+| `BrokerWorker` | Serial LLM call loop, AbortController timeout, result callbacks | `src/broker/worker.ts` |
+| `Repository` | All SQL via drizzle-orm; hides DB from callers | `src/db/repository.ts` |
+| `LanguageConfig` | O(1) dispatch to tree-sitter or regex extractor per extension | `src/language-config.ts` |
+| `CommunityDetection` | Louvain via graphology; dirty-flag cache invalidation | `src/community-detection.ts` |
+
+---
+
+## What v1.5 Hardening Adds: New vs Modified Components
+
+### New Components
+
+```
+tests/
+├── integration/
+│   ├── file-pipeline.test.ts       — EXISTS: scan→dep→importance→cascade
+│   ├── broker-lifecycle.test.ts    — NEW: spawn, connect, disconnect, crash recovery
+│   └── mcp-transport.test.ts       — NEW: in-process MCP tool call contracts
+└── unit/
+    ├── broker-queue.test.ts        — EXISTS: full PriorityQueue coverage
+    ├── parsers.test.ts             — EXISTS: all language parsers
+    ├── ast-diffing.test.ts         — EXISTS: semantic diff
+    ├── dependency-graph.test.ts    — EXISTS: graph operations
+    ├── importance-scoring.test.ts  — EXISTS: scoring logic
+    └── tool-outputs.test.ts        — EXISTS: MCP response shape contracts
+
+scripts/
+└── register-mcp.ts                 — NEW: replaces install-mcp-claude.sh with
+                                           programmatic Claude Code registration
+```
+
+### Modified Components
+
+| Component | What Changes | Why |
+|-----------|-------------|-----|
+| `src/mcp-server.ts` | `server.tool()` → `server.registerTool()` with `inputSchema: z.object(...)`, add `annotations` per-tool, bump `version` string to `"1.5.0"`, add `logging: {}` capability | MCP spec compliance: standard schema, tool behavior hints, structured logging capability |
+| `src/mcp-server.ts` → `registerTools()` | Add `readOnlyHint: true` on read-only tools, `destructiveHint: true` on exclude_and_remove | Spec-compliant annotations help agents understand tool semantics |
+| `src/broker/main.ts` | Add `process.on('uncaughtException')` and `process.on('unhandledRejection')` handlers that clean up PID/socket files before exiting | Lifecycle hardening: ensures files are cleaned up on crash, not just on SIGTERM/SIGINT |
+| `src/broker/client.ts` | Replace hardcoded 500ms sleep after spawn with socket-existence poll (100ms interval, up to 3s total) | Eliminates flaky startup race on slow or loaded machines |
+| `src/coordinator.ts` | Ensure `shutdown()` removes `instance.pid` even when shutdown throws | Consistent instance lifecycle; prevent stale PID accumulation |
+
+---
+
+## Integration Points: How New Work Plugs Into Existing Architecture
+
+### 1. Test Infrastructure Integration
+
+**How tests connect to existing code — no new production abstractions needed.**
+
+The codebase already has a clean, testable architecture. `ServerCoordinator` works without MCP transport (tested in `coordinator.test.ts`). `PriorityQueue` is a pure class (tested in `broker-queue.test.ts`). Repository functions are pure SQL that need only an open DB.
+
+The established test pattern across the codebase:
+
+```typescript
+// Established pattern (from file-pipeline.test.ts, tool-outputs.test.ts, coordinator.test.ts)
+beforeAll(async () => {
+  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'test-prefix-'));
+  openDatabase(path.join(tmpDir, 'test.db'));
+  setProjectRoot(tmpDir);
+  setConfig({ excludePatterns: [], fileWatching: { enabled: false } } as any);
+});
+afterAll(async () => {
+  closeDatabase();
+  await fs.rm(tmpDir, { recursive: true, force: true });
+});
+
+// Mock broker to prevent socket connections (from file-pipeline.test.ts)
+vi.mock('../../src/broker/client.js', () => ({
+  submitJob: vi.fn(), connect: vi.fn(), disconnect: vi.fn(),
+  isConnected: vi.fn(() => false), requestStatus: vi.fn(),
+  resubmitStaleFiles: vi.fn(),
+}));
+```
+
+**New pattern for MCP transport tests** — in-process tool dispatch via `InMemoryTransport`:
+
+```typescript
+// tests/integration/mcp-transport.test.ts
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+
+// Wire real McpServer + real ServerCoordinator, bypass stdio entirely
+const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+await server.connect(serverTransport);
+const client = new Client({ name: 'test', version: '1.0.0' }, {});
+await client.connect(clientTransport);
+
+// Call a real tool through the full dispatch path
+const result = await client.callTool({ name: 'list_files', arguments: {} });
+expect(result.isError).toBe(false);
+```
+
+This tests the full `registerTools()` dispatch path without spawning a process. `InMemoryTransport` is available at `@modelcontextprotocol/sdk/inMemory.js` in the installed v1.27.1 SDK. The SDK migration guide notes it is now considered internal/testing-only in v2, but the installed version fully supports it.
+
+**What does NOT need a test:** `logger.ts`, `storage-utils.ts`, `types.ts`, `confidence.ts` — trivial constants/re-exports with no testable logic. `broker/main.ts` — entry point glue whose lifecycle is covered by `broker-lifecycle.test.ts` spawning the actual binary.
+
+**Existing tests NOT requiring changes:**
+- All 15 existing `src/**/*.test.ts` files (260+ tests) remain valid after v1.5 changes.
+- The `server.tool()` → `server.registerTool()` migration is transparent to existing coordinator/repository unit tests — they don't touch the MCP server layer.
+
+### 2. MCP Spec Compliance Integration
+
+**Change is entirely inside `src/mcp-server.ts` — zero other files touched.**
+
+The installed SDK v1.27.1 already provides both `server.tool()` (deprecated) and `server.registerTool()` (current). The migration is mechanical: wrap raw Zod shapes with `z.object()`, move description into the config object, add annotations.
+
+Before (current state):
+```typescript
+server.tool("list_files", "List all files in the project...", {
+  maxItems: z.number().optional().describe("Cap response to N files...")
+}, async (params: { maxItems?: number }) => { ... });
+```
+
+After (spec-compliant):
+```typescript
+server.registerTool("list_files", {
+  description: "List all files in the project...",
+  inputSchema: z.object({
+    maxItems: z.number().optional().describe("Cap response to N files...")
+  }),
+  annotations: { readOnlyHint: true, idempotentHint: true }
+}, async ({ maxItems }) => { ... });
+```
+
+**Annotations by tool category:**
+
+| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
+|------|---------------|------------------|-----------------|
+| list_files, find_important_files, get_file_summary, search, status, detect_cycles, get_cycles_for_file, get_communities | true | false | true |
+| set_file_summary, set_file_importance, scan_all | false | false | true |
+| set_base_directory | false | false | false |
+| exclude_and_remove | false | true | true |
+
+**Logging capability:** Add `logging: {}` to the capabilities object in the `McpServer` constructor. This satisfies spec compliance for the logging capability declaration. The `ctx.mcpReq.log()` per-call API is optional — the project uses file-based logging (`enableDaemonFileLogging`), which is correct for stdio servers. The capability declaration is the compliance item; no per-call logging wiring is needed.
+
+**Server version:** `serverInfo.version` is currently `"1.0.0"`. Bump to `"1.5.0"` to match the milestone.
+
+**outputSchema:** Do not add `outputSchema` to all 14 tools. The tools return freeform JSON text content that varies by query result. The only candidate is the `status` tool which returns a stable shape. Add `outputSchema` only where it provides genuine agent value — likely just `status`.
+
+### 3. Zero-Config Auto-Registration Integration
+
+**Current state:** `install-mcp-claude.sh` writes directly to `~/.claude.json` using a bash inline Node.js script. The script is correct but requires bash to run (problematic in some WSL2 environments). Manual step after build.
+
+**What to add:** `scripts/register-mcp.ts` compiled to `dist/scripts/register-mcp.js` via the existing esbuild pipeline. It can be run as `node dist/scripts/register-mcp.js` or hooked into `postbuild` in `package.json`.
+
+This script:
+1. Locates `~/.claude.json` (identical logic to the shell script)
+2. Writes the `FileScopeMCP` entry with `node dist/mcp-server.js`
+3. Is idempotent — re-running overwrites the entry, no-ops if already registered
+4. Prints a single status line
+
+This is a TypeScript port of the existing shell script, not a redesign. The shell script can remain as a fallback.
+
+**What NOT to do:** Do not add auto-registration to the MCP server startup path (`initServer()`). Registration is a build/install-time concern, not a runtime concern. Adding it to startup would cause the server to modify its own registration config on every connection.
+
+### 4. Broker Lifecycle Hardening Integration
+
+**Current state:** `broker/main.ts` has SIGTERM/SIGINT handlers that call `server.shutdown()` then remove PID/socket files. `broker/client.ts` has stale socket detection and auto-spawn with a 500ms sleep.
+
+**Gap 1: Crash cleanup.** If the broker process crashes on an uncaught exception, the SIGTERM handler never runs. Socket and PID files persist. The next spawn attempt by `spawnBrokerIfNeeded()` finds the socket, checks the PID, discovers the process is dead, and cleans up before re-spawning. This works but creates a window where the first connection attempt after a crash fails and triggers the 10s reconnect timer instead of immediately re-spawning.
+
+Fix in `src/broker/main.ts` — add cleanup handlers before the PID file is written:
+
+```typescript
+function emergencyCleanup(): void {
+  try { fs.rmSync(SOCK_PATH, { force: true }); } catch {}
+  try { fs.rmSync(PID_PATH, { force: true }); } catch {}
+}
+
+process.on('uncaughtException', (err) => {
+  log(`Uncaught exception: ${err}`);
+  emergencyCleanup();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  log(`Unhandled rejection: ${reason}`);
+  emergencyCleanup();
+  process.exit(1);
+});
+```
+
+These must be registered after the PID file is written (otherwise cleaning up a PID file that hasn't been written yet is a no-op, which is fine, but logical order matters for clarity).
+
+**Gap 2: Spawn timing race.** `spawnBrokerIfNeeded()` uses a hardcoded `await new Promise(r => setTimeout(r, 500))` after spawning. On a loaded machine (CI, multiple active repos), the broker may take longer than 500ms to bind the socket, causing the first `attemptConnect()` to fail and fall back to the 10s reconnect timer.
+
+Fix in `src/broker/client.ts`:
+
+```typescript
+// Replace the 500ms sleep with a socket-existence poll
+const SPAWN_POLL_INTERVAL_MS = 100;
+const SPAWN_POLL_MAX_ATTEMPTS = 30; // 3 seconds total
+
+for (let i = 0; i < SPAWN_POLL_MAX_ATTEMPTS; i++) {
+  if (existsSync(SOCK_PATH)) break;
+  await new Promise<void>(r => setTimeout(r, SPAWN_POLL_INTERVAL_MS));
+}
+// Continue to attemptConnect() regardless — if socket still absent, connection
+// will fail and the reconnect timer handles retry.
+```
+
+This bounds the connect latency to actual broker startup time rather than a fixed worst-case value.
+
+**Gap 3: Concurrent instance safety** — already handled correctly. Two MCP instances calling `spawnBrokerIfNeeded()` simultaneously will both find the socket absent, both spawn the broker binary. The broker's PID guard causes the second binary to `process.exit(0)` after reading the first's PID file. No fix needed; the design is correct.
+
+**Gap 4: Test coverage for broker lifecycle.** `broker/client.ts` and `broker/main.ts` have zero test coverage. The new `tests/integration/broker-lifecycle.test.ts` should:
+- Spawn the actual broker binary (via `child_process.spawn`)
+- Poll for PID file existence (confirms startup)
+- Send a status request via a real Unix socket connection
+- Kill the broker and verify socket + PID files are removed
+- Re-spawn and verify recovery
+
+This is the only test that must NOT mock `broker/client.ts` — it tests the real spawn/connect path.
+
+---
+
+## Recommended File Structure After v1.5
 
 ```
 src/
-├── ast-extractor/          # NEW: AST edge extraction pipeline
-│   ├── index.ts            # extractEdges(filePath, content, root): Edge[] — public API
-│   ├── types.ts            # EdgeType enum, Edge interface, LanguageConfig interface
-│   ├── registry.ts         # LanguageConfig array, getConfig(ext) dispatch
-│   └── languages/          # One file per language group
-│       ├── ts-js.ts        # .ts .tsx .js .jsx — reuses existing tree-sitter parsers
-│       ├── python.ts       # .py — tree-sitter-python (new npm dep)
-│       ├── rust.ts         # .rs — tree-sitter-rust (new npm dep)
-│       ├── go.ts           # .go — tree-sitter-go (new npm dep, replaces regex)
-│       └── regex-fallback.ts  # .c .cpp .lua .zig .php .cs .java .rb — IMPORT_PATTERNS
-├── graph/                  # NEW: graph analytics
-│   └── community.ts        # buildGraph(), runLouvain(), persistCommunities()
-├── cascade/                # unchanged
-├── change-detector/        # unchanged
-├── broker/                 # unchanged
-├── db/
-│   ├── schema.ts           # MODIFIED: new columns + file_communities table
-│   └── repository.ts       # MODIFIED: new edge CRUD, community CRUD
-├── coordinator.ts          # MODIFIED: calls extractEdges(), triggers community recompute
-├── file-utils.ts           # MODIFIED: analyzeNewFile() delegates to extractEdges()
-└── mcp-server.ts           # MODIFIED: get_community tool, budgetCap helper
-```
+├── mcp-server.ts          — MODIFIED: registerTool + annotations + logging cap
+├── coordinator.ts         — MINOR: harden shutdown() PID cleanup on throw
+├── broker/
+│   ├── main.ts            — MODIFIED: add uncaughtException/unhandledRejection handlers
+│   ├── client.ts          — MODIFIED: socket poll replaces hardcoded 500ms sleep
+│   ├── server.ts          — unchanged
+│   ├── worker.ts          — unchanged
+│   ├── queue.ts           — unchanged
+│   ├── config.ts          — unchanged
+│   ├── types.ts           — unchanged
+│   └── stats.ts           — unchanged
+└── [all other src files]  — unchanged
 
-### Structure Rationale
+tests/
+├── integration/
+│   ├── file-pipeline.test.ts     — EXISTS (373 lines, no changes)
+│   ├── mcp-transport.test.ts     — NEW: tool contract tests via InMemoryTransport
+│   └── broker-lifecycle.test.ts  — NEW: spawn/connect/shutdown/crash-recovery
+└── unit/
+    ├── broker-queue.test.ts      — EXISTS (416 lines, no changes)
+    ├── parsers.test.ts           — EXISTS (538 lines, no changes)
+    ├── ast-diffing.test.ts       — EXISTS (462 lines, no changes)
+    ├── dependency-graph.test.ts  — EXISTS (287 lines, no changes)
+    ├── importance-scoring.test.ts — EXISTS (325 lines, no changes)
+    └── tool-outputs.test.ts      — EXISTS (447 lines, no changes)
 
-- **`ast-extractor/` isolated from `change-detector/`:** The extractor produces edges only. It does not touch staleness, LLM jobs, or ChangeDetector concerns. `change-detector/ast-parser.ts` owns export snapshots and semantic diff — those stay where they are.
-- **`languages/` one file per group:** Adding a new grammar is a single-file addition plus one entry in `registry.ts`. No cross-cutting edits to coordinator or file-utils.
-- **`regex-fallback.ts` keeps existing IMPORT_PATTERNS verbatim:** If a new grammar causes issues, route the extension back to regex-fallback. Rollback is one registry change.
-- **`graph/community.ts` separate from `db/`:** Community detection is computational (graphology algorithms), not persistence. It reads from and writes to the DB through `repository.ts` — it never touches SQLite directly.
+scripts/
+└── register-mcp.ts        — NEW: Node.js Claude Code auto-registration
 
----
-
-## Architectural Patterns
-
-### Pattern 1: LanguageConfig Registry
-
-**What:** A registry maps file extensions to a `LanguageConfig` object with a single method `extractEdges(filePath, content, projectRoot): Promise<Edge[]>`. The public `extractEdges` in `ast-extractor/index.ts` looks up the config by extension and delegates.
-
-**When to use:** Any new language or grammar — add one entry to the registry and one implementation file. No changes elsewhere.
-
-**Trade-offs:** Slight indirection vs. the existing inline `if (ext === '.ts') ... else if (ext === '.go') ...` chains. Worth it: those chains are duplicated in at least three places (`coordinator.ts` Pass 2, `analyzeNewFile()`, `updateFileNodeOnChange()`).
-
-**Example:**
-```typescript
-// src/ast-extractor/types.ts
-export type EdgeType = 'imports' | 'calls' | 'contains' | 'inherits';
-export type ConfidenceSource = 'EXTRACTED' | 'INFERRED';
-
-export interface Edge {
-  targetPath: string;          // resolved absolute path or package name
-  edgeType: EdgeType;
-  weight: number;              // reference count (default 1, higher for repeated calls)
-  confidence: number;          // 0.0–1.0
-  confidenceSource: ConfidenceSource;
-  isPackage: boolean;          // true = package_import, false = local_import
-}
-
-export interface LanguageConfig {
-  extensions: string[];
-  extractEdges(
-    filePath: string,
-    content: string,
-    projectRoot: string
-  ): Promise<Edge[]>;
-}
-
-// src/ast-extractor/registry.ts
-const configs: LanguageConfig[] = [
-  tsJsConfig, pythonConfig, goConfig, rustConfig, regexFallbackConfig
-];
-
-export function getLanguageConfig(ext: string): LanguageConfig | null {
-  return configs.find(c => c.extensions.includes(ext)) ?? null;
-}
-```
-
-**Confidence assignment by source:**
-- Tree-sitter extracted imports: `confidence = 1.0`, `confidenceSource = 'EXTRACTED'`
-- Regex-based imports (c, cpp, lua, zig, php, cs, java, rb): `confidence = 0.75`, `confidenceSource = 'INFERRED'`
-- Future call-graph edges inferred from type info: `confidence = 0.5–0.8`, `confidenceSource = 'INFERRED'`
-
-### Pattern 2: Edge Schema Extension with Confidence Columns
-
-**What:** Extend the existing `file_dependencies` table with four new nullable columns: `edge_type TEXT DEFAULT 'imports'`, `weight INTEGER DEFAULT 1`, `confidence REAL DEFAULT 1.0`, `confidence_source TEXT DEFAULT 'EXTRACTED'`. All existing rows get defaults on `ALTER TABLE`. New rows from tree-sitter get populated values.
-
-**When to use:** Any time a dependency edge is written. `setEdges()` in repository.ts replaces `setDependencies()` and writes these columns. `setDependencies()` becomes a thin backward-compat wrapper calling `setEdges()`.
-
-**Why not a new table:** The existing `file_dependencies` table has correct indexes on `source_path` and `target_path`. A second table would require joins everywhere. Four nullable columns with defaults are an O(1) `ALTER TABLE` — zero data copy, zero downtime.
-
-**Migration (inside existing schema_version gate):**
-```sql
-ALTER TABLE file_dependencies ADD COLUMN edge_type TEXT DEFAULT 'imports';
-ALTER TABLE file_dependencies ADD COLUMN weight INTEGER DEFAULT 1;
-ALTER TABLE file_dependencies ADD COLUMN confidence REAL DEFAULT 1.0;
-ALTER TABLE file_dependencies ADD COLUMN confidence_source TEXT DEFAULT 'EXTRACTED';
-
-CREATE TABLE IF NOT EXISTS file_communities (
-  file_path      TEXT PRIMARY KEY NOT NULL,
-  community_id   INTEGER NOT NULL,
-  recomputed_at  INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS communities_id_idx ON file_communities(community_id);
-
-UPDATE schema_version SET version = <N+1>;
-```
-
-SQLite `ALTER TABLE ADD COLUMN` is O(1) regardless of row count — documented behavior since SQLite 3.1.3. Nullable columns or columns with defaults pass the constraint check unconditionally.
-
-### Pattern 3: Community Recompute with graphology + Louvain
-
-**What:** After dependency edges are written to SQLite, build an in-memory graphology directed graph, run `graphology-communities-louvain`, and batch-write community assignments to `file_communities`. No persistent graph object — rebuild from DB each time.
-
-**When triggered:**
-1. End of `buildFileTree()` Pass 2 (full scan at startup or forced rescan)
-2. After `updateFileNodeOnChange()` when `depsChanged` is true (existing flag in file-utils.ts)
-
-**Why no persistent graph:** The graph object would need to be kept in sync with every edge write. A cold rebuild from DB is simpler and fast enough: graphology benchmark shows 10K nodes / 9.7K edges in 53ms.
-
-```typescript
-// src/graph/community.ts
-import { DirectedGraph } from 'graphology';
-import louvain from 'graphology-communities-louvain';
-import { getAllEdges, batchSetCommunities } from '../db/repository.js';
-
-export function recomputeCommunities(): void {
-  const graph = new DirectedGraph();
-  const edges = getAllEdges('local_import'); // package edges excluded — not useful for clustering
-  for (const e of edges) {
-    if (!graph.hasNode(e.source_path)) graph.addNode(e.source_path);
-    if (!graph.hasNode(e.target_path)) graph.addNode(e.target_path);
-    // addEdge can be called multiple times for weighted multi-edges;
-    // for initial version, skip duplicate edges
-    if (!graph.hasEdge(e.source_path, e.target_path)) {
-      graph.addEdge(e.source_path, e.target_path);
-    }
-  }
-  if (graph.order === 0) return;
-  const communities: Record<string, number> = louvain(graph);
-  batchSetCommunities(communities, Date.now());
-}
-```
-
-**Louvain stability note:** Community IDs are not stable across runs (algorithm is randomized). Never expose raw community IDs to MCP callers. Always query by file path; return community members by file path.
-
-### Pattern 4: Token Budget Cap
-
-**What:** A `budgetCap(text, maxTokens)` helper estimates token count as `Math.ceil(text.length / 4)` and truncates at a sentence or line boundary with an annotation if exceeded. Applied in every MCP tool that produces unbounded text.
-
-**When to use:** Every tool that formats freeform text responses: `get_file_summary`, `list_files`, `find_important_files`, `detect_cycles`, `get_community`.
-
-**Trade-offs:** chars/4 approximation is accurate to ±15% for English/code — sufficient for a soft cap. Exact tiktoken counting would require a native dependency for a marginal improvement.
-
-```typescript
-// In mcp-server.ts
-function budgetCap(text: string, maxTokens = 4000): string {
-  const estimated = Math.ceil(text.length / 4);
-  if (estimated <= maxTokens) return text;
-  const charLimit = maxTokens * 4;
-  const truncated = text.slice(0, charLimit);
-  // Try to break at newline
-  const lastNewline = truncated.lastIndexOf('\n');
-  const clean = lastNewline > charLimit * 0.9 ? truncated.slice(0, lastNewline) : truncated;
-  const omitted = estimated - maxTokens;
-  return clean + `\n[truncated — ~${omitted} tokens omitted]`;
-}
+install-mcp-claude.sh      — KEEP: still useful as bash fallback
 ```
 
 ---
 
-## Data Flow
+## Data Flow Changes in v1.5
 
-### File Change → AST Parse → Edge Extraction → Community Update
+### MCP Test Data Flow (new)
 
 ```
-chokidar 'change' event (filePath)
-    |
-    v  [2s debounce — existing]
-coordinator.handleFileEvent('change', filePath)
+vitest runner
     |
     v
-ChangeDetector.classify(filePath)          [existing — semantic diff, UNCHANGED]
-    |
+InMemoryTransport.createLinkedPair()
+    |── (serverTransport) ────────────── McpServer.connect()
+    |── (clientTransport)                     |
+    |                                   registerTools(server, coordinator)
+    v                                         |
+Client.connect(clientTransport)         coordinator.init(tmpDir)
+    |                                         |
+    v                                   SQLite (tmp DB pre-populated)
+client.callTool({ name, arguments })
+    |── JSON-RPC over in-memory ──────▶ tool handler
+    |◀── tool response ───────────────────────|
     v
-updateFileNodeOnChange(filePath, tree, root)  [in file-utils.ts — MODIFIED]
-    |
-    +-- reads file content
-    |
-    +-- extractEdges(filePath, content, root)   [NEW: ast-extractor/index.ts]
-    |       |
-    |       +-- getLanguageConfig(ext)
-    |       +-- config.extractEdges(...)
-    |             .ts/.tsx/.js/.jsx:
-    |               existing tsParser/jsParser (already loaded in process)
-    |               visit import_statement → Edge{type:'imports', confidence:1.0}
-    |             .py:
-    |               tree-sitter-python parser (new, createRequire pattern)
-    |               import_statement / import_from_statement → Edge
-    |             .rs:
-    |               tree-sitter-rust parser (new, createRequire pattern)
-    |               use_declaration / mod_item → Edge
-    |             .go:
-    |               tree-sitter-go parser (new, createRequire pattern)
-    |               import_declaration → Edge (replaces existing Go regex)
-    |             .c/.cpp/.lua/.zig/.php/.cs/.java/.rb:
-    |               existing IMPORT_PATTERNS regex (unchanged logic)
-    |               confidence = 0.75, source = 'INFERRED'
-    |
-    +-- diffOldEdgesVsNew(oldEdges, newEdges)   [existing depsChanged logic]
-    |
-    +-- setEdges(filePath, newEdges)            [NEW: replaces setDependencies()]
-    |     DELETE WHERE source_path = ?
-    |     INSERT rows with edge_type, weight, confidence, confidence_source
-    |
-    +-- if (depsChanged):
-          recomputeCommunities()               [NEW: graph/community.ts]
-              reads all local edges from DB
-              builds graphology DirectedGraph
-              runs louvain()
-              batchSetCommunities() → file_communities
+expect(result.content[0].text).toMatch(...)
 ```
 
-### Initial Full Scan (Pass 2 in buildFileTree)
+No process spawn, no stdio, no timing dependencies. The full tool dispatch path is exercised including Zod input validation, coordinator delegation, and repository reads.
+
+### Broker Lifecycle Data Flow (hardened)
 
 ```
-coordinator.buildFileTree()
+MCP instance start
     |
-    v  Pass 1: stream metadata into SQLite [UNCHANGED]
+    v coordinator.init() → brokerConnect() → spawnBrokerIfNeeded()
     |
-    v  Pass 2: extract edges [MODIFIED]
-    |   for each filePath:
-    |     content = readFile(filePath)
-    |     edges = extractEdges(filePath, content, baseDir)
-    |     setEdges(filePath, edges)
-    |
-    v  Pass 2b: importance [UNCHANGED]
-    |
-    v  Pass 2c: community detection [NEW]
-         recomputeCommunities()
-```
+    ├── existsSync(SOCK_PATH) + PID alive? → skip spawn
+    ├── stale files? → rmSync both → spawn dist/broker/main.js (detached, unref'd)
+    |         |
+    |         v  poll existsSync(SOCK_PATH) × 30 × 100ms (up to 3s)
+    |         v  (replaces hardcoded 500ms sleep)
+    └── not running? → spawn → poll → attemptConnect()
+              |
+              v net.createConnection(SOCK_PATH)
+              v on('connect') → resubmitStaleFiles()
 
-### MCP Query → Community Response
+Broker clean shutdown (SIGTERM/SIGINT):
+    worker.stop() → await currentJobPromise → destroy connections → server.close()
+    → rmSync(SOCK_PATH) → rmSync(PID_PATH) → process.exit(0)
 
-```
-Claude Code → get_community({ file_path })
-    |
-    v  mcp-server.ts tool handler
-    |
-    v  getCommunityForFile(filePath) → community_id
-    |
-    v  getCommunityMembers(community_id) → FileNode[]
-    |  sorted by importance DESC
-    |
-    v  format: path, importance, summary_snippet (first 80 chars)
-    |
-    v  budgetCap(responseText, 4000)
-    |
-    v  MCP text response
+Broker crash (uncaughtException/unhandledRejection):  [NEW v1.5]
+    log(err) → rmSync(SOCK_PATH, force) → rmSync(PID_PATH, force) → process.exit(1)
+    [next client connect attempt detects no socket → immediately respawns]
 ```
 
 ---
 
-## Integration Points
+## Architectural Patterns in Use
 
-### Existing Modules: What Changes and What Does Not
+### Pattern 1: Coordinator as Pure Orchestrator (existing, enables testing)
 
-| Module | Change | Scope |
-|--------|--------|-------|
-| `src/file-utils.ts` | `analyzeNewFile()` calls `extractEdges()` instead of inline regex/AST branches | Consolidation — eliminates 3 duplicated extraction chains |
-| `src/coordinator.ts` | Pass 2 loop calls `extractEdges()` and `setEdges()`; adds `recomputeCommunities()` at end of Pass 2 and inside `handleFileEvent` on `depsChanged` | Core pipeline wiring |
-| `src/db/schema.ts` | Add 4 columns to `file_dependencies`; add `file_communities` table with index | Schema evolution |
-| `src/db/repository.ts` | Add `setEdges()`, `getAllEdges()`, `getCommunityForFile()`, `getCommunityMembers()`, `batchSetCommunities()`; keep `setDependencies()` as thin backward-compat wrapper | New API surface |
-| `src/mcp-server.ts` | Add `get_community` tool handler; wrap all text responses in `budgetCap()` | New feature |
-| `src/change-detector/ast-parser.ts` | No change — orthogonal concern (export snapshots + semantic diff) | UNCHANGED |
-| `src/cascade/cascade-engine.ts` | No change | UNCHANGED |
-| `src/broker/` | No change | UNCHANGED |
-| `src/nexus/` | No change | UNCHANGED |
+`ServerCoordinator` can be instantiated and `init(path)` called without any MCP transport. The MCP transport layer (`registerTools`) is a thin wrapper that delegates to coordinator. This means MCP transport tests can use `InMemoryTransport` to test actual tool dispatch in-process. The test for this pattern already exists in `coordinator.test.ts`.
 
-### New External Dependencies
+### Pattern 2: Repository as DB Boundary (existing, enables testing)
 
-| Package | Purpose | Install | Confidence |
-|---------|---------|---------|-----------|
-| `tree-sitter-python` | Python AST grammar for Node.js | `npm install tree-sitter-python` | HIGH — official tree-sitter org repo, v0.25.x on npm |
-| `tree-sitter-rust` | Rust AST grammar for Node.js | `npm install tree-sitter-rust` | HIGH — official tree-sitter org repo, v0.25.x on npm |
-| `tree-sitter-go` | Go AST grammar for Node.js | `npm install tree-sitter-go` | HIGH — 200+ dependents on npm, official org |
-| `graphology` | Typed directed graph data structure | `npm install graphology` | HIGH — widely used, official docs |
-| `graphology-communities-louvain` | Louvain clustering | `npm install graphology-communities-louvain` | HIGH — official graphology standard library |
+All SQL goes through `src/db/repository.ts`. Tests open a real SQLite DB in `/tmp`, call repository functions directly, and verify state. MCP transport tests pre-populate the DB via repository functions and verify tool responses read from it correctly. Already established in `tool-outputs.test.ts` and `file-pipeline.test.ts`.
 
-All new grammars follow the same `createRequire` / CJS native addon pattern established in `src/change-detector/ast-parser.ts`. No new native binding patterns needed.
+### Pattern 3: Broker Client as Module-Level Singleton (existing, requires mock)
 
-### Internal Boundaries
+`broker/client.ts` uses module-level state (`socket`, `reconnectTimer`, `repoPath`). Any test that exercises code calling broker functions must `vi.mock('../../src/broker/client.js', ...)`. The broker-lifecycle integration test is the only test that must use the real module — it tests actual spawn/connect behavior.
 
-| Boundary | Communication | Constraint |
-|----------|---------------|-----------|
-| `coordinator.ts` → `ast-extractor/` | Direct function call: `extractEdges(path, content, root)` | No IPC; same process; synchronous except for file reads |
-| `coordinator.ts` → `graph/community.ts` | Direct function call: `recomputeCommunities()` | Synchronous; graphology 10K-node run ~53ms per benchmark |
-| `graph/community.ts` → `db/repository.ts` | `getAllEdges()` + `batchSetCommunities()` | community.ts has no direct SQLite access |
-| `ast-extractor/` ↔ `change-detector/` | None | These are independent — extractor produces edges; change-detector produces semantic diffs. No shared state. |
-| `mcp-server.ts` → `db/repository.ts` | Existing pattern; adds `getCommunityForFile()` + `getCommunityMembers()` | No new patterns |
-| `ast-extractor/languages/ts-js.ts` → `change-detector/ast-parser.ts` | Reuses same parser instances (tsParser, tsxParser, jsParser) | Import the parser instances; do NOT duplicate parser construction |
+### Pattern 4: PID Guard as Idempotent Singleton Enforcer (existing, correct)
 
-**Critical:** `ast-extractor/languages/ts-js.ts` must reuse the parser instances already created in `change-detector/ast-parser.ts`, not construct new ones. Two `new Parser()` instances for the same grammar would double memory and startup cost. Export the parser instances from ast-parser.ts and import them in ts-js.ts.
-
----
-
-## Schema Migration Plan
-
-### Approach: Incremental ALTER TABLE inside existing schema_version gate
-
-The project already has `schema_version` table and `runMigrationIfNeeded()` in `src/migrate/json-to-sqlite.ts`. The migration runner checks the version integer and applies steps sequentially. Add v1.4 schema changes there — do not invent a new migration mechanism.
-
-```sql
--- v1.4 migration (executed once, inside schema_version version check)
-
--- Step 1: Extend file_dependencies with edge metadata columns
--- O(1) regardless of row count — SQLite ALTER TABLE ADD COLUMN guarantee
-ALTER TABLE file_dependencies ADD COLUMN edge_type TEXT DEFAULT 'imports';
-ALTER TABLE file_dependencies ADD COLUMN weight INTEGER DEFAULT 1;
-ALTER TABLE file_dependencies ADD COLUMN confidence REAL DEFAULT 1.0;
-ALTER TABLE file_dependencies ADD COLUMN confidence_source TEXT DEFAULT 'EXTRACTED';
-
--- Step 2: Community assignments table
-CREATE TABLE IF NOT EXISTS file_communities (
-  file_path      TEXT PRIMARY KEY NOT NULL,
-  community_id   INTEGER NOT NULL,
-  recomputed_at  INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS communities_id_idx ON file_communities(community_id);
-
--- Step 3: Bump version
-UPDATE schema_version SET version = <N+1>;
-```
-
-**Drizzle note:** The project uses a hand-rolled migration runner, not drizzle-kit migrations. Add the new table definition to `src/db/schema.ts` for Drizzle ORM type safety, but add the actual migration SQL directly to `runMigrationIfNeeded()`.
-
-**Backward compat:** All existing callers of `getDependencies()`, `getDependents()`, `getAllLocalImportEdges()` continue to work unchanged — those functions filter on `dependency_type` which is not affected by the new columns.
-
----
-
-## Build Order (Phase Dependency Graph)
-
-Phases must be executed in this sequence:
-
-```
-Phase A: Schema migration
-         file_dependencies +4 cols, file_communities table
-         (required first — code writing new columns fails on old schema)
-    |
-    v
-Phase B: ast-extractor/ module — new module, no existing code changed
-         B1: types.ts + interfaces (no deps)
-         B2: languages/regex-fallback.ts (ports IMPORT_PATTERNS, no new npm deps)
-         B3: languages/ts-js.ts (reuses existing parser instances from ast-parser.ts)
-         B4: languages/python.ts, rust.ts, go.ts (new grammar npm installs)
-         B5: registry.ts + index.ts (wires dispatch)
-    |
-    v
-Phase C: db/repository.ts — new edge CRUD + community CRUD
-         setEdges(), getAllEdges(), batchSetCommunities()
-         getCommunityForFile(), getCommunityMembers()
-         (depends on schema from A; used by D and E)
-    |
-    v
-Phase D: file-utils.ts + coordinator.ts — wire extractEdges() into pipeline
-         analyzeNewFile() replaced
-         coordinator Pass 2 replaced
-         (depends on B for extractEdges API, C for setEdges)
-    |
-    v
-Phase E: graph/community.ts — Louvain implementation
-         (depends on C for getAllEdges/batchSetCommunities)
-         (triggered from coordinator in D)
-    |
-    v
-Phase F: mcp-server.ts — get_community tool + budgetCap on all tools
-         (depends on C for getCommunity* queries)
-         (budgetCap helper is standalone, can be done in any phase)
-```
-
-**Rationale for this ordering:**
-- Schema first: writing edge_type to a schema that lacks the column throws at runtime.
-- ast-extractor before coordinator: coordinator.ts imports `extractEdges`; module must exist.
-- regex-fallback before new grammars: confirms LanguageConfig interface works before adding native deps.
-- ts-js before python/rust/go: lower risk (no new npm deps), validates the pattern.
-- repository.ts before community.ts: community.ts reads via repository functions, not raw SQL.
-- MCP tool last: community must be populated before the tool returns meaningful results.
+The broker uses `process.kill(pid, 0)` to detect if already running, then `process.exit(0)` on conflict. Concurrent spawn attempts are safe — the second process exits cleanly. No change needed. The lifecycle test must verify this: spawning twice yields one running broker and one harmless exit.
 
 ---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Adding a Fourth Extraction Code Path In-Place
+### Anti-Pattern 1: Testing MCP Tools via Subprocess Spawn
 
-**What people do:** Add tree-sitter grammar extraction as another branch inside the existing `if (isTreeSitterLanguage(ext)) { ... } else if (ext === '.go') { ... } else if (IMPORT_PATTERNS[ext]) { ... }` chain in coordinator.ts and file-utils.ts.
+**What people do:** Spawn `dist/mcp-server.js` as a subprocess and send JSON-RPC messages via stdin/stdout to test tool outputs.
 
-**Why it's wrong:** That chain is duplicated in at least three places. Every new grammar means three edits. The duplication is what makes the current code hard to extend.
+**Why it's wrong:** Requires a full build before tests run. Slow (process spawn overhead). Fragile (timing-dependent). `InMemoryTransport` provides the same coverage at 10x speed in-process.
 
-**Do this instead:** Introduce the `LanguageConfig` registry. All three call sites become `extractEdges(filePath, content, projectRoot)` — one line, one place to change.
+**Do this instead:** Use `InMemoryTransport.createLinkedPair()` for MCP tool contract tests. Reserve process spawning for the broker lifecycle integration test where the actual detached-spawn behavior is what's being verified.
 
-### Anti-Pattern 2: Caching ASTs Between File Events
+### Anti-Pattern 2: Mocking Repository Functions in MCP Tests
 
-**What people do:** Cache the parsed tree-sitter tree object in a `Map<string, Tree>` between file change events to avoid re-parsing.
+**What people do:** Mock `getFile`, `getAllFiles`, etc. to return fake data.
 
-**Why it's wrong:** The project explicitly ruled out AST caching ("ASTs too large and go stale immediately"). In-memory caching also conflicts with chokidar's debounce model — the cached tree would be stale by the time the debounce fires. Tree-sitter re-parse of a 500-line file takes ~1ms. No cache needed.
+**Why it's wrong:** Tests the mock, not the code. Repository functions are pure SQL — a real SQLite DB in `/tmp` is fast (~1ms per operation via better-sqlite3), accurate, and confirms actual query behavior.
 
-**Do this instead:** Parse on demand. If incremental re-parse performance becomes measurable, revisit then.
+**Do this instead:** Pre-populate a real tmp SQLite DB and let the tool handlers query it naturally. Already established across 5+ test files.
 
-### Anti-Pattern 3: Running Louvain in the Broker
+### Anti-Pattern 3: Adding Retry Logic to Broker Spawn
 
-**What people do:** Route community recompute as a job through the LLM broker since it's a background computation.
+**What people do:** Add retry loops with backoff around `spawnBrokerIfNeeded()` on connection failure.
 
-**Why it's wrong:** Community detection is not an LLM task — it is a pure graph algorithm that completes in <200ms. Routing it through the broker adds Unix socket IPC round-trip latency and couples a non-LLM concern to the LLM pipeline unnecessarily.
+**Why it's wrong:** The reconnect timer (10s interval in `startReconnectTimer()`) already handles transient failures. Adding retry at the spawn level creates two overlapping recovery mechanisms. The broker's PID guard means double-spawn is harmless but wasteful.
 
-**Do this instead:** Call `recomputeCommunities()` directly in the coordinator after dependency updates, synchronously inside `treeMutex.run()`. Fast enough.
+**Do this instead:** Keep the existing reconnect timer. Replace the 500ms sleep with a socket poll. The system self-heals without retry complexity.
 
-### Anti-Pattern 4: Storing Community Assignments in the files Table
+### Anti-Pattern 4: Adding outputSchema to All Tools
 
-**What people do:** Add `community_id INTEGER` as a column on the `files` table.
+**What people do:** Add Zod `outputSchema` to every `registerTool()` call as part of the spec compliance migration.
 
-**Why it's wrong:** Communities are recomputed as a full batch — individual UPDATE per file would be N separate statements plus the full batch replace semantics are awkward on an existing primary-key table.
+**Why it's wrong:** The tools return freeform JSON text content that varies by query result. Defining schemas for all 14 tools adds significant maintenance overhead for minimal agent benefit. Most agents treat tool output as text anyway.
 
-**Do this instead:** Use the dedicated `file_communities` table. `batchSetCommunities()` does `DELETE FROM file_communities` + bulk INSERT in one transaction. Clean semantics, clean separation.
+**Do this instead:** Add `outputSchema` only to `status` (the only tool with a reliably stable response shape). Leave the other 13 tools with just `inputSchema` + `annotations`.
 
-### Anti-Pattern 5: Exposing Raw Community IDs to MCP Callers
+### Anti-Pattern 5: Registering MCP Server at Runtime
 
-**What people do:** Return `{ communityId: 42, files: [...] }` from `get_community`.
+**What people do:** Have `initServer()` call the registration script to ensure the server is always registered with Claude Code.
 
-**Why it's wrong:** Louvain community IDs are arbitrary integers that change with every recompute (algorithm is randomized, seeded by graph traversal order). IDs are not stable. Callers cannot bookmark them.
+**Why it's wrong:** The MCP server is already running — it was started by Claude Code using the registration entry. Modifying `~/.claude.json` from inside a running MCP process creates a race condition and is conceptually wrong (the server modifying the config that launched it).
 
-**Do this instead:** Accept `file_path` as the input; look up that file's community; return all community members as file paths with their metadata. Never expose the raw integer ID.
+**Do this instead:** Keep registration as a build/install-time step. `scripts/register-mcp.ts` runs once after `npm run build`.
 
-### Anti-Pattern 6: Constructing Duplicate Parser Instances for ts-js.ts
+---
 
-**What people do:** In `ast-extractor/languages/ts-js.ts`, construct new `Parser()` instances for TypeScript and JavaScript grammars independently of `change-detector/ast-parser.ts`.
+## Integration Ordering: Build Sequence for v1.5
 
-**Why it's wrong:** The project already constructs `tsParser`, `tsxParser`, `jsParser` in ast-parser.ts at module load time. Constructing duplicates doubles memory for tree-sitter's internal state and adds startup overhead for grammar loading.
+Based on dependencies between the four hardening areas, the correct build order is:
 
-**Do this instead:** Export the parser instances from `ast-parser.ts` and import them in `ts-js.ts`. The extractor uses the same parser objects for its own AST walks.
+**1. Broker lifecycle hardening** — foundational; eliminates the biggest reliability gap first. Self-contained to `broker/main.ts` and `broker/client.ts`. No dependencies on other v1.5 work.
+
+**2. MCP spec compliance** — self-contained to `src/mcp-server.ts`. No dependencies on testing infrastructure. Can proceed in parallel with broker hardening.
+
+**3. Test infrastructure** — depends on the hardened broker (broker-lifecycle.test.ts is only meaningful after the crash cleanup handlers exist) and spec-compliant MCP server (mcp-transport.test.ts verifies the `registerTool` API, not the deprecated `server.tool` API). Writing tests against the old API would mean rewriting them immediately after the migration.
+
+**4. Zero-config auto-registration** — depends on nothing except the build pipeline being stable. Implement last when everything else is confirmed working and the binary being registered is hardened.
+
+This ordering avoids writing tests for code that is about to change and avoids writing the registration script before the binary it registers is fully hardened.
 
 ---
 
 ## Scaling Considerations
 
-| Scale | Concern | Approach |
-|-------|---------|---------|
-| <500 files | All patterns as described | No changes needed |
-| 500–5K files | Community recompute per edge-change event | Fine — graphology 10K nodes in ~53ms |
-| 5K–50K files | Recompute frequency on large active repos | Batch: only trigger at end of chokidar debounce window, not per individual file event |
-| 50K+ files | Out of scope per PROJECT.md | graphology-communities-louvain handles 10M+ edges; not a near-term concern |
+This is a local-only developer tool; traditional web scaling does not apply. The relevant dimensions are:
+
+| Concern | Current State | v1.5 Impact |
+|---------|---------------|-------------|
+| Test suite execution time | ~260 tests, fast (SQLite in /tmp) | New tests add ~50-100 more; should stay under 15s total |
+| Broker job throughput | Serial by design (single GPU) | Unchanged; lifecycle hardening does not affect throughput |
+| Concurrent MCP instances | Multiple per repo are expected; WAL mode handles it | `instance.pid` is informational only; no enforcement needed |
+| MCP response latency | Synchronous better-sqlite3 reads ~1ms | `registerTool` migration has zero performance impact |
+| Socket poll overhead | 500ms sleep → 100ms poll | Strictly better; reduces connect latency on fast machines |
 
 ---
 
 ## Sources
 
-- Direct source reading: `src/change-detector/ast-parser.ts`, `src/db/schema.ts`, `src/db/repository.ts`, `src/coordinator.ts`, `src/file-utils.ts`, `src/cycle-detection.ts`, `src/types.ts`, `package.json` — HIGH confidence
-- [graphology-communities-louvain official docs](https://graphology.github.io/standard-library/communities-louvain.html) — HIGH confidence
-- [graphology GitHub repository](https://github.com/graphology/graphology) — HIGH confidence
-- [tree-sitter-go npm](https://www.npmjs.com/package/tree-sitter-go) — HIGH confidence (official org, 200+ dependents)
-- [tree-sitter-rust npm](https://www.npmjs.com/package/tree-sitter-rust) — HIGH confidence (official org)
-- [node-tree-sitter GitHub](https://github.com/tree-sitter/node-tree-sitter) — HIGH confidence (official)
-- [SQLite ALTER TABLE documentation](https://www.sqlite.org/lang_altertable.html) — HIGH confidence (O(1) column add confirmed)
-- [Codebase-Memory arxiv preprint](https://arxiv.org/html/2603.27277) — MEDIUM confidence (demonstrates tree-sitter + confidence-scored edges + Louvain community pattern in an MCP context)
+- MCP TypeScript SDK v1.27.1 documentation via Context7 (`/modelcontextprotocol/typescript-sdk`): `registerTool`, `annotations` (readOnlyHint, destructiveHint, idempotentHint), `logging` capability, `InMemoryTransport`, migration guide from v1 to v2 API — HIGH confidence
+- Direct codebase inspection (all claims verified against installed source):
+  - `src/mcp-server.ts` (615 lines) — StdioTransport, McpServer init, registerTools, 14 tool definitions
+  - `src/coordinator.ts` — AsyncMutex, init(), initServer(), shutdown(), broker connect
+  - `src/broker/main.ts` — PID guard, SIGTERM/SIGINT handlers, startup sequence
+  - `src/broker/client.ts` — spawnBrokerIfNeeded(), attemptConnect(), reconnect timer
+  - `src/broker/queue.ts` + `src/broker/types.ts` — PriorityQueue, QueueJob, dedupKey
+  - `src/db/schema.ts` + `src/db/repository.ts` — SQLite schema, all repository functions
+  - `tests/integration/file-pipeline.test.ts` + `tests/unit/broker-queue.test.ts` — established test patterns
+  - `package.json` — SDK v1.27.1 confirmed, vitest confirmed
+  - Node.js SDK dist file inspection: `registerTool`, `tool`, `registerPrompt`, `InMemoryTransport` all present
 
 ---
 
-*Architecture research for: FileScopeMCP v1.4 Deep Graph Intelligence*
-*Researched: 2026-04-08*
+*Architecture research for: FileScopeMCP v1.5 Production-Grade MCP Intelligence Layer*
+*Researched: 2026-04-17*
