@@ -534,7 +534,7 @@ describe('COMPAT-01: MCP tool names and schemas remain identical', () => {
     ];
 
     for (const toolName of expectedTools) {
-      expect(src).toContain(`server.tool("${toolName}"`);
+      expect(src).toContain(`server.registerTool("${toolName}"`);
     }
   });
 });

@@ -441,7 +441,7 @@ describe('MCP tool name registry', () => {
     ];
 
     for (const tool of expectedTools) {
-      expect(src).toContain(`server.tool("${tool}"`);
+      expect(src).toContain(`server.registerTool("${tool}"`);
     }
   });
 });
