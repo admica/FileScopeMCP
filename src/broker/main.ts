@@ -33,7 +33,7 @@ function checkPidGuard(): void {
   if (fs.existsSync(PID_PATH)) {
     const raw = fs.readFileSync(PID_PATH, 'utf-8').trim();
     const pid = parseInt(raw, 10);
-    if (!isNaN(pid) && isPidRunning(pid)) {
+    if (!isNaN(pid) && isPidRunning(pid) && fs.existsSync(SOCK_PATH)) {
       log(`Broker already running (PID ${pid})`);
       process.exit(0); // Non-error exit for auto-start race conditions
     }
@@ -84,6 +84,7 @@ async function main(): Promise<void> {
   log(`  Model:     ${config.llm.model}`);
   log(`  Provider:  ${config.llm.provider}`);
   log(`  Timeout:   ${config.jobTimeoutMs}ms`);
+  log(`  Drain:     ${config.drainTimeoutMs}ms`);
   log(`  Max queue: ${config.maxQueueSize}`);
   log(`  Node:      ${process.version}`);
   log(`  Started:   ${new Date().toISOString()}`);
@@ -108,7 +109,7 @@ async function main(): Promise<void> {
     shutdownStarted = true;
     log(`Received ${sig} — graceful shutdown`);
 
-    await server.shutdown();
+    await server.shutdown(config.drainTimeoutMs);
 
     // Remove socket and PID files
     fs.rmSync(SOCK_PATH, { force: true });
@@ -120,6 +121,23 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 }
+
+// ─── Crash handlers (BRKR-02, D-06) ─────────────────────────────────────────
+
+process.on('uncaughtException', (err: Error) => {
+  log(`Broker crash (uncaughtException): ${err.message}\n${err.stack ?? ''}`);
+  fs.rmSync(SOCK_PATH, { force: true });
+  fs.rmSync(PID_PATH, { force: true });
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  log(`Broker crash (unhandledRejection): ${msg}`);
+  fs.rmSync(SOCK_PATH, { force: true });
+  fs.rmSync(PID_PATH, { force: true });
+  process.exit(1);
+});
 
 // ─── Run ──────────────────────────────────────────────────────────────────────
 
