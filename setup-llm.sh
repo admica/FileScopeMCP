@@ -467,7 +467,7 @@ wsl_guide() {
     echo -e "    - Is llama-server still running in the Windows PowerShell window?"
     echo -e "    - Is the firewall rule from step 3 active? (Test with ${CYAN}Test-NetConnection${NC} from another Windows host)"
     echo -e "    - Is it listening on 0.0.0.0:$LLM_PORT (not 127.0.0.1)? Check with ${CYAN}netstat -an | findstr $LLM_PORT${NC}"
-    echo -e "    - Is the GGUF done downloading? llama-server blocks the HTTP port until the model is loaded. First run can take 5-10 min on a fast connection."
+    echo -e "    - Is the GGUF done downloading? llama-server blocks the HTTP port until the model is loaded."
     echo ""
 }
 
