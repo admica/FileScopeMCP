@@ -84,7 +84,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full phase details.
 **Milestone Goal:** Make FileScopeMCP bulletproof and zero-config for LLM agents — comprehensive testing, MCP spec compliance, and hardened lifecycle management.
 
 - [x] **Phase 29: Broker Lifecycle Hardening** - Eliminate crash cleanup gaps and spawn timing races in the broker (completed 2026-04-17)
-- [ ] **Phase 30: MCP Spec Compliance** - Migrate tool registration to current SDK API and fix false capability declarations
+- [x] **Phase 30: MCP Spec Compliance** - Migrate tool registration to current SDK API and fix false capability declarations (completed 2026-04-17)
 - [ ] **Phase 31: Test Infrastructure** - Close the protocol-layer test gap with transport, lifecycle, and subsystem tests
 - [ ] **Phase 32: Zero-Config Auto-Registration** - Replace broken install script with `.mcp.json` and CLI-based registration
 
@@ -114,10 +114,10 @@ Plans:
   2. The `tools: { listChanged: true }` capability is removed or backed by an actual `sendToolListChanged()` call — MCP clients that cache tool lists get correct behavior
   3. Read-only tools carry `readOnlyHint: true` and the destructive tool carries `destructiveHint: true` per the MCP 2025-11-25 spec
   4. Tool error responses return structured `{ ok: false, error: "CODE", message: "..." }` objects that LLM agents can parse programmatically
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
-- [ ] 30-01-PLAN.md — Migrate all 13 tools to registerTool() with annotations, enriched descriptions, and structured error/success responses
-- [ ] 30-02-PLAN.md — Update test file assertions from server.tool( to server.registerTool( pattern
+- [x] 30-01-PLAN.md — Migrate all 13 tools to registerTool() with annotations, enriched descriptions, and structured error/success responses
+- [x] 30-02-PLAN.md — Update test file assertions from server.tool( to server.registerTool( pattern
 
 ### Phase 31: Test Infrastructure
 **Goal**: Protocol-layer and subsystem test gaps are closed; CI catches regressions before they reach agents
@@ -129,7 +129,11 @@ Plans:
   3. File watcher debounce, ignore patterns, and event dispatch are verified via mocked chokidar — no real filesystem waits in tests
   4. `npm run coverage` produces a V8 coverage report with per-subsystem gap identification
   5. A CI smoke test asserts the first byte emitted by `dist/mcp-server.js` is `{` — stdout pollution is caught at CI time
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 31-01-PLAN.md — Export registerTools, scope V8 coverage config, MCP transport tests for all 13 tools
+- [ ] 31-02-PLAN.md — Broker lifecycle integration tests and stdout pollution smoke test
+- [ ] 31-03-PLAN.md — File watcher unit tests, config loading tests, cascade/change-detector gap audit
 
 ### Phase 32: Zero-Config Auto-Registration
 **Goal**: Cloning the repo and running `npm run build` is sufficient for Claude Code to discover FileScopeMCP with no manual JSON editing
@@ -174,6 +178,6 @@ Plans:
 | 27. Community Detection | v1.4 | 2/2 | Complete | 2026-04-09 |
 | 28. MCP Polish | v1.4 | 2/2 | Complete | 2026-04-09 |
 | 29. Broker Lifecycle Hardening | v1.5 | 2/2 | Complete    | 2026-04-17 |
-| 30. MCP Spec Compliance | v1.5 | 0/2 | Not started | - |
-| 31. Test Infrastructure | v1.5 | 0/TBD | Not started | - |
+| 30. MCP Spec Compliance | v1.5 | 2/2 | Complete    | 2026-04-17 |
+| 31. Test Infrastructure | v1.5 | 0/3 | Not started | - |
 | 32. Zero-Config Auto-Registration | v1.5 | 0/TBD | Not started | - |
