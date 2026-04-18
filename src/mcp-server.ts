@@ -145,7 +145,7 @@ const server = new McpServer(serverInfo);
  * `coordinator` for orchestration or calls repository functions directly for
  * pure DB reads/writes.
  */
-function registerTools(server: McpServer, coordinator: ServerCoordinator): void {
+export function registerTools(server: McpServer, coordinator: ServerCoordinator): void {
   server.registerTool("set_base_directory", {
     title: "Set Base Directory",
     description: "Override the base directory for analysis. Initializes the file watcher, database, and broker connection for the specified path. Call this first if --base-dir was not passed at startup. Subsequent calls re-initialize to a new directory.",
