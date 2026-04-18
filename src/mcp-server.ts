@@ -650,7 +650,9 @@ async function gracefulShutdown(coordinator: ServerCoordinator, signal: string):
 }
 
 // Entry point: daemon mode or MCP mode
-(async () => {
+// Guard: skip when imported as a module (e.g., vitest importing registerTools)
+const isDirectExecution = process.argv[1]?.endsWith('mcp-server.js') || process.argv[1]?.endsWith('mcp-server.ts');
+if (isDirectExecution) (async () => {
   const isDaemon = process.argv.includes('--daemon');
   const baseDirArg = process.argv.find(a => a.startsWith('--base-dir='));
 
