@@ -43,8 +43,8 @@ docker run --gpus all -p 8880:8880 \
   -v $HOME/.cache/llama.cpp:/root/.cache/llama.cpp \
   ghcr.io/ggml-org/llama.cpp:server-cuda \
   -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S \
-  --alias FileScopeMCP-brain -c 65536 -ngl 99 --n-cpu-moe 99 \
-  -fa on --jinja --host 0.0.0.0 --port 8880
+  --alias FileScopeMCP-brain -c 32768 -ngl 99 --n-cpu-moe 20 \
+  -b 2048 -ub 2048 -fa on --jinja --host 0.0.0.0 --port 8880
 ```
 
 Run `./setup-llm.sh --launch` to print the exact launch command for the native binary.
@@ -77,13 +77,13 @@ This is the recommended setup for Windows users with a dedicated GPU. WSL2 doesn
 
 ### Step 1: Pick the Windows binary
 
-Download the latest llama.cpp Windows release from [github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases). Pick the zip that matches your GPU (where `<NNNN>` is the latest build number):
+Download the llama.cpp Windows release from [github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases). Pick the zip that matches your GPU. The tuned values below were validated against **build b8794**; newer builds should work but are untested.
 
 | GPU | File | Backend |
 |-----|------|---------|
-| **AMD RDNA2/RDNA3** (RX 6800 XT, RX 7900 XT, etc.) | `llama-b<NNNN>-bin-win-vulkan-x64.zip` | Vulkan |
-| **NVIDIA** | `llama-b<NNNN>-bin-win-cuda-12.X-x64.zip` | CUDA (no toolkit required for prebuilt) |
-| **Intel Arc** | `llama-b<NNNN>-bin-win-vulkan-x64.zip` | Vulkan |
+| **AMD RDNA2/RDNA3** (RX 6800 XT, RX 7900 XT, etc.) | `llama-b8794-bin-win-vulkan-x64.zip` | Vulkan |
+| **NVIDIA** | `llama-b8794-bin-win-cuda-12.X-x64.zip` | CUDA (no toolkit required for prebuilt) |
+| **Intel Arc** | `llama-b8794-bin-win-vulkan-x64.zip` | Vulkan |
 
 **For AMD: use Vulkan, NOT ROCm.** Two reasons:
 
@@ -94,7 +94,7 @@ No HIP SDK, no Visual Studio, no ROCm SDK needed.
 
 ### Step 2: Extract the zip
 
-Right-click → Extract All → enter `C:\llama.cpp`. The zip may or may not create a nested subfolder like `C:\llama.cpp\llama-bNNNN-bin-win-vulkan-x64\`. Find the folder that actually contains `llama-server.exe`:
+Right-click → Extract All → enter `C:\llama.cpp`. The zip may or may not create a nested subfolder like `C:\llama.cpp\llama-b8794-bin-win-vulkan-x64\`. Find the folder that actually contains `llama-server.exe`:
 
 ```powershell
 Get-ChildItem -Recurse -Filter llama-server.exe C:\llama.cpp
@@ -122,11 +122,11 @@ cd C:\llama.cpp  # or the nested subfolder from Step 2
 .\llama-server.exe `
   -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S `
   --alias FileScopeMCP-brain `
-  -c 65536 `
+  -c 32768 `
   -ngl 99 `
-  --n-cpu-moe 99 `
+  --n-cpu-moe 20 `
   -fa on `
-  -b 4096 -ub 4096 `
+  -b 2048 -ub 2048 `
   --cache-type-k q8_0 --cache-type-v q8_0 `
   --jinja `
   --no-warmup `
@@ -137,14 +137,20 @@ cd C:\llama.cpp  # or the nested subfolder from Step 2
 Flag breakdown:
 
 - `-ngl 99` — offload all layers to GPU
-- `--n-cpu-moe 99` — claw routed expert FFNs back to CPU RAM, keeping only attention + shared expert on GPU (~2-3GB VRAM)
+- `--n-cpu-moe 20` — keep routed expert FFNs on GPU for the first ~12 layers (tuned for 16GB VRAM). Raise to `99` if you hit OOM; lower for more speed if you have headroom.
 - `-fa on` — flash attention
+- `-b 2048 -ub 2048` — logical and physical batch size. Keeps compute buffer small on 16GB cards; raise to 4096 on ≥20GB VRAM for better prompt-eval throughput.
 - `--jinja` — enable the Gemma 4 chat template for `<|think|>` thinking-mode control
 - `--no-warmup` — skip the startup dummy inference. Warmup would force-touch every weight page, defeating `--n-cpu-moe`'s on-demand expert paging. (mmap is on by default — no need to specify `--mmap`.)
-- `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. At 64K context this costs ~6-8GB VRAM, which fits comfortably once `--n-cpu-moe 99` has cleared the expert weights off GPU. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
-- `-c 65536` — 64K context. Gemma 4 small models support 128K native, so 64K is well inside the trained range. Bump to 128K if you need it and have the VRAM headroom.
+- `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. At 32K context this costs ~3-4GB VRAM. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
+- `-c 32768` — 32K context. Gemma 4 small models support 128K native, so 32K is well inside the trained range. Bump to 65536/131072 if you need it and have VRAM headroom (each doubling adds ~3-4GB KV).
 
-**RAM requirement:** `--n-cpu-moe 99` streams routed experts from system RAM, so keep ~20GB of system RAM free beyond what Windows itself uses.
+**Verified config (build b8794, RX 7900 XT 16GB dedicated, ~24GB shared):**
+- VRAM under load: 13.3 / 16.0 GB dedicated (~2.7GB headroom)
+- Prompt eval: 305-420 t/s
+- Token gen: 18-19 t/s
+
+**RAM requirement:** `--n-cpu-moe` streams routed experts from system RAM for every offloaded layer. At `--n-cpu-moe 20`, keep ~12GB of system RAM free beyond what Windows itself uses; at `--n-cpu-moe 99`, keep ~20GB.
 
 **First run:** The `-hf` flag downloads the GGUF (~18GB) into `$env:LLAMA_CACHE` or the default llama.cpp cache dir. Expect 5-10 minutes on a fast connection. llama-server does NOT accept HTTP traffic until the model is fully loaded.
 

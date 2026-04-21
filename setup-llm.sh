@@ -3,11 +3,13 @@
 # Configures llama.cpp's llama-server as FileScopeMCP's local LLM backend.
 #
 # Default model: Gemma 4 26B A4B MoE (Unsloth UD-Q5_K_S, ~18GB on disk).
-# Uses llama.cpp's expert offloading (--n-cpu-moe 99) to keep only the
-# attention + shared-expert weights on GPU while routed expert FFNs live
-# in system RAM / mmap'd from the GGUF file on disk. This lets the 26B MoE
-# run on 16GB VRAM, paying the cost only for the ~3.8B active parameters
-# per token (8 routed + 1 shared expert of 128 total).
+# Uses llama.cpp's expert offloading (--n-cpu-moe) to keep attention +
+# shared-expert weights on GPU while routed expert FFNs live in system RAM /
+# mmap'd from the GGUF file on disk. This lets the 26B MoE run on 16GB VRAM,
+# paying the cost only for the ~3.8B active parameters per token (8 routed +
+# 1 shared expert of 128 total). Default --n-cpu-moe 20 is tuned for 16GB
+# VRAM (RX 7900 XT, build b8794: ~13.3/16.0 GB used, 305-420 t/s prompt eval,
+# 18-19 t/s gen). Raise to 99 if OOM; lower for more speed with VRAM headroom.
 #
 # Usage:
 #   ./setup-llm.sh                     # Print setup guide for your platform
@@ -25,7 +27,7 @@ set -e
 MODEL_HF_REF_DEFAULT="unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S"
 MODEL_ALIAS="FileScopeMCP-brain"    # matches broker.*.json model field
 LLM_PORT=8880
-CONTEXT_SIZE=65536                   # 64K — fits in ~6-8GB q8_0 KV cache with --n-cpu-moe freeing VRAM
+CONTEXT_SIZE=32768                   # 32K — fits in ~3-4GB q8_0 KV cache with --n-cpu-moe freeing VRAM
 VRAM_SOFT_MIN_MB=8192                # warn if VRAM < 8GB (not a hard gate)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -86,7 +88,8 @@ Architecture:
     (8 routed + 1 shared expert out of 128), ideal for 16GB VRAM via expert
     offloading to CPU RAM.
   - llama.cpp's -hf flag auto-downloads the GGUF on first run into \$LLAMA_CACHE.
-  - --n-cpu-moe 99 keeps routed experts in system RAM; --no-warmup skips the
+  - --n-cpu-moe N keeps routed experts of N layers in system RAM (default 20 tuned
+    for 16GB VRAM; raise to 99 on lower-VRAM GPUs); --no-warmup skips the
     startup dummy inference so cold experts stay paged-out (mmap is on by default)
     until they're actually routed to.
   - --alias $MODEL_ALIAS makes the broker config (broker.*.json) work unchanged.
@@ -300,9 +303,9 @@ llama-server \\
   --alias $MODEL_ALIAS \\
   -c $CONTEXT_SIZE \\
   -ngl 99 \\
-  --n-cpu-moe 99 \\
+  --n-cpu-moe 20 \\
   -fa on \\
-  -b 4096 -ub 4096 \\
+  -b 2048 -ub 2048 \\
   --cache-type-k q8_0 --cache-type-v q8_0 \\
   --jinja \\
   --no-warmup \\
@@ -349,22 +352,22 @@ wsl_guide() {
 
     # Vendor branching for the prebuilt binary choice.
     local gpu_vendor="unknown"
-    local zip_name="llama-b<NNNN>-bin-win-vulkan-x64.zip"
+    local zip_name="llama-b8794-bin-win-vulkan-x64.zip"
     local zip_label="Vulkan build (fallback for unknown GPU)"
     if echo "$GPU_NAME" | grep -qiE 'radeon|amd|rx [0-9]'; then
         gpu_vendor="amd"
-        zip_name="llama-b<NNNN>-bin-win-vulkan-x64.zip"
+        zip_name="llama-b8794-bin-win-vulkan-x64.zip"
         zip_label="Vulkan build (AMD — RDNA2/RDNA3)"
         ok "AMD RDNA2/RDNA3 detected — using Vulkan backend (NOT ROCm)"
         warn "ROCm on Windows is broken for llama.cpp since build b8152 (Issue #19943)."
         warn "Use Vulkan — it is also 0-50% faster than ROCm on RDNA2 for MoE models."
     elif echo "$GPU_NAME" | grep -qiE 'nvidia|rtx|gtx|geforce'; then
         gpu_vendor="nvidia"
-        zip_name="llama-b<NNNN>-bin-win-cuda-12.X-x64.zip"
+        zip_name="llama-b8794-bin-win-cuda-12.X-x64.zip"
         zip_label="CUDA 12 build (NVIDIA)"
     elif echo "$GPU_NAME" | grep -qi 'intel'; then
         gpu_vendor="intel"
-        zip_name="llama-b<NNNN>-bin-win-vulkan-x64.zip"
+        zip_name="llama-b8794-bin-win-vulkan-x64.zip"
         zip_label="Vulkan build (Intel Arc)"
     fi
 
@@ -376,7 +379,7 @@ wsl_guide() {
     echo ""
     echo -e "     Pick: ${YELLOW}${zip_label}${NC}"
     echo -e "     File: ${CYAN}${zip_name}${NC}"
-    echo -e "     (${CYAN}<NNNN>${NC} is the latest build number on the releases page.)"
+    echo -e "     (${CYAN}b8794${NC} is the validated build. Newer builds should work but are untested — grab it from the releases page if b8794 is gone.)"
     if [[ "$gpu_vendor" == "nvidia" ]]; then
         echo -e "     The CUDA 12 toolkit is NOT required for the prebuilt binary."
     fi
@@ -385,7 +388,7 @@ wsl_guide() {
     echo -e "     Right-click → ${CYAN}Extract All${NC} → enter ${CYAN}C:\\llama.cpp${NC}"
     echo ""
     echo -e "     The zip may or may not create a nested subfolder like"
-    echo -e "     ${CYAN}C:\\llama.cpp\\llama-bNNNN-bin-win-vulkan-x64${NC}. Find the folder"
+    echo -e "     ${CYAN}C:\\llama.cpp\\llama-b8794-bin-win-vulkan-x64${NC}. Find the folder"
     echo -e "     that actually contains ${CYAN}llama-server.exe${NC} with PowerShell:"
     echo ""
     echo -e "     ${CYAN}Get-ChildItem -Recurse -Filter llama-server.exe C:\\llama.cpp${NC}"
@@ -410,22 +413,23 @@ wsl_guide() {
     echo -e "     ${CYAN}cd C:\\llama.cpp${NC}   ${YELLOW}# or the nested subfolder from step 2${NC}"
     echo ""
     echo -e "     ${YELLOW}# -ngl 99 offloads all layers to GPU;${NC}"
-    echo -e "     ${YELLOW}# --n-cpu-moe 99 claws routed experts back to CPU RAM${NC}"
+    echo -e "     ${YELLOW}# --n-cpu-moe 20 offloads experts of 20 layers to CPU RAM (tuned for 16GB VRAM, build b8794)${NC}"
+    echo -e "     ${YELLOW}# raise to 99 if OOM; lower for more speed with VRAM headroom${NC}"
     echo -e "     ${CYAN}.\\llama-server.exe \`"
     echo -e "         -hf $MODEL_HF_REF \`"
     echo -e "         --alias $MODEL_ALIAS \`"
     echo -e "         -c $CONTEXT_SIZE \`"
     echo -e "         -ngl 99 \`"
-    echo -e "         --n-cpu-moe 99 \`"
+    echo -e "         --n-cpu-moe 20 \`"
     echo -e "         -fa on \`"
-    echo -e "         -b 4096 -ub 4096 \`"
+    echo -e "         -b 2048 -ub 2048 \`"
     echo -e "         --cache-type-k q8_0 --cache-type-v q8_0 \`"
     echo -e "         --jinja \`"
     echo -e "         --no-warmup \`"
     echo -e "         --host 0.0.0.0 --port $LLM_PORT \`"
     echo -e "         --metrics${NC}"
     echo ""
-    warn "--n-cpu-moe 99 means weights stream from system RAM — keep ~20GB RAM free beyond what Windows uses."
+    warn "--n-cpu-moe streams offloaded expert weights from system RAM — keep ~12GB free at --n-cpu-moe 20, ~20GB at 99."
     echo ""
     echo -e "     First run downloads the GGUF (~18GB) into ${CYAN}\$env:LLAMA_CACHE${NC}"
     echo -e "     or the default llama.cpp cache dir. Subsequent runs start instantly."
@@ -503,8 +507,8 @@ linux_guide() {
     echo -e "    ${CYAN}  -v \$HOME/.cache/llama.cpp:/root/.cache/llama.cpp \\${NC}"
     echo -e "    ${CYAN}  ghcr.io/ggml-org/llama.cpp:server-cuda \\${NC}"
     echo -e "    ${CYAN}  -hf $MODEL_HF_REF \\${NC}"
-    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 99 \\${NC}"
-    echo -e "    ${CYAN}  -fa on --jinja --host 0.0.0.0 --port $LLM_PORT${NC}"
+    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 20 \\${NC}"
+    echo -e "    ${CYAN}  -b 2048 -ub 2048 -fa on --jinja --host 0.0.0.0 --port $LLM_PORT${NC}"
     echo ""
     echo -e "  ${GREEN}Launch llama-server (same command for both options):${NC}"
     echo ""
@@ -534,8 +538,8 @@ linux_guide() {
     ExecStart=/path/to/llama-server \\
       -hf $MODEL_HF_REF \\
       --alias $MODEL_ALIAS \\
-      -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 99 -fa on \\
-      -b 4096 -ub 4096 \\
+      -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 20 -fa on \\
+      -b 2048 -ub 2048 \\
       --cache-type-k q8_0 --cache-type-v q8_0 \\
       --jinja --no-warmup \\
       --host 0.0.0.0 --port $LLM_PORT --metrics
