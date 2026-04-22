@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import * as fsPromises from 'fs/promises';
+const fsPromises = fs.promises;
 import * as path from 'path';
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { getProjectRoot, getConfig, addExclusionPattern, getFilescopeIgnore } from './global-state.js';
@@ -762,25 +762,6 @@ export function setFileImportance(fileTree: FileNode, filePath: string, importan
   }
   
   return findAndSetImportance(fileTree);
-}
-
-async function createFileTree(baseDir: string): Promise<FileNode> {
-  const normalizedBaseDir = path.normalize(baseDir);
-
-  // Collect flat list from generator, then build a synthetic root node
-  const fileNodes: FileNode[] = [];
-  for await (const node of scanDirectory(normalizedBaseDir)) {
-    fileNodes.push(node);
-  }
-
-  const rootNode: FileNode = {
-    path: normalizedBaseDir,
-    name: path.basename(normalizedBaseDir),
-    isDirectory: true,
-    children: fileNodes,
-  };
-
-  return rootNode;
 }
 
 export function getFileImportance(fileTree: FileNode, targetPath: string): FileNode | null {
