@@ -1,0 +1,100 @@
+# Requirements: FileScopeMCP
+
+**Defined:** 2026-04-17
+**Core Value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
+
+## v1.5 Requirements
+
+Requirements for Production-Grade MCP Intelligence Layer. Each maps to roadmap phases.
+
+### Testing Infrastructure
+
+- [ ] **TEST-01**: MCP transport-layer tests validate JSON-RPC tool calls through `InMemoryTransport` for all 13 tools
+- [ ] **TEST-02**: Broker lifecycle tests cover PID guard, socket cleanup, spawn, shutdown, and crash recovery
+- [ ] **TEST-03**: Tool contract tests verify each MCP tool returns correct schema-conformant output
+- [ ] **TEST-04**: Broker client tests cover auto-discovery, reconnection, and job submission
+- [ ] **TEST-05**: File watcher tests validate debounce, ignore patterns, and event dispatch via mocked chokidar
+- [ ] **TEST-06**: Cascade engine tests verify staleness propagation through dependency chains
+- [ ] **TEST-07**: Change detector integration tests cover AST diffing + breaking change classification
+- [ ] **TEST-08**: Config loading tests cover edge cases (missing files, malformed JSON, defaults)
+- [ ] **TEST-09**: V8 coverage report integrated into `npm run coverage` with gap identification
+
+### MCP Spec Compliance
+
+- [ ] **SPEC-01**: All 13+ tools migrated from `server.tool()` to `registerTool()` with `z.object()` input schemas
+- [ ] **SPEC-02**: False `listChanged: true` capability removed or backed by actual `sendToolListChanged` calls
+- [ ] **SPEC-03**: Tool annotations added (readOnlyHint, destructiveHint, openWorldHint) per MCP spec
+- [ ] **SPEC-04**: Structured MCP error codes returned instead of generic error strings
+
+### One-Command Agent Registration (same-host)
+
+Scope clarified during Phase 32 discussion (2026-04-21): original "zero-config" framing overpromised — end users still run `git clone` + `./build.sh`. Phase 32 delivers one-command install, not zero-config. Cross-host cases (WSL FileScopeMCP → Windows-host Claude Code) are documented as manual config, not automated.
+
+- [x] **ZERO-01**: `.mcp.json` committed at project root for Claude Code auto-discovery when working on the FileScopeMCP repo itself (contributor dogfooding)
+- [x] **ZERO-02**: One-command registration via `claude mcp add` CLI on same host replaces broken `install-mcp-claude.sh`; cross-host (WSL→Windows) documented as manual config
+- [x] **ZERO-03**: Setup docs updated to reflect new registration flow while preserving LLM backend setup instructions
+
+### Broker Lifecycle Hardening
+
+- [ ] **BRKR-01**: Broker liveness check validates both PID alive AND socket exists (prevents PID recycle false positive)
+- [ ] **BRKR-02**: uncaughtException handler cleans up PID file and socket before exit
+- [ ] **BRKR-03**: Graceful shutdown drains in-progress jobs before closing socket
+- [ ] **BRKR-04**: Configurable spawn timeout replaces hardcoded 500ms sleep
+- [ ] **BRKR-05**: Concurrent broker instance detection with clear error messaging
+
+## v2 Requirements
+
+Deferred to future release. Tracked but not in current roadmap.
+
+### MCP Advanced Capabilities
+
+- **MCPADV-01**: MCP Resources with `notifications/resources/updated` for push-based intelligence
+- **MCPADV-02**: MCP Prompts for pre-built query templates
+- **MCPADV-03**: Progress notifications via `ctx.sendNotification` during long operations
+- **MCPADV-04**: MCP conformance runner validation (requires HTTP transport shim)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| One-script LLM backend setup | llama.cpp across platforms is inherently complex; zero-config applies to MCP/broker lifecycle only |
+| MCP Resources (push-based) | Conflicts with query-based design principle in PROJECT.md; HIGH complexity |
+| HTTP transport shim | Only needed for conformance runner; LOW value for this project's use case |
+| Full app zero-config | FileScopeMCP is a full app (MCP + broker + Nexus + LLM backend); setup docs remain manual |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| TEST-01 | Phase 31 | Pending |
+| TEST-02 | Phase 31 | Pending |
+| TEST-03 | Phase 31 | Pending |
+| TEST-04 | Phase 31 | Pending |
+| TEST-05 | Phase 31 | Pending |
+| TEST-06 | Phase 31 | Pending |
+| TEST-07 | Phase 31 | Pending |
+| TEST-08 | Phase 31 | Pending |
+| TEST-09 | Phase 31 | Pending |
+| SPEC-01 | Phase 30 | Pending |
+| SPEC-02 | Phase 30 | Pending |
+| SPEC-03 | Phase 30 | Pending |
+| SPEC-04 | Phase 30 | Pending |
+| ZERO-01 | Phase 32 | Complete |
+| ZERO-02 | Phase 32 | Complete |
+| ZERO-03 | Phase 32 | Complete |
+| BRKR-01 | Phase 29 | Pending |
+| BRKR-02 | Phase 29 | Pending |
+| BRKR-03 | Phase 29 | Pending |
+| BRKR-04 | Phase 29 | Pending |
+| BRKR-05 | Phase 29 | Pending |
+
+**Coverage:**
+- v1.5 requirements: 21 total
+- Mapped to phases: 21
+- Unmapped: 0 ✓
+
+---
+*Requirements defined: 2026-04-17*
+*Last updated: 2026-04-17 after roadmap creation*

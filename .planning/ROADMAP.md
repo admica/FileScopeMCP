@@ -86,7 +86,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full phase details.
 - [x] **Phase 29: Broker Lifecycle Hardening** - Eliminate crash cleanup gaps and spawn timing races in the broker (completed 2026-04-17)
 - [x] **Phase 30: MCP Spec Compliance** - Migrate tool registration to current SDK API and fix false capability declarations (completed 2026-04-17)
 - [x] **Phase 31: Test Infrastructure** - Close the protocol-layer test gap with transport, lifecycle, and subsystem tests (completed 2026-04-18)
-- [ ] **Phase 32: Zero-Config Auto-Registration** - Replace broken install script with `.mcp.json` and CLI-based registration
+- [x] **Phase 32: Zero-Config Auto-Registration** - Replace broken install script with `.mcp.json` and CLI-based registration (completed 2026-04-22)
 
 ## Phase Details
 
@@ -143,12 +143,12 @@ Plans:
   1. `.mcp.json` committed at project root causes Claude Code to auto-discover the server on clone without any additional setup steps
   2. Running `npm run register-mcp` completes successfully using `claude mcp add` CLI and `claude mcp list` confirms registration — no writes to `~/.claude.json`
   3. Setup documentation reflects the new registration flow and a developer following it from scratch reaches a working installation without manual JSON editing
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 Plans:
 - [x] 32-01-PLAN.md — Commit `.mcp.json` dogfood config at repo root and verify `.gitignore` (ZERO-01)
 - [x] 32-02-PLAN.md — Implement `scripts/register-mcp.mjs` plus `npm run register-mcp` and fail-soft integration test (ZERO-02)
 - [x] 32-03-PLAN.md — Swap `build.sh` to `npm run register-mcp` and delete five legacy artifacts (ZERO-02)
-- [ ] 32-04-PLAN.md — Rewrite `docs/mcp-clients.md` and update README Quick Start (ZERO-03)
+- [x] 32-04-PLAN.md — Rewrite `docs/mcp-clients.md` and update README Quick Start (ZERO-03)
 
 ## Progress
 
@@ -185,4 +185,4 @@ Plans:
 | 29. Broker Lifecycle Hardening | v1.5 | 2/2 | Complete    | 2026-04-17 |
 | 30. MCP Spec Compliance | v1.5 | 2/2 | Complete    | 2026-04-17 |
 | 31. Test Infrastructure | v1.5 | 3/3 | Complete    | 2026-04-18 |
-| 32. Zero-Config Auto-Registration | v1.5 | 3/4 | In Progress|  |
+| 32. Zero-Config Auto-Registration | v1.5 | 4/4 | Complete   | 2026-04-22 |

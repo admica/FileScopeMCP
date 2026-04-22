@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Production-Grade MCP Intelligence Layer
 status: executing
-stopped_at: Completed 32-03-PLAN.md (build.sh migration + legacy cleanup)
-last_updated: "2026-04-22T02:57:46.227Z"
+stopped_at: Completed 32-04-PLAN.md (README Quick Start + docs/mcp-clients.md rewrite)
+last_updated: "2026-04-22T03:02:52.406Z"
 last_activity: 2026-04-22
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 11
-  completed_plans: 10
-  percent: 91
+  completed_plans: 11
+  percent: 100
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 ## Current Position
 
 Phase: 32 (zero-config-auto-registration) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-04-22
 
@@ -46,6 +46,7 @@ Recent decisions affecting current work:
 - [Phase 32-zero-config-auto-registration]: Dogfood .mcp.json uses relative path 'dist/mcp-server.js' with no --base-dir flag (D-01, D-03) — Claude Code runs MCP servers with repo root as CWD, FS auto-initializes to CWD per quick task 260323-kgd
 - [Phase 32-zero-config-auto-registration]: Plan 03: build.sh delegates to 'npm run register-mcp' (D-13); mcp.json template-generation removed; 5 legacy files deleted via git rm; run.sh generation preserved (D-16)
 - [Phase 32-zero-config-auto-registration]: Plan 03 Rule 2 deviation: patched docs/mcp-clients.md and docs/troubleshooting.md to replace stale install-mcp-claude.sh references with 'npm run register-mcp' (minimal change; Plan 04 owns full docs/mcp-clients.md rewrite per D-18)
+- [Phase 32-zero-config-auto-registration]: Plan 04: D-17 + D-18 executed -- README Quick Start gains single paragraph explaining claude mcp add --scope user mechanism; docs/mcp-clients.md rewritten with 4 sections in D-18 order (Claude Code / Cursor AI / Cross-host WSL->Windows / Daemon Mode), consolidating OS-specific JSON from deleted templates
 
 ### Pending Todos
 
@@ -69,7 +70,7 @@ None.
 ## Session Continuity
 
 Last activity: 2026-04-17
-Stopped at: Completed 32-03-PLAN.md (build.sh migration + legacy cleanup)
+Stopped at: Completed 32-04-PLAN.md (README Quick Start + docs/mcp-clients.md rewrite)
 Resume file: None
 
 **Planned Phase:** 32 (Zero-Config Auto-Registration) — 4 plans — 2026-04-21T23:13:11.420Z
