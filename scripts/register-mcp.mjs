@@ -52,8 +52,12 @@ if (addResult.status !== 0) {
 }
 
 // Post-check (D-07): confirm via `claude mcp list` that our entry is present.
+// Match server name at a word boundary so variants like `FileScopeMCP-dev` don't cause a false positive.
 const listResult = spawnSync('claude', ['mcp', 'list'], { encoding: 'utf-8' });
-const listedOk = listResult.status === 0 && typeof listResult.stdout === 'string' && listResult.stdout.includes(SERVER_NAME);
+const serverLineRegex = new RegExp(`(^|\\s)${SERVER_NAME}(\\s|:|$)`, 'm');
+const listedOk = listResult.status === 0
+  && typeof listResult.stdout === 'string'
+  && serverLineRegex.test(listResult.stdout);
 
 console.log('');
 if (listedOk) {
