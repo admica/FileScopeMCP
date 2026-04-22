@@ -8,7 +8,7 @@
 # mmap'd from the GGUF file on disk. This lets the 26B MoE run on 16GB VRAM,
 # paying the cost only for the ~3.8B active parameters per token (8 routed +
 # 1 shared expert of 128 total). Default --n-cpu-moe 20 is tuned for 16GB
-# VRAM (RX 7900 XT, build b8794: ~13.3/16.0 GB used, 305-420 t/s prompt eval,
+# VRAM (RX 7900 XT: ~13.3/16.0 GB used, 305-420 t/s prompt eval,
 # 18-19 t/s gen). Raise to 99 if OOM; lower for more speed with VRAM headroom.
 #
 # Usage:
@@ -387,10 +387,6 @@ wsl_guide() {
     echo -e "  2. Extract the zip to ${CYAN}C:\\llama.cpp${NC}"
     echo -e "     Right-click → ${CYAN}Extract All${NC} → enter ${CYAN}C:\\llama.cpp${NC}"
     echo ""
-    echo -e "     The zip may or may not create a nested subfolder like"
-    echo -e "     ${CYAN}C:\\llama.cpp\\llama-b8794-bin-win-vulkan-x64${NC}. Find the folder"
-    echo -e "     that actually contains ${CYAN}llama-server.exe${NC} with PowerShell:"
-    echo ""
     echo -e "     ${CYAN}Get-ChildItem -Recurse -Filter llama-server.exe C:\\llama.cpp${NC}"
     echo ""
     echo -e "  3. Add a Windows Firewall rule to allow inbound TCP on port $LLM_PORT."
@@ -412,9 +408,6 @@ wsl_guide() {
     echo ""
     echo -e "     ${CYAN}cd C:\\llama.cpp${NC}   ${YELLOW}# or the nested subfolder from step 2${NC}"
     echo ""
-    echo -e "     ${YELLOW}# -ngl 99 offloads all layers to GPU;${NC}"
-    echo -e "     ${YELLOW}# --n-cpu-moe 20 offloads experts of 20 layers to CPU RAM (tuned for 16GB VRAM, build b8794)${NC}"
-    echo -e "     ${YELLOW}# raise to 99 if OOM; lower for more speed with VRAM headroom${NC}"
     echo -e "     ${CYAN}.\\llama-server.exe \`"
     echo -e "         -hf $MODEL_HF_REF \`"
     echo -e "         --alias $MODEL_ALIAS \`"
@@ -428,8 +421,6 @@ wsl_guide() {
     echo -e "         --no-warmup \`"
     echo -e "         --host 0.0.0.0 --port $LLM_PORT \`"
     echo -e "         --metrics${NC}"
-    echo ""
-    warn "--n-cpu-moe streams offloaded expert weights from system RAM — keep ~12GB free at --n-cpu-moe 20, ~20GB at 99."
     echo ""
     echo -e "     First run downloads the GGUF (~18GB) into ${CYAN}\$env:LLAMA_CACHE${NC}"
     echo -e "     or the default llama.cpp cache dir. Subsequent runs start instantly."
@@ -468,10 +459,9 @@ wsl_guide() {
     echo -e "     ${CYAN}./setup-llm.sh --status${NC}"
     echo ""
     echo -e "  ${YELLOW}If curl fails:${NC}"
-    echo -e "    - Is llama-server still running in the Windows PowerShell window?"
-    echo -e "    - Is the firewall rule from step 3 active? (Test with ${CYAN}Test-NetConnection${NC} from another Windows host)"
+    echo -e "    - Is the firewall rule active? (Test with ${CYAN}Test-NetConnection${NC} from another Windows host)"
     echo -e "    - Is it listening on 0.0.0.0:$LLM_PORT (not 127.0.0.1)? Check with ${CYAN}netstat -an | findstr $LLM_PORT${NC}"
-    echo -e "    - Is the GGUF done downloading? llama-server blocks the HTTP port until the model is loaded."
+    echo -e "    - Is the GGUF done downloading?"
     echo ""
 }
 
