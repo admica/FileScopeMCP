@@ -20,19 +20,16 @@ PROJECT_ROOT=$(pwd)
 # OS detection using OSTYPE for better cross-platform support
 if [[ "$OSTYPE" == "darwin"* ]]; then
     OS="macOS"
-    MCP_TEMPLATE="mcp.json.mac"
     LOGFILE="${HOME}/Library/Logs/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
     mkdir -p "${HOME}/Library/Logs"
     PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 elif [[ "$OSTYPE" == "linux"* ]]; then
     OS="Linux"
-    MCP_TEMPLATE="mcp.json.linux"
     LOGFILE="${PROJECT_ROOT}/logs/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
     mkdir -p "${PROJECT_ROOT}/logs"
 else
     echo "Could not detect OS using OSTYPE but likely Linuxish.."
     OS="Linux"
-    MCP_TEMPLATE="mcp.json.linux"
     LOGFILE="${PROJECT_ROOT}/logs/${APPNAME}_$(date +%Y%m%d_%H%M%S).log"
     mkdir -p "${PROJECT_ROOT}/logs"
 fi
@@ -106,23 +103,6 @@ else
     fi
 fi
 
-# Ensure MCP template exists
-if [ ! -f "$MCP_TEMPLATE" ]; then
-    print_error "$MCP_TEMPLATE not found in $PROJECT_ROOT."
-    exit 1
-fi
-
-# Generate MCP config from template in the base directory
-print_action "Generating MCP configuration..."
-if ! grep -q "{FILE_SCOPE_MCP_DIR}" "$MCP_TEMPLATE"; then
-    print_warning "No {projectRoot} placeholder in $MCP_TEMPLATE. Output may be incorrect."
-fi
-if sed -e "s|{FILE_SCOPE_MCP_DIR}|${PROJECT_ROOT}|g" "$MCP_TEMPLATE" > "mcp.json" 2>> "$LOGFILE"; then
-    print_detail "MCP configuration generated at ./mcp.json"
-else
-    print_error "Failed to generate mcp.json. Check $LOGFILE for details."
-fi
-
 # Build run.sh for simple setup (Linux and macOS)
 print_action "Creating run.sh..."
 echo "#!/bin/bash" > run.sh
@@ -138,12 +118,12 @@ echo -n -e "${PURPLE}"
 cat run.sh
 echo -n -e "${NC}"
 
-# Register with Claude Code
+# Register with Claude Code (idempotent; fail-soft if `claude` CLI missing)
 print_action "Registering with Claude Code..."
-if bash "${PROJECT_ROOT}/install-mcp-claude.sh" 2>&1 | tee -a "$LOGFILE"; then
-    print_detail "Claude Code MCP registration complete."
+if npm run register-mcp 2>&1 | tee -a "$LOGFILE"; then
+    print_detail "Claude Code MCP registration complete (or gracefully skipped — see output)."
 else
-    print_warning "Claude Code registration failed. Run install-mcp-claude.sh manually after setup."
+    print_warning "Claude Code registration failed. Run 'npm run register-mcp' manually after setup."
 fi
 
 # Final message
@@ -151,6 +131,6 @@ print_header "Setup Complete"
 print_detail "Project root: $PROJECT_ROOT"
 print_detail "Log file: $LOGFILE"
 echo -e "${GREEN}MCP server configuration generated.${NC}"
-echo -e "${CYAN}Cursor AI: copy ./mcp.json to your project's .cursor/ directory.${NC}"
-echo -e "${CYAN}Claude Code: registration was attempted above (or run install-mcp-claude.sh manually).${NC}"
+echo -e "${CYAN}Cursor AI: see docs/mcp-clients.md for per-OS .cursor/mcp.json snippets.${NC}"
+echo -e "${CYAN}Claude Code: registration ran above. Re-run any time with 'npm run register-mcp'.${NC}"
 echo -e "${CYAN}Run the server manually with: run.sh${NC}"
