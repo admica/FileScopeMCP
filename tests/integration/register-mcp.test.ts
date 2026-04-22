@@ -10,9 +10,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 const SCRIPT_PATH = path.join(process.cwd(), 'scripts/register-mcp.mjs');
+const SERVER_BIN = path.join(process.cwd(), 'dist/mcp-server.js');
 const scriptExists = existsSync(SCRIPT_PATH);
+// The script's Guard 1 (missing dist/mcp-server.js → exit 1) fires before the ENOENT branch,
+// so the fail-soft ENOENT path is only reachable when the build has been run. Skip otherwise
+// — matches the pattern in mcp-stdout.test.ts:17 where missing build artifacts skip the suite.
+const serverBinExists = existsSync(SERVER_BIN);
 
-describe.skipIf(!scriptExists)('register-mcp fail-soft', () => {
+describe.skipIf(!scriptExists || !serverBinExists)('register-mcp fail-soft', () => {
 
   it('exits 0 and prints hint when `claude` CLI is missing', async () => {
     const proc = spawn(process.execPath, [SCRIPT_PATH], {
