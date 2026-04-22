@@ -166,7 +166,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
     title: "List Files",
     description: "List all tracked files with importance rankings. Without maxItems: returns a nested directory tree structure. With maxItems: returns a flat list of the N most important files sorted by importance descending, with truncation metadata. Call status first to verify initialization.",
     inputSchema: {
-      maxItems: z.number().optional().describe("Cap response to N files sorted by importance. Omit for full tree."),
+      maxItems: z.coerce.number().optional().describe("Cap response to N files sorted by importance. Omit for full tree."),
     },
     annotations: {
       readOnlyHint: true,
@@ -209,8 +209,8 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
     title: "Find Important Files",
     description: "Find the highest-importance files in the project. Returns files sorted by importance descending with dependency counts and staleness flags. Use this over list_files when you need the top N files by importance with relationship metadata. Precondition: server must be initialized.",
     inputSchema: {
-      maxItems: z.number().optional().describe("Maximum number of files to return (default: 10)"),
-      minImportance: z.number().optional().describe("Minimum importance score (0-10)"),
+      maxItems: z.coerce.number().optional().describe("Maximum number of files to return (default: 10)"),
+      minImportance: z.coerce.number().optional().describe("Minimum importance score (0-10)"),
     },
     annotations: {
       readOnlyHint: true,
@@ -340,7 +340,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
     description: "Manually set the importance ranking (0-10) for a file. Overrides the auto-calculated importance. Falls back to basename matching if the exact path is not found. Idempotent: repeated calls with the same value are safe.",
     inputSchema: {
       filepath: z.string().describe("The path to the file to update"),
-      importance: z.number().min(0).max(10).describe("The importance value to set (0-10)"),
+      importance: z.coerce.number().min(0).max(10).describe("The importance value to set (0-10)"),
     },
     annotations: {
       readOnlyHint: false,
@@ -395,7 +395,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
     title: "Scan All",
     description: "Queue files for LLM summarization via the broker. Uses min_importance to filter low-value files (default 1, skips zero-importance). Set remaining_only=true to skip already-summarized files. Requires an active broker connection (llm.enabled=true in config). Returns BROKER_DISCONNECTED if the broker is unreachable.",
     inputSchema: {
-      min_importance: z.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
+      min_importance: z.coerce.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
       remaining_only: z.boolean().optional().default(false).describe("When true, only queue files that have never been summarized"),
     },
     annotations: {
@@ -419,7 +419,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
     description: "Search file metadata across symbols (function/class/interface names), purpose descriptions, LLM summaries, and file paths. Returns results ranked: symbol match (100) > purpose match (50) > summary match (20) > path match (10). Use this to find files by what they do, not just their name.",
     inputSchema: {
       query: z.string().describe("Search term to match against symbols, purpose, summaries, and paths"),
-      maxItems: z.number().optional().describe("Max results (default 10)"),
+      maxItems: z.coerce.number().optional().describe("Max results (default 10)"),
     },
     annotations: {
       readOnlyHint: true,
