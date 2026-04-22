@@ -7,7 +7,7 @@ FileScopeMCP auto-initializes to the current working directory when Claude Code 
 ## MCP server not appearing in Claude Code
 
 1. Run `claude mcp list` to check registration
-2. If missing, run `./install-mcp-claude.sh`
+2. If missing, run `npm run register-mcp`
 3. Check `~/.claude.json` — it should have a `FileScopeMCP` entry under `mcpServers`
 4. Restart Claude Code after registration
 

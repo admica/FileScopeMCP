@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "FileScopeMCP": {
-      "command": "node",
-      "args": ["D:\\FileScopeMCP\\dist\\mcp-server.js","--base-dir={projectRoot}"],
-      "transport": "stdio"
-    }
-  }
-} 

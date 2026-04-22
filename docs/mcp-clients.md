@@ -5,7 +5,7 @@
 Registered automatically by `build.sh`. To re-register without rebuilding:
 
 ```bash
-./install-mcp-claude.sh
+npm run register-mcp
 ```
 
 The server auto-initializes to the current working directory when a Claude Code session starts. Use `set_base_directory` to analyze a different directory:

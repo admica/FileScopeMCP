@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "FileScopeMCP": {
-      "command": "node",
-      "args": ["{FILE_SCOPE_MCP_DIR}/dist/mcp-server.js"]
-    }
-  }
-}
