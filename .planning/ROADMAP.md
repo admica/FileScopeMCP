@@ -85,7 +85,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full phase details.
 
 - [x] **Phase 29: Broker Lifecycle Hardening** - Eliminate crash cleanup gaps and spawn timing races in the broker (completed 2026-04-17)
 - [x] **Phase 30: MCP Spec Compliance** - Migrate tool registration to current SDK API and fix false capability declarations (completed 2026-04-17)
-- [ ] **Phase 31: Test Infrastructure** - Close the protocol-layer test gap with transport, lifecycle, and subsystem tests
+- [x] **Phase 31: Test Infrastructure** - Close the protocol-layer test gap with transport, lifecycle, and subsystem tests (completed 2026-04-18)
 - [ ] **Phase 32: Zero-Config Auto-Registration** - Replace broken install script with `.mcp.json` and CLI-based registration
 
 ## Phase Details
@@ -129,11 +129,11 @@ Plans:
   3. File watcher debounce, ignore patterns, and event dispatch are verified via mocked chokidar — no real filesystem waits in tests
   4. `npm run coverage` produces a V8 coverage report with per-subsystem gap identification
   5. A CI smoke test asserts the first byte emitted by `dist/mcp-server.js` is `{` — stdout pollution is caught at CI time
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 Plans:
-- [ ] 31-01-PLAN.md — Export registerTools, scope V8 coverage config, MCP transport tests for all 13 tools
-- [ ] 31-02-PLAN.md — Broker lifecycle integration tests and stdout pollution smoke test
-- [ ] 31-03-PLAN.md — File watcher unit tests, config loading tests, cascade/change-detector gap audit
+- [x] 31-01-PLAN.md — Export registerTools, scope V8 coverage config, MCP transport tests for all 13 tools
+- [x] 31-02-PLAN.md — Broker lifecycle integration tests and stdout pollution smoke test
+- [x] 31-03-PLAN.md — File watcher unit tests, config loading tests, cascade/change-detector gap audit
 
 ### Phase 32: Zero-Config Auto-Registration
 **Goal**: Cloning the repo and running `npm run build` is sufficient for Claude Code to discover FileScopeMCP with no manual JSON editing
@@ -143,7 +143,12 @@ Plans:
   1. `.mcp.json` committed at project root causes Claude Code to auto-discover the server on clone without any additional setup steps
   2. Running `npm run register-mcp` completes successfully using `claude mcp add` CLI and `claude mcp list` confirms registration — no writes to `~/.claude.json`
   3. Setup documentation reflects the new registration flow and a developer following it from scratch reaches a working installation without manual JSON editing
-**Plans**: TBD
+**Plans:** 2/4 plans executed
+Plans:
+- [x] 32-01-PLAN.md — Commit `.mcp.json` dogfood config at repo root and verify `.gitignore` (ZERO-01)
+- [x] 32-02-PLAN.md — Implement `scripts/register-mcp.mjs` plus `npm run register-mcp` and fail-soft integration test (ZERO-02)
+- [ ] 32-03-PLAN.md — Swap `build.sh` to `npm run register-mcp` and delete five legacy artifacts (ZERO-02)
+- [ ] 32-04-PLAN.md — Rewrite `docs/mcp-clients.md` and update README Quick Start (ZERO-03)
 
 ## Progress
 
@@ -179,5 +184,5 @@ Plans:
 | 28. MCP Polish | v1.4 | 2/2 | Complete | 2026-04-09 |
 | 29. Broker Lifecycle Hardening | v1.5 | 2/2 | Complete    | 2026-04-17 |
 | 30. MCP Spec Compliance | v1.5 | 2/2 | Complete    | 2026-04-17 |
-| 31. Test Infrastructure | v1.5 | 0/3 | Not started | - |
-| 32. Zero-Config Auto-Registration | v1.5 | 0/TBD | Not started | - |
+| 31. Test Infrastructure | v1.5 | 3/3 | Complete    | 2026-04-18 |
+| 32. Zero-Config Auto-Registration | v1.5 | 2/4 | In Progress|  |

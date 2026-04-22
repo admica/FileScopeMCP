@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Production-Grade MCP Intelligence Layer
 status: executing
-stopped_at: Phase 30 context gathered
-last_updated: "2026-04-17T18:20:52.893Z"
-last_activity: 2026-04-17
+stopped_at: Completed 32-01-PLAN.md (.mcp.json dogfood config)
+last_updated: "2026-04-22T02:50:01.000Z"
+last_activity: 2026-04-22
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  completed_phases: 3
+  total_plans: 11
+  completed_plans: 9
+  percent: 82
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-17)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 29 — broker-lifecycle-hardening
+**Current focus:** Phase 32 — zero-config-auto-registration
 
 ## Current Position
 
-Phase: 30
-Plan: Not started
-Status: Executing Phase 29
-Last activity: 2026-04-17
+Phase: 32 (zero-config-auto-registration) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-04-22
 
 Progress: [░░░░░░░░░░] 0% (v1.5: 0/4 phases)
 
@@ -43,6 +43,7 @@ Recent decisions affecting current work:
 - (Phase 29-30 are independent and can proceed in parallel or either order)
 - Phase 31 must wait for both Phase 29 and Phase 30 to complete
 - Phase 32 must wait for Phase 31 (registers the fully hardened binary)
+- [Phase 32-zero-config-auto-registration]: Dogfood .mcp.json uses relative path 'dist/mcp-server.js' with no --base-dir flag (D-01, D-03) — Claude Code runs MCP servers with repo root as CWD, FS auto-initializes to CWD per quick task 260323-kgd
 
 ### Pending Todos
 
@@ -66,5 +67,7 @@ None.
 ## Session Continuity
 
 Last activity: 2026-04-17
-Stopped at: Phase 30 context gathered
-Resume file: .planning/phases/30-mcp-spec-compliance/30-CONTEXT.md
+Stopped at: Completed 32-01-PLAN.md (.mcp.json dogfood config)
+Resume file: None
+
+**Planned Phase:** 32 (Zero-Config Auto-Registration) — 4 plans — 2026-04-21T23:13:11.420Z
