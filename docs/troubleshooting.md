@@ -10,6 +10,7 @@ FileScopeMCP auto-initializes to the current working directory when Claude Code 
 2. If missing, run `npm run register-mcp`
 3. Check `~/.claude.json` — it should have a `FileScopeMCP` entry under `mcpServers`
 4. Restart Claude Code after registration
+5. If working inside the FileScopeMCP repo itself, the committed `.mcp.json` (repo scope) can coexist with the user-scope entry created by `build.sh`. The repo-scope entry uses a relative path (`dist/mcp-server.js`) and only resolves when Claude Code's CWD is the repo root; if the subprocess is spawned elsewhere the server fails silently. Use `claude mcp list` to see what is active, and `claude mcp remove --scope user FileScopeMCP` (or `--scope project`) to disambiguate if both are registered.
 
 ## npm install fails on native modules
 
