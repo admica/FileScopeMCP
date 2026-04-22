@@ -31,6 +31,8 @@ cd FileScopeMCP
 ./build.sh          # installs deps, compiles, registers with Claude Code
 ```
 
+`./build.sh` registers FileScopeMCP globally via `claude mcp add --scope user` (idempotent; re-run with `npm run register-mcp`). If the `claude` CLI is missing, the build still succeeds — see [docs/mcp-clients.md](docs/mcp-clients.md) for manual setup.
+
 That's it. Open a Claude Code session in any project and FileScopeMCP auto-initializes. Try:
 
 ```
