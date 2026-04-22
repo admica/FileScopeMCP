@@ -104,13 +104,16 @@ else
 fi
 
 # Build run.sh for simple setup (Linux and macOS)
+# Use a single heredoc so `$@` is written literally (not expanded at build time)
+# and PROJECT_ROOT / NODE_BIN are properly quoted when the clone path contains spaces.
 print_action "Creating run.sh..."
-echo "#!/bin/bash" > run.sh
-echo "# Adapt this for your needs in WSL/Linux." >> run.sh
-echo "# Format: <node> <mcp-server.js> --base-dir=<your-project>" >> run.sh
-echo -n "$(which node) " >> run.sh
-echo -n ""${PROJECT_ROOT}/dist/mcp-server.js" " >> run.sh
-echo "\"$@\"" >> run.sh
+NODE_BIN="$(command -v node)"
+cat > run.sh <<EOF
+#!/bin/bash
+# Adapt this for your needs in WSL/Linux.
+# Format: <node> <mcp-server.js> --base-dir=<your-project>
+"${NODE_BIN}" "${PROJECT_ROOT}/dist/mcp-server.js" "\$@"
+EOF
 chmod +x run.sh
 
 echo ">> run.sh:"
