@@ -37,11 +37,19 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.git",
   "**/.svn",
   "**/.hg",
-  // Agent / planning tool workspaces (full repo clones — catastrophic duplication)
+  // Agent / planning tool workspaces (full repo clones — catastrophic duplication).
+  // Both the directory itself AND its descendants must be excluded: the glob
+  // engine's `**/X` form only matches the literal directory entry, not files
+  // nested under it, so tools like detect_cycles would otherwise surface
+  // duplicated worktree copies.
   "**/.claude/worktrees",
+  "**/.claude/worktrees/**",
   "**/.planning/workspaces",
+  "**/.planning/workspaces/**",
   "**/.gsd/workspaces",
+  "**/.gsd/workspaces/**",
   "**/.filescope",
+  "**/.filescope/**",
   // Node / JS / TS
   "**/node_modules",
   "**/package-lock.json",

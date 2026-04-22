@@ -13,6 +13,7 @@ import {
   setDependencies,
   getAllFiles,
   getAllLocalImportEdges,
+  purgeRecordsMatching,
 } from './repository.js';
 import type { FileNode, PackageDependency } from '../types.js';
 
@@ -263,5 +264,43 @@ describe('getAllLocalImportEdges', () => {
   it('returns empty array when no local_import edges exist', () => {
     const edges = getAllLocalImportEdges();
     expect(edges).toEqual([]);
+  });
+});
+
+describe('purgeRecordsMatching', () => {
+  it('deletes files whose path satisfies the predicate', () => {
+    upsertFile(makeFile({ path: '/project/src/keep.ts', name: 'keep.ts' }));
+    upsertFile(makeFile({ path: '/project/.claude/worktrees/agent/file.ts', name: 'file.ts' }));
+    upsertFile(makeFile({ path: '/project/.claude/worktrees/agent/other.ts', name: 'other.ts' }));
+
+    const result = purgeRecordsMatching((p) => p.includes('/.claude/worktrees/'));
+
+    expect(result.files).toBe(2);
+    expect(getFile('/project/src/keep.ts')).not.toBeNull();
+    expect(getFile('/project/.claude/worktrees/agent/file.ts')).toBeNull();
+    expect(getFile('/project/.claude/worktrees/agent/other.ts')).toBeNull();
+  });
+
+  it('deletes dependency edges where source or target matches', () => {
+    upsertFile(makeFile({ path: '/project/keep.ts', name: 'keep.ts' }));
+    upsertFile(makeFile({ path: '/project/.claude/worktrees/w1.ts', name: 'w1.ts' }));
+    upsertFile(makeFile({ path: '/project/.claude/worktrees/w2.ts', name: 'w2.ts' }));
+    setDependencies('/project/keep.ts', ['/project/.claude/worktrees/w1.ts'], []);
+    setDependencies('/project/.claude/worktrees/w1.ts', ['/project/.claude/worktrees/w2.ts'], []);
+
+    const result = purgeRecordsMatching((p) => p.includes('/.claude/worktrees/'));
+
+    expect(result.files).toBe(2);
+    expect(result.deps).toBeGreaterThanOrEqual(2);
+    expect(getDependencies('/project/keep.ts')).toHaveLength(0);
+    expect(getDependencies('/project/.claude/worktrees/w1.ts')).toHaveLength(0);
+  });
+
+  it('returns zero counts when no paths match', () => {
+    upsertFile(makeFile({ path: '/project/a.ts', name: 'a.ts' }));
+    const result = purgeRecordsMatching(() => false);
+    expect(result.files).toBe(0);
+    expect(result.deps).toBe(0);
+    expect(getFile('/project/a.ts')).not.toBeNull();
   });
 });

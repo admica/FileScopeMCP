@@ -377,6 +377,41 @@ export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; d
   return { files: fileResult.changes, deps: depResult.changes };
 }
 
+/**
+ * Deletes files and dependency edges whose paths satisfy the provided predicate.
+ * Used to clean up records whose paths now match an exclude pattern (e.g. when
+ * .claude/worktrees/ is added to excludes but the DB still has entries from
+ * earlier scans). Caller supplies the predicate so this module stays independent
+ * of the file-utils glob machinery (avoiding an import cycle).
+ */
+export function purgeRecordsMatching(
+  shouldPurge: (filePath: string) => boolean,
+): { files: number; deps: number } {
+  const sqlite = getSqlite();
+  const allPaths = sqlite.prepare('SELECT path FROM files').all() as Array<{ path: string }>;
+  const toDelete = allPaths.map(r => r.path).filter(shouldPurge);
+
+  if (toDelete.length === 0) return { files: 0, deps: 0 };
+
+  const deleteFileStmt = sqlite.prepare('DELETE FROM files WHERE path = ?');
+  const deleteDepStmt = sqlite.prepare(
+    'DELETE FROM file_dependencies WHERE source_path = ? OR target_path = ?'
+  );
+
+  let files = 0;
+  let deps = 0;
+  const tx = sqlite.transaction((paths: string[]) => {
+    for (const p of paths) {
+      deps += deleteDepStmt.run(p, p).changes;
+      files += deleteFileStmt.run(p).changes;
+    }
+  });
+  tx(toDelete);
+
+  markCommunitiesDirty();
+  return { files, deps };
+}
+
 // ─── Exports snapshot ─────────────────────────────────────────────────────────
 
 /**

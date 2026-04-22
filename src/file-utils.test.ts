@@ -948,3 +948,37 @@ describe('Two-pass pipeline integration', () => {
     expect(result.packageDependencies.length).toBe(0);
   });
 });
+
+describe('isExcluded — agent worktree descendants', () => {
+  it('matches files nested under .claude/worktrees/ via **/.claude/worktrees/** pattern', () => {
+    setProjectRoot('/tmp/fake-project');
+    setConfig({
+      baseDirectory: '/tmp/fake-project',
+      excludePatterns: ['**/.claude/worktrees', '**/.claude/worktrees/**'],
+      version: '1.0.0',
+    });
+
+    const baseDir = '/tmp/fake-project';
+    // The directory itself
+    expect(isExcluded('/tmp/fake-project/.claude/worktrees', baseDir, true)).toBe(true);
+    // Descendants at several depths
+    expect(isExcluded('/tmp/fake-project/.claude/worktrees/agent-abc', baseDir, true)).toBe(true);
+    expect(isExcluded('/tmp/fake-project/.claude/worktrees/agent-abc/src/config-utils.ts', baseDir, false)).toBe(true);
+    expect(isExcluded('/tmp/fake-project/.claude/worktrees/agent-abc/src/nested/file.ts', baseDir, false)).toBe(true);
+    // A sibling path is not excluded
+    expect(isExcluded('/tmp/fake-project/src/config-utils.ts', baseDir, false)).toBe(false);
+  });
+
+  it('matches .filescope descendants via **/.filescope/** pattern', () => {
+    setProjectRoot('/tmp/fake-project2');
+    setConfig({
+      baseDirectory: '/tmp/fake-project2',
+      excludePatterns: ['**/.filescope', '**/.filescope/**'],
+      version: '1.0.0',
+    });
+
+    const baseDir = '/tmp/fake-project2';
+    expect(isExcluded('/tmp/fake-project2/.filescope/data.db', baseDir, false)).toBe(true);
+    expect(isExcluded('/tmp/fake-project2/.filescope/nested/thing.json', baseDir, false)).toBe(true);
+  });
+});

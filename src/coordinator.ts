@@ -8,7 +8,7 @@ import {
   FileWatchingConfig,
   PackageDependency
 } from './types.js';
-import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, getAllFileNodes } from './file-utils.js';
+import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, getAllFileNodes, isExcluded } from './file-utils.js';
 import { canonicalizePath } from './storage-utils.js';
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, FILESCOPE_DIR } from './config-utils.js';
@@ -16,7 +16,7 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, purgeRecordsOutsideRoot } from './db/repository.js';
+import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
 import { extractEdges } from './language-config.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
@@ -254,6 +254,14 @@ export class ServerCoordinator {
     const purged = purgeRecordsOutsideRoot(projectRoot);
     if (purged.files > 0 || purged.deps > 0) {
       log(`Purged ${purged.files} stale file records and ${purged.deps} stale dependency edges outside ${projectRoot}`);
+    }
+
+    // Purge records that now match the current exclude patterns. Handles the case
+    // where paths (e.g. .claude/worktrees/) were indexed before being excluded, so
+    // detect_cycles and related tools don't report false positives on stale data.
+    const excluded = purgeRecordsMatching((p) => isExcluded(p, projectRoot, false));
+    if (excluded.files > 0 || excluded.deps > 0) {
+      log(`Purged ${excluded.files} file records and ${excluded.deps} dependency edges matching current exclude patterns`);
     }
 
     // Run JSON-to-SQLite migration if needed — receives the already-open DB handle
