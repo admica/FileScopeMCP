@@ -97,7 +97,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full phase details.
 **Milestone Goal:** Elevate FileScopeMCP from file-granular to symbol-granular for three daily-use LLM queries — kill grep for symbol navigation, expose import-names on dependent edges, add "changed since" re-orientation.
 
 - [x] **Phase 33: Symbol Extraction Foundation** — Emit top-level symbols (name, kind, line range, export flag) and imported-name metadata during the existing TS/JS AST walk; add `symbols` schema, repository functions, migration-time bulk extraction, and `npm run inspect-symbols` CLI (completed 2026-04-23)
-- [ ] **Phase 34: Symbol-Aware MCP Surface** — New `find_symbol(name, kind?, exportedOnly=true)` tool and enriched `get_file_summary` response (`exports[]` + `dependents[]` upgraded with `importedNames[]` and `importLines[]`)
+- [x] **Phase 34: Symbol-Aware MCP Surface** — New `find_symbol(name, kind?, exportedOnly=true)` tool and enriched `get_file_summary` response (`exports[]` + `dependents[]` upgraded with `importedNames[]` and `importLines[]`) (completed 2026-04-23)
 - [ ] **Phase 35: Changed-Since Tool + Watcher Integration** — New `list_changed_since(since)` tool (timestamp and git-SHA modes, no deletion tracking) and FileWatcher re-extracts symbols on change via the existing single-pass AST walk
 
 ## Phase Details
@@ -128,9 +128,9 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full phase details.
   5. `get_file_summary.dependents[]` upgrades from `string[]` to `[{path, importedNames: string[], importLines: number[]}]` — existing consumers see additive fields only
   6. Non-TS/JS files return `exports: []` and `dependents[].importedNames: []` without error
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 - [x] 34-01-PLAN.md — Repository helpers: findSymbols (GLOB prefix match + dual count/slice) and getDependentsWithImports (aggregate imported_names JSON + import_line per source)
-- [ ] 34-02-PLAN.md — MCP surface: register find_symbol tool + enrich get_file_summary with exports[] and rich dependents[]; new unit + contract tests
+- [x] 34-02-PLAN.md — MCP surface: register find_symbol tool + enrich get_file_summary with exports[] and rich dependents[]; new unit + contract tests
 
 ### Phase 35: Changed-Since Tool + Watcher Integration
 **Goal**: Agents re-orient after multi-edit runs with one MCP call; watcher re-extracts symbols on file change via the existing single-pass AST walk, keeping `symbols` as fresh as `file_dependencies`.
@@ -182,5 +182,5 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full phase details.
 | 31. Test Infrastructure | v1.5 | 3/3 | Complete | 2026-04-18 |
 | 32. Zero-Config Auto-Registration | v1.5 | 4/4 | Complete | 2026-04-22 |
 | 33. Symbol Extraction Foundation | v1.6 | 5/1 | Complete    | 2026-04-23 |
-| 34. Symbol-Aware MCP Surface | v1.6 | 1/2 | In Progress|  |
+| 34. Symbol-Aware MCP Surface | v1.6 | 2/2 | Complete   | 2026-04-23 |
 | 35. Changed-Since Tool + Watcher Integration | v1.6 | 0/? | Not started | - |

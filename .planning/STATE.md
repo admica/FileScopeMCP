@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Symbol-Level Intelligence
-status: executing
-stopped_at: Completed 34-01-PLAN.md
-last_updated: "2026-04-23T22:21:34.050Z"
+status: verifying
+stopped_at: Completed 34-02-PLAN.md
+last_updated: "2026-04-23T22:36:18.872Z"
 last_activity: 2026-04-23
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 6
-  percent: 86
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 
 Phase: 34 (Symbol-Aware MCP Surface) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-23
 
 Progress: [░░░░░░░░░░] 0% (v1.6: 0/3 phases)
@@ -49,6 +49,9 @@ v1.6-specific decisions from scope audit (2026-04-23):
 - [Phase 34]: Inlined getDependentsWithImports return type — single call site, no new DependentWithImports interface in symbol-types.ts
 - [Phase 34]: Used direct INSERT helper insertDepRow() in tests rather than extending setEdges() — needed fine-grained control over NULL imported_names and package_import rows
 - [Phase 34]: Established GLOB+bracket-escape as the case-sensitive prefix-match pattern (new to codebase, no PRAGMA needed)
+- [Phase 34]: Extended tests/unit/tool-outputs.test.ts as the contract test home (R-3: tests/contract/ does not exist); avoided a single-file directory
+- [Phase 34]: Inlined find_symbol clamp + projection in the handler (5 lines) rather than extracting normalizeFindSymbolArgs()
+- [Phase 34]: find_symbol description authored as string[].join(' ') literal so the length probe can regex-extract without JS eval
 
 ### Pending Todos
 
@@ -71,7 +74,7 @@ None yet — milestone just started.
 ## Session Continuity
 
 Last activity: 2026-04-23
-Stopped at: Completed 34-01-PLAN.md
+Stopped at: Completed 34-02-PLAN.md
 Resume file: None
 
 **Planned Phase:** 34 (Symbol-Aware MCP Surface) — 2 plans — 2026-04-23T22:10:51.641Z

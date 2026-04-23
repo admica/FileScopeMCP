@@ -31,13 +31,13 @@
 - [x] **FIND-02**: Case-sensitive match with exact and prefix modes (exact by default; prefix via trailing `*`)
 - [x] **FIND-03**: `exportedOnly` defaults to `true` — private helpers excluded unless explicitly requested
 - [x] **FIND-04**: Returns standardized envelope `{items, total, truncated?: true}`; no-match returns `{items: [], total: 0}` (not an error)
-- [ ] **FIND-05**: Error codes: `NOT_INITIALIZED` only; all other outcomes are valid empty results
+- [x] **FIND-05**: Error codes: `NOT_INITIALIZED` only; all other outcomes are valid empty results
 
 ### get_file_summary Enrichment
 
-- [ ] **SUM-01**: `get_file_summary` response gains `exports: [{name, kind, startLine, endLine}]` field listing only exported symbols from the file
+- [x] **SUM-01**: `get_file_summary` response gains `exports: [{name, kind, startLine, endLine}]` field listing only exported symbols from the file
 - [x] **SUM-02**: `dependents[]` entries upgrade from `string[]` to `[{path, importedNames: string[], importLines: number[]}]`
-- [ ] **SUM-03**: Changes are additive — no existing fields removed or renamed; existing MCP clients see `dependents` coerced to the richer shape
+- [x] **SUM-03**: Changes are additive — no existing fields removed or renamed; existing MCP clients see `dependents` coerced to the richer shape
 - [x] **SUM-04**: When a file has no extracted symbols (e.g., non-TS/JS or unparsed), `exports` is `[]` and `dependents[].importedNames` is `[]`
 
 ### list_changed_since Tool
