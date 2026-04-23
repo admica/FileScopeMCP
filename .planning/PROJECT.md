@@ -8,9 +8,20 @@ A fully autonomous file intelligence system that watches project directories and
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
+## Current Milestone: v1.5 Production-Grade MCP Intelligence Layer
+
+**Goal:** Make FileScopeMCP bulletproof and zero-config for LLM agents — comprehensive testing, MCP spec compliance, and hardened lifecycle management.
+
+**Target features:**
+- Comprehensive automated test coverage across all subsystems (parsers, dep graph, AST diff, broker, MCP transport, cascade, watcher, config)
+- Full official MCP spec compliance (audit tool schemas, add missing capabilities)
+- Zero-config agent integration (eliminate manual JSON editing, auto-registration, crash recovery)
+- Broker lifecycle hardening (PID cleanup, socket management, graceful shutdown, concurrent instance safety)
+- Agent-ready polish (error messages, timeouts, edge case handling)
+
 ## Current State
 
-Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 phases total).
+Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 phases total). Phase 30 complete — MCP spec compliance (migrated 13 tools to registerTool() with ToolAnnotations, structured error responses, removed deprecated APIs).
 
 **Architecture:**
 - MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface
@@ -103,7 +114,11 @@ Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 
 
 <!-- Current scope. Building toward these. -->
 
-None — planning next milestone.
+- [ ] Comprehensive automated test coverage across all subsystems
+- [ ] Full official MCP spec compliance
+- [ ] One-command agent registration (same-host) — scope refactored in Phase 32 (2026-04-21) from "zero-config" after audit: end users still run `git clone` + `./build.sh`; cross-host cases documented as manual
+- [ ] Broker lifecycle hardening
+- [ ] Agent-ready polish (error messages, timeouts, edge cases)
 
 ### Out of Scope
 
@@ -125,6 +140,7 @@ None — planning next milestone.
 - Cross-file call resolution — requires type registry, HIGH complexity
 - Graph diff between scans — no clear use case
 - Real-time community updates — Louvain is batch-only; dirty-flag cache is correct pattern
+- One-script LLM backend setup — llama.cpp across platforms (Windows host, remote LAN, etc.) is inherently complex; zero-config goal applies to MCP/broker lifecycle only
 
 ## Context
 
@@ -190,4 +206,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-09 after v1.4 Deep Graph Intelligence milestone complete*
+*Last updated: 2026-04-17 after v1.5 Production-Grade MCP Intelligence Layer milestone started*
