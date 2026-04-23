@@ -147,22 +147,30 @@ export function upsertFile(node: FileNode): void {
 }
 
 /**
- * Deletes a file by path. Also removes all dependency rows where this file
- * is source or target (cascade cleanup).
+ * Deletes a file by path. Atomically removes:
+ *   - all file_dependencies rows where this file is source or target,
+ *   - all symbols rows for this path (Phase 35 WTC-02 cascade),
+ *   - the files row itself.
+ * All three DELETEs run in a single better-sqlite3 transaction so a crash
+ * leaves the DB in a consistent state (prior to Phase 35 these deletes
+ * ran non-atomically — see Phase 35 RESEARCH Conflict 1).
  */
 export function deleteFile(filePath: string): void {
+  const sqlite = getSqlite();
   const db = getDb();
-  // Clean up dependencies referencing this file
-  db.delete(file_dependencies)
-    .where(
-      or(
-        eq(file_dependencies.source_path, filePath),
-        eq(file_dependencies.target_path, filePath)
+  const tx = sqlite.transaction(() => {
+    db.delete(file_dependencies)
+      .where(
+        or(
+          eq(file_dependencies.source_path, filePath),
+          eq(file_dependencies.target_path, filePath)
+        )
       )
-    )
-    .run();
-  // Delete the file row
-  db.delete(files).where(eq(files.path, filePath)).run();
+      .run();
+    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+    db.delete(files).where(eq(files.path, filePath)).run();
+  });
+  tx();
 }
 
 /**
@@ -1154,4 +1162,43 @@ export function setEdgesAndSymbols(
   });
   tx();
   markCommunitiesDirty();
+}
+
+// ─── Phase 35 read helpers (CHG-02, CHG-03) ────────────────────────────────
+
+/**
+ * Phase 35 (CHG-02): Returns non-directory files whose mtime is strictly
+ * greater than `mtimeMs`, sorted most-recent first. Rows with NULL mtime
+ * are excluded (cannot compare). Raw sqlite read — no Drizzle.
+ */
+export function getFilesChangedSince(mtimeMs: number): Array<{ path: string; mtime: number }> {
+  const sqlite = getSqlite();
+  return sqlite
+    .prepare(
+      'SELECT path, mtime FROM files WHERE is_directory = 0 AND mtime IS NOT NULL AND mtime > ? ORDER BY mtime DESC'
+    )
+    .all(mtimeMs) as Array<{ path: string; mtime: number }>;
+}
+
+/**
+ * Phase 35 (CHG-03): Returns rows from the `files` table whose path matches
+ * one of the given paths. Empty input returns [] without querying. Paths
+ * are processed in batches of 500 to stay well below SQLite's default
+ * variable limit (32,766 in better-sqlite3 v12.6.2; 500 is safe under any
+ * historical limit). Order of returned rows is DB-native — caller sorts.
+ */
+export function getFilesByPaths(paths: string[]): Array<{ path: string; mtime: number | null }> {
+  if (paths.length === 0) return [];
+  const sqlite = getSqlite();
+  const results: Array<{ path: string; mtime: number | null }> = [];
+  const CHUNK = 500;
+  for (let i = 0; i < paths.length; i += CHUNK) {
+    const chunk = paths.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = sqlite
+      .prepare(`SELECT path, mtime FROM files WHERE path IN (${placeholders})`)
+      .all(...chunk) as Array<{ path: string; mtime: number | null }>;
+    results.push(...rows);
+  }
+  return results;
 }
