@@ -9,6 +9,8 @@ import type { FileNode, PackageDependency } from '../types.js';
 import type { ExportSnapshot } from '../change-detector/types.js';
 import type { EdgeResult } from '../language-config.js';
 import type { CommunityResult } from '../community-detection.js';
+import type { Symbol as SymbolRow, SymbolKind } from './symbol-types.js';
+import type { ImportMeta } from '../change-detector/ast-parser.js';
 
 // ─── Community dirty flag ──────────────────────────────────────────────────────
 // Module-level mutable flag: true = community cache is stale, Louvain must rerun.
@@ -317,8 +319,20 @@ export function setDependencies(
  * Replaces all dependency rows for the given source file with enriched edge data.
  * Like setDependencies() but writes edge_type, confidence, confidence_source, and weight.
  * Callers migrated to extractEdges() should use this instead of setDependencies().
+ *
+ * Phase 33 IMP-03 extension: when `importMeta` is provided, each edge's
+ * `imported_names` (JSON string array) and `import_line` (INTEGER) columns are
+ * populated by matching `edge.originalSpecifier` to `meta.specifier`. When
+ * multiple metas share the same specifier (D-08 — two imports to the same
+ * target), they are CONSUMED in order so each edge row keeps a distinct line.
+ * Package edges carrying a matching specifier also get metadata; edges with no
+ * matching meta get NULL values (preserves non-TS/JS NULL per D-10).
  */
-export function setEdges(sourcePath: string, edges: EdgeResult[]): void {
+export function setEdges(
+  sourcePath: string,
+  edges: EdgeResult[],
+  importMeta?: ImportMeta[]
+): void {
   const db = getDb();
 
   // Delete all existing dependency rows for this source
@@ -326,8 +340,30 @@ export function setEdges(sourcePath: string, edges: EdgeResult[]): void {
     .where(eq(file_dependencies.source_path, sourcePath))
     .run();
 
-  // Insert enriched edge rows
+  // Group metas by specifier — when two imports share the same specifier (D-08),
+  // CONSUME them in order so each edge row gets its own import_line.
+  const metaBySpec = new Map<string, ImportMeta[]>();
+  if (importMeta) {
+    for (const m of importMeta) {
+      const list = metaBySpec.get(m.specifier) ?? [];
+      list.push(m);
+      metaBySpec.set(m.specifier, list);
+    }
+  }
+
   for (const edge of edges) {
+    let importedNamesJson: string | null = null;
+    let importLineVal:    number | null = null;
+    const spec = edge.originalSpecifier;
+    if (spec) {
+      const list = metaBySpec.get(spec);
+      if (list && list.length > 0) {
+        const meta = list.shift()!;   // consume in arrival order
+        importedNamesJson = JSON.stringify(meta.importedNames);
+        importLineVal     = meta.line;
+      }
+    }
+
     db.insert(file_dependencies).values({
       source_path:       sourcePath,
       target_path:       edge.target,
@@ -339,6 +375,8 @@ export function setEdges(sourcePath: string, edges: EdgeResult[]): void {
       confidence:        edge.confidence,
       confidence_source: edge.confidenceSource,
       weight:            edge.weight,
+      imported_names:    importedNamesJson,
+      import_line:       importLineVal,
     }).run();
   }
   markCommunitiesDirty();
@@ -815,3 +853,172 @@ export function getCommunityForFile(filePath: string): CommunityResult | null {
   };
 }
 
+// ─── Symbol persistence (Phase 33 SYM-04) ───────────────────────────────
+
+/**
+ * Replace all symbol rows for the given path in a single transaction.
+ * Matches setCommunities pattern: raw better-sqlite3 prepared statements.
+ * Empty `syms` array is valid — it clears all symbols for that path.
+ */
+export function upsertSymbols(filePath: string, syms: SymbolRow[]): void {
+  const sqlite = getSqlite();
+  const tx = sqlite.transaction(() => {
+    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+    if (syms.length === 0) return;
+    const stmt = sqlite.prepare(
+      'INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    for (const s of syms) {
+      stmt.run(filePath, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
+    }
+  });
+  tx();
+}
+
+interface SymbolDbRow {
+  path: string;
+  name: string;
+  kind: string;
+  start_line: number;
+  end_line: number;
+  is_export: number;
+}
+
+function rowToSymbol(r: SymbolDbRow): SymbolRow & { path: string } {
+  return {
+    path:      r.path,
+    name:      r.name,
+    kind:      r.kind as SymbolKind,
+    startLine: r.start_line,
+    endLine:   r.end_line,
+    isExport:  r.is_export === 1,
+  };
+}
+
+/**
+ * Return all symbols matching `name`, optionally filtered by `kind`.
+ * Case-sensitive exact match (prefix/wildcards are Phase 34's concern).
+ */
+export function getSymbolsByName(name: string, kind?: SymbolKind): Array<SymbolRow & { path: string }> {
+  const sqlite = getSqlite();
+  const rows = kind
+    ? sqlite.prepare('SELECT path, name, kind, start_line, end_line, is_export FROM symbols WHERE name = ? AND kind = ?').all(name, kind) as SymbolDbRow[]
+    : sqlite.prepare('SELECT path, name, kind, start_line, end_line, is_export FROM symbols WHERE name = ?').all(name) as SymbolDbRow[];
+  return rows.map(rowToSymbol);
+}
+
+/**
+ * Return all symbols for the given file path.
+ */
+export function getSymbolsForFile(filePath: string): Array<SymbolRow & { path: string }> {
+  const sqlite = getSqlite();
+  const rows = sqlite
+    .prepare('SELECT path, name, kind, start_line, end_line, is_export FROM symbols WHERE path = ? ORDER BY start_line')
+    .all(filePath) as SymbolDbRow[];
+  return rows.map(rowToSymbol);
+}
+
+/**
+ * Delete all symbol rows for a given file path.
+ * Called on file unlink (Phase 35 WTC-02) and by upsertSymbols implicitly.
+ */
+export function deleteSymbolsForFile(filePath: string): void {
+  const sqlite = getSqlite();
+  sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+}
+
+// ─── kv_state generic key/value (Phase 33 D-11) ────────────────────────
+
+/**
+ * Returns the value for `key`, or null if not set.
+ */
+export function getKvState(key: string): string | null {
+  const sqlite = getSqlite();
+  const row = sqlite.prepare('SELECT value FROM kv_state WHERE key = ?')
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/**
+ * Upsert a key/value pair.
+ */
+export function setKvState(key: string, value: string): void {
+  const sqlite = getSqlite();
+  sqlite.prepare(
+    'INSERT INTO kv_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).run(key, value);
+}
+
+// ─── Atomic per-file edge + symbol write (Phase 33 D-15) ───────────────
+
+/**
+ * Writes edges, imported-name metadata, AND symbols for a single file in one transaction.
+ * Used by the coordinator's per-file scan loop and by the FileWatcher update path.
+ * If any INSERT throws, the whole transaction rolls back — the file is left in its prior state.
+ */
+export function setEdgesAndSymbols(
+  sourcePath: string,
+  edges: EdgeResult[],
+  syms: SymbolRow[],
+  importMeta?: ImportMeta[]
+): void {
+  const sqlite = getSqlite();
+  const tx = sqlite.transaction(() => {
+    // Inline the setEdges body so the whole write participates in the same transaction.
+    // (Calling setEdges() from here would still work because better-sqlite3 nests transactions,
+    // but inlining keeps the single-transaction guarantee explicit.)
+    const db = getDb();
+    db.delete(file_dependencies)
+      .where(eq(file_dependencies.source_path, sourcePath))
+      .run();
+
+    const metaBySpec = new Map<string, ImportMeta[]>();
+    if (importMeta) {
+      for (const m of importMeta) {
+        const list = metaBySpec.get(m.specifier) ?? [];
+        list.push(m);
+        metaBySpec.set(m.specifier, list);
+      }
+    }
+    for (const edge of edges) {
+      let importedNamesJson: string | null = null;
+      let importLineVal:    number | null = null;
+      const spec = edge.originalSpecifier;
+      if (spec) {
+        const list = metaBySpec.get(spec);
+        if (list && list.length > 0) {
+          const meta = list.shift()!;
+          importedNamesJson = JSON.stringify(meta.importedNames);
+          importLineVal     = meta.line;
+        }
+      }
+      db.insert(file_dependencies).values({
+        source_path:       sourcePath,
+        target_path:       edge.target,
+        dependency_type:   edge.isPackage ? 'package_import' : 'local_import',
+        package_name:      edge.packageName ?? null,
+        package_version:   edge.packageVersion ?? null,
+        is_dev_dependency: null,
+        edge_type:         edge.edgeType,
+        confidence:        edge.confidence,
+        confidence_source: edge.confidenceSource,
+        weight:            edge.weight,
+        imported_names:    importedNamesJson,
+        import_line:       importLineVal,
+      }).run();
+    }
+
+    // Symbols
+    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(sourcePath);
+    if (syms.length > 0) {
+      const stmt = sqlite.prepare(
+        'INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      for (const s of syms) {
+        stmt.run(sourcePath, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
+      }
+    }
+  });
+  tx();
+  markCommunitiesDirty();
+}

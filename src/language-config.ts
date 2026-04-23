@@ -93,6 +93,8 @@ export interface EdgeResult {
   packageName?: string;
   /** Package version string — only present if resolved from package.json. */
   packageVersion?: string;
+  /** Raw import specifier string (e.g. './utils.js', 'react'). Phase 33 IMP-03. */
+  originalSpecifier?: string;
 }
 
 // ─── Internal registry type ────────────────────────────────────────────────────

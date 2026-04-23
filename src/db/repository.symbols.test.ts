@@ -233,9 +233,9 @@ describe('setEdgesAndSymbols — atomic per-file write (D-15)', () => {
       [makeSymbol({ name: 'newSym' })],
       [{ specifier: './new.js', importedNames: ['n'], line: 1 }],
     );
-    const depTargets = getSqlite()
+    const depTargets = (getSqlite()
       .prepare('SELECT target_path FROM file_dependencies WHERE source_path = ?')
-      .all('/project/a.ts').map((r: { target_path: string }) => r.target_path);
+      .all('/project/a.ts') as Array<{ target_path: string }>).map(r => r.target_path);
     expect(depTargets).toEqual(['/project/new.ts']);
     expect(getSymbolsForFile('/project/a.ts').map(s => s.name)).toEqual(['newSym']);
   });
