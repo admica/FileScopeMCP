@@ -45,6 +45,22 @@ enableDaemonFileLogging(path.join(
   'mcp-server.log',
 ));
 
+// Crash handlers. Any stray error or unhandled rejection from the broker
+// client, file watcher, or coordinator would otherwise propagate up and kill
+// the stdio MCP session mid-response with no log trail. Route them to the
+// file-only logger and exit 1 so the parent (Claude Code) can restart.
+process.on('uncaughtException', (err: Error) => {
+  log(`MCP server crash (uncaughtException): ${err.message}\n${err.stack ?? ''}`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason: unknown) => {
+  const msg = reason instanceof Error
+    ? `${reason.message}\n${reason.stack ?? ''}`
+    : String(reason);
+  log(`MCP server crash (unhandledRejection): ${msg}`);
+  process.exit(1);
+});
+
 /**
  * A simple implementation of the Transport interface for stdio
  */
