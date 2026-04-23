@@ -907,6 +907,80 @@ export function getSymbolsByName(name: string, kind?: SymbolKind): Array<SymbolR
   return rows.map(rowToSymbol);
 }
 
+// ─── Phase 34 find_symbol support (FIND-01..04, D-17) ──────────────────
+
+/**
+ * Escape GLOB metacharacters (`*`, `?`, `[`) in a user-supplied string by wrapping
+ * each in a bracket class. `]` alone doesn't need escaping outside a bracket class.
+ * Used by buildNamePredicate to safeguard literal metachars inside a user search term.
+ */
+function escapeGlobMeta(s: string): string {
+  return s.replace(/([*?\[])/g, '[$1]');
+}
+
+/**
+ * Build the WHERE name predicate for findSymbols per D-01:
+ *   - trailing `*` → prefix mode (GLOB, escape other metachars in the prefix body)
+ *   - no trailing `*` → exact match (=, any interior `*` treated as literal)
+ * Case-sensitivity comes from SQLite's GLOB (always case-sensitive per SQLite docs)
+ * and from `=` (always exact). No PRAGMA needed.
+ */
+function buildNamePredicate(name: string): { namePredicate: string; nameParam: string } {
+  if (name.endsWith('*')) {
+    const prefix = escapeGlobMeta(name.slice(0, -1));
+    return { namePredicate: 'name GLOB ?', nameParam: prefix + '*' };
+  }
+  return { namePredicate: 'name = ?', nameParam: name };
+}
+
+/**
+ * Phase 34 FIND-01..04 + D-17. Returns matching symbols + pre-truncation count.
+ * Two prepared statements against the same connection (COUNT + slice).
+ *
+ * Matching (D-01/D-03): trailing `*` triggers GLOB prefix match, otherwise `=` exact match.
+ * Case-sensitive natively (SQLite GLOB is always case-sensitive; no PRAGMA session toggle).
+ * Kind filter (D-06): if provided but unrecognized, SQL returns 0 rows — caller never errors.
+ * exportedOnly (FIND-03): when true, WHERE adds `is_export = 1`; when false, omitted.
+ * Ordering (D-05): is_export DESC, path ASC, start_line ASC.
+ * Limit (D-04): applied in SQL; total is pre-LIMIT.
+ */
+export function findSymbols(opts: {
+  name: string;
+  kind?: SymbolKind;
+  exportedOnly: boolean;
+  limit: number;
+}): { items: Array<SymbolRow & { path: string }>; total: number } {
+  const sqlite = getSqlite();
+  const { namePredicate, nameParam } = buildNamePredicate(opts.name);
+
+  const whereParts: string[] = [namePredicate];
+  const params: unknown[] = [nameParam];
+  if (opts.kind) {
+    whereParts.push('kind = ?');
+    params.push(opts.kind);
+  }
+  if (opts.exportedOnly) {
+    whereParts.push('is_export = 1');
+  }
+  const whereSQL = whereParts.join(' AND ');
+
+  const total = (sqlite
+    .prepare(`SELECT COUNT(*) AS n FROM symbols WHERE ${whereSQL}`)
+    .get(...params) as { n: number }).n;
+
+  const rows = sqlite
+    .prepare(
+      `SELECT path, name, kind, start_line, end_line, is_export
+       FROM symbols
+       WHERE ${whereSQL}
+       ORDER BY is_export DESC, path ASC, start_line ASC
+       LIMIT ?`
+    )
+    .all(...params, opts.limit) as SymbolDbRow[];
+
+  return { items: rows.map(rowToSymbol), total };
+}
+
 /**
  * Return all symbols for the given file path.
  */
