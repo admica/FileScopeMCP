@@ -62,6 +62,18 @@ describe('MCP schema numeric coercion', () => {
     expect(match![1]).toMatch(/maxItems:\s*z\.coerce\.number\(\)/);
   });
 
+  it('find_symbol uses z.coerce.boolean().default(true) for exportedOnly and z.coerce.number().int() for maxItems', async () => {
+    const src = await fs.readFile(
+      path.resolve(process.cwd(), 'src/mcp-server.ts'),
+      'utf-8'
+    );
+    const match = src.match(/registerTool\("find_symbol"[\s\S]*?inputSchema:\s*\{([\s\S]*?)\}/);
+    expect(match, 'find_symbol registerTool block not found').toBeTruthy();
+    const block = match![1];
+    expect(block, 'exportedOnly should use z.coerce.boolean().default(true)').toMatch(/exportedOnly:\s*z\.coerce\.boolean\(\)\.default\(true\)/);
+    expect(block, 'maxItems should use z.coerce.number().int()').toMatch(/maxItems:\s*z\.coerce\.number\(\)\.int\(\)/);
+  });
+
   it('coerce schema parses string numeric args', async () => {
     const { z } = await import('zod');
     const schema = z.object({
