@@ -87,12 +87,16 @@ describe('TypeScript parser', () => {
     }
   });
 
-  it('aggregates duplicate imports with weight > 1', async () => {
+  it('keeps duplicate imports as separate rows per statement (Phase 33 D-08)', async () => {
+    // Phase 33 D-08: separate rows per import_statement preserve each row's
+    // imported_names/import_line. Weight aggregation is bypassed for TS/JS
+    // edges carrying originalSpecifier.
     const fixture = `import { A } from 'pkg';\nimport { B } from 'pkg';`;
     const edges = await extractEdges(path.join(tempDir, 'test.ts'), fixture, tempDir);
     const pkgEdges = edges.filter(e => e.edgeType === 'imports' && e.target.includes('pkg'));
-    expect(pkgEdges.length).toBe(1);
-    expect(pkgEdges[0].weight).toBeGreaterThanOrEqual(2);
+    expect(pkgEdges.length).toBe(2);
+    expect(pkgEdges.every(e => e.weight === 1)).toBe(true);
+    expect(pkgEdges.every(e => e.originalSpecifier === 'pkg')).toBe(true);
   });
 
   it('handles .tsx files with JSX', async () => {
