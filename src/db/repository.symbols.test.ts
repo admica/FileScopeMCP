@@ -14,6 +14,8 @@ import {
   setKvState,
   setEdges,
   setEdgesAndSymbols,
+  findSymbols,
+  getDependentsWithImports,
 } from './repository.js';
 import type { Symbol as SymbolRow } from './symbol-types.js';
 import type { ImportMeta } from '../change-detector/ast-parser.js';
@@ -238,5 +240,199 @@ describe('setEdgesAndSymbols — atomic per-file write (D-15)', () => {
       .all('/project/a.ts') as Array<{ target_path: string }>).map(r => r.target_path);
     expect(depTargets).toEqual(['/project/new.ts']);
     expect(getSymbolsForFile('/project/a.ts').map(s => s.name)).toEqual(['newSym']);
+  });
+});
+
+// ─── Helpers for Phase 34 describes below ───────────────────────────────
+// Direct INSERT into file_dependencies with per-row imported_names/import_line control.
+// Used by getDependentsWithImports tests where we need fine-grained row shape
+// (NULL imported_names, namespace imports, package_import rows, etc.).
+function insertDepRow(opts: {
+  source: string;
+  target: string;
+  type?: 'local_import' | 'package_import';
+  importedNames?: string[] | null;  // null → NULL column, array → JSON.stringify
+  importLine?: number | null;
+}): void {
+  const dependency_type = opts.type ?? 'local_import';
+  const imported_names = opts.importedNames === null || opts.importedNames === undefined
+    ? null
+    : JSON.stringify(opts.importedNames);
+  const import_line = opts.importLine === undefined ? null : opts.importLine;
+  getSqlite()
+    .prepare(
+      `INSERT INTO file_dependencies
+         (source_path, target_path, dependency_type, edge_type, confidence,
+          confidence_source, weight, imported_names, import_line)
+       VALUES (?, ?, ?, 'imports', 1.0, 'extracted', 1, ?, ?)`
+    )
+    .run(opts.source, opts.target, dependency_type, imported_names, import_line);
+}
+
+describe('findSymbols (Phase 34 FIND-01..04)', () => {
+  it('exact match returns the single exact-name row', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'React', kind: 'const' })]);
+    upsertSymbols('/project/b.ts', [makeSymbol({ name: 'Other', kind: 'const' })]);
+    const res = findSymbols({ name: 'React', exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(1);
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0].name).toBe('React');
+    expect(res.items[0].path).toBe('/project/a.ts');
+  });
+
+  it('exact match is case-sensitive', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'React', kind: 'const' })]);
+    const res = findSymbols({ name: 'react', exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(0);
+    expect(res.items).toEqual([]);
+  });
+
+  it('prefix match (trailing *) returns all names with the prefix', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'React',    kind: 'const' })]);
+    upsertSymbols('/project/b.ts', [makeSymbol({ name: 'ReactDOM', kind: 'const' })]);
+    upsertSymbols('/project/c.ts', [makeSymbol({ name: 'Reactive', kind: 'const' })]);
+    upsertSymbols('/project/d.ts', [makeSymbol({ name: 'Red',      kind: 'const' })]);
+    const res = findSymbols({ name: 'React*', exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(3);
+    expect(res.items).toHaveLength(3);
+    // is_export DESC, path ASC, start_line ASC — all three have isExport=true (makeSymbol default)
+    // so path ASC gives /project/a.ts, /project/b.ts, /project/c.ts
+    expect(res.items.map(i => i.path)).toEqual(['/project/a.ts', '/project/b.ts', '/project/c.ts']);
+    expect(res.items.map(i => i.name).sort()).toEqual(['React', 'ReactDOM', 'Reactive']);
+  });
+
+  it('prefix match is case-sensitive (GLOB)', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'React',    kind: 'const' })]);
+    upsertSymbols('/project/b.ts', [makeSymbol({ name: 'react',    kind: 'const' })]);
+    upsertSymbols('/project/c.ts', [makeSymbol({ name: 'ReactDOM', kind: 'const' })]);
+    const res = findSymbols({ name: 'React*', exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(2);
+    expect(res.items.map(i => i.name).sort()).toEqual(['React', 'ReactDOM']);
+  });
+
+  it('exportedOnly=true excludes non-exported symbols', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'foo', kind: 'function', isExport: true  })]);
+    upsertSymbols('/project/b.ts', [makeSymbol({ name: 'foo', kind: 'function', isExport: false })]);
+    expect(findSymbols({ name: 'foo', exportedOnly: true,  limit: 50 }).total).toBe(1);
+    expect(findSymbols({ name: 'foo', exportedOnly: false, limit: 50 }).total).toBe(2);
+  });
+
+  it('kind filter narrows results', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'foo', kind: 'function' })]);
+    upsertSymbols('/project/b.ts', [makeSymbol({ name: 'foo', kind: 'class'    })]);
+    const res = findSymbols({ name: 'foo', kind: 'function', exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(1);
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0].kind).toBe('function');
+  });
+
+  it('unknown kind returns empty — not an error', () => {
+    upsertSymbols('/project/a.ts', [makeSymbol({ name: 'foo', kind: 'function' })]);
+    // D-06: unknown kind → {items: [], total: 0}, never throws
+    const res = findSymbols({ name: 'foo', kind: 'widget' as any, exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(0);
+    expect(res.items).toEqual([]);
+  });
+
+  it('total is pre-truncation and items.length <= limit', () => {
+    // Seed 5 symbols named 'foo' across 5 distinct paths.
+    for (let i = 0; i < 5; i++) {
+      upsertSymbols(`/project/f${i}.ts`, [makeSymbol({ name: 'foo', kind: 'function' })]);
+    }
+    const res = findSymbols({ name: 'foo', exportedOnly: false, limit: 3 });
+    expect(res.total).toBe(5);
+    expect(res.items).toHaveLength(3);
+  });
+
+  it('ordering is is_export DESC, path ASC, start_line ASC', () => {
+    // Interleaved seeding to prove we don't rely on insertion order.
+    upsertSymbols('/project/b.ts', [makeSymbol({ name: 'foo', kind: 'function', isExport: false, startLine: 1,  endLine: 2 })]);
+    upsertSymbols('/project/a.ts', [
+      makeSymbol({ name: 'foo', kind: 'function', isExport: true,  startLine: 10, endLine: 12 }),
+      makeSymbol({ name: 'foo', kind: 'function', isExport: true,  startLine: 5,  endLine: 7  }),
+    ]);
+    const res = findSymbols({ name: 'foo', exportedOnly: false, limit: 50 });
+    expect(res.total).toBe(3);
+    // Expected order:
+    //   (a.ts, startLine 5,  isExport=1)  — export first, path asc, line asc
+    //   (a.ts, startLine 10, isExport=1)
+    //   (b.ts, startLine 1,  isExport=0)
+    expect(res.items.map(i => ({ path: i.path, startLine: i.startLine, isExport: i.isExport }))).toEqual([
+      { path: '/project/a.ts', startLine: 5,  isExport: true  },
+      { path: '/project/a.ts', startLine: 10, isExport: true  },
+      { path: '/project/b.ts', startLine: 1,  isExport: false },
+    ]);
+  });
+
+  it('zero matches returns {items: [], total: 0} not an error', () => {
+    // No seed.
+    const res = findSymbols({ name: 'nothing', exportedOnly: false, limit: 50 });
+    expect(res).toEqual({ items: [], total: 0 });
+  });
+});
+
+describe('getDependentsWithImports (Phase 34 SUM-02, D-12..D-15, D-18)', () => {
+  it('returns [] when no dependents exist', () => {
+    expect(getDependentsWithImports('/any/path')).toEqual([]);
+  });
+
+  it('single source + single import returns one entry with one name + one line', () => {
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: ['useState'], importLine: 5 });
+    expect(getDependentsWithImports('/src/b.ts')).toEqual([
+      { path: '/src/a.ts', importedNames: ['useState'], importLines: [5] },
+    ]);
+  });
+
+  it('same source + two distinct imports of same target → names merged + deduped, lines both', () => {
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: ['useState', 'useEffect'], importLine: 5  });
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: ['useState', 'useMemo'],   importLine: 10 });
+    const res = getDependentsWithImports('/src/b.ts');
+    expect(res).toHaveLength(1);
+    expect(res[0].path).toBe('/src/a.ts');
+    expect(res[0].importedNames).toEqual(['useEffect', 'useMemo', 'useState']); // alphabetical, deduped
+    expect(res[0].importLines).toEqual([5, 10]);                                // ascending
+  });
+
+  it('NULL imported_names coerces to []', () => {
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: null, importLine: null });
+    const res = getDependentsWithImports('/src/b.ts');
+    expect(res).toHaveLength(1);
+    expect(res[0].importedNames).toEqual([]);
+    expect(res[0].importLines).toEqual([]);
+  });
+
+  it('NULL import_line is excluded from importLines array', () => {
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: ['foo'], importLine: 5 });
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: ['bar'], importLine: null });
+    const res = getDependentsWithImports('/src/b.ts');
+    expect(res).toHaveLength(1);
+    expect(res[0].importedNames).toEqual(['bar', 'foo']);
+    expect(res[0].importLines).toEqual([5]);                                    // null excluded
+  });
+
+  it('two distinct sources produce two entries sorted by path ASC', () => {
+    insertDepRow({ source: '/src/x.ts', target: '/src/t.ts', importedNames: ['a'], importLine: 1 });
+    insertDepRow({ source: '/src/a.ts', target: '/src/t.ts', importedNames: ['b'], importLine: 2 });
+    const res = getDependentsWithImports('/src/t.ts');
+    expect(res).toHaveLength(2);
+    expect(res[0].path).toBe('/src/a.ts');
+    expect(res[1].path).toBe('/src/x.ts');
+  });
+
+  it('namespace import (["*"]) passes through as importedNames: ["*"]', () => {
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', importedNames: ['*'], importLine: 3 });
+    const res = getDependentsWithImports('/src/b.ts');
+    expect(res).toHaveLength(1);
+    expect(res[0].importedNames).toEqual(['*']);
+    expect(res[0].importLines).toEqual([3]);
+  });
+
+  it('package_import rows with target=target are excluded (local_import only)', () => {
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', type: 'local_import',   importedNames: ['foo'], importLine: 5 });
+    insertDepRow({ source: '/src/a.ts', target: '/src/b.ts', type: 'package_import', importedNames: ['bar'], importLine: 6 });
+    const res = getDependentsWithImports('/src/b.ts');
+    expect(res).toHaveLength(1);
+    expect(res[0].importedNames).toEqual(['foo']);                              // bar excluded
+    expect(res[0].importLines).toEqual([5]);
   });
 });
