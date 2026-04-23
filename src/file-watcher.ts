@@ -29,6 +29,7 @@ export class FileWatcher {
   private restartAttempts: number = 0;
   private readonly maxRestartDelay: number = 30_000;
   private stabilityTimer: NodeJS.Timeout | null = null;
+  private restartTimer: NodeJS.Timeout | null = null;
   private static readonly STABILITY_THRESHOLD_MS = 60_000;
 
   /**
@@ -125,6 +126,13 @@ export class FileWatcher {
       this.stabilityTimer = null;
     }
 
+    // Clear any pending restart — otherwise a prior restart() call can
+    // resurrect the watcher after stop() completes.
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+
     // Clear all throttle timers
     this.throttleTimers.forEach(timer => clearTimeout(timer));
     this.throttleTimers.clear();
@@ -158,13 +166,17 @@ export class FileWatcher {
     this.restartAttempts++;
     logWarn(`FileWatcher: Restarting in ${delay}ms (attempt ${this.restartAttempts})...`);
     this.stop();
-    setTimeout(() => {
+    // stop() clears restartTimer, so schedule the new one AFTER.
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
       if (!this.isWatching) {
         this.start();
         // Do NOT reset restartAttempts here — start the stability timer instead
         this.startStabilityTimer();
       }
     }, delay);
+    // Don't let a pending restart block process shutdown.
+    this.restartTimer.unref?.();
   }
 
   /**
