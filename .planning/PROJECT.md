@@ -125,6 +125,12 @@ Shipped v1.5 Production-Grade MCP Intelligence Layer (2026-04-23). Six milestone
 - ✓ Cross-platform scripts/register-mcp.mjs via `npm run register-mcp` — v1.5
 - ✓ build.sh delegates to npm run register-mcp; 5 legacy install templates deleted — v1.5
 - ✓ README Quick Start + docs/mcp-clients.md rewritten around new registration flow — v1.5
+- ✓ Symbol extraction (TS/JS) — function/class/interface/type/enum/const with line ranges, persisted to `symbols` table — v1.6 (Phase 33)
+- ✓ `imported_names` + `import_line` columns on `file_dependencies` (TS/JS edges) — v1.6 (Phase 33)
+- ✓ `npm run inspect-symbols` CLI for parser debugging — v1.6 (Phase 33)
+- ✓ `find_symbol` MCP tool — case-sensitive exact + trailing-`*` prefix, `kind` filter, `exportedOnly` default true, `{items, total, truncated?}` envelope — v1.6 (Phase 34, FIND-01..05)
+- ✓ `get_file_summary.exports[]` populated from symbols table for TS/JS files — v1.6 (Phase 34, SUM-01)
+- ✓ `get_file_summary.dependents[]` upgraded to `[{path, importedNames, importLines}]` — v1.6 (Phase 34, SUM-02..04)
 
 ### Active
 
@@ -234,4 +240,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-23 after v1.5 Production-Grade MCP Intelligence Layer milestone shipped*
+*Last updated: 2026-04-23 after Phase 34 Symbol-Aware MCP Surface (v1.6) shipped*
