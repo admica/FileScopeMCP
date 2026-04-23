@@ -1,0 +1,11 @@
+{
+  "captured_at": "2026-04-23T13:44:28.551Z",
+  "self_scan_ms": 1833,
+  "medium_repo_scan_ms": 332,
+  "file_counts": {
+    "self": 437,
+    "medium_repo": 102
+  },
+  "node_version": "v22.21.1",
+  "commit_sha": "860fe61"
+}

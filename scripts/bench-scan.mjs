@@ -81,3 +81,9 @@ const baseline = {
 mkdirSync(path.dirname(OUT_PATH), { recursive: true });
 writeFileSync(OUT_PATH, JSON.stringify(baseline, null, 2) + '\n');
 console.error(`[bench-scan] baseline written to ${OUT_PATH}`);
+
+// coordinator.init() starts a FileWatcher (chokidar) that keeps the event loop
+// alive indefinitely. We have no public shutdown API on ServerCoordinator yet,
+// so force-exit after the write. Phase 35's PERF-02 check runs this in CI and
+// must terminate deterministically.
+process.exit(0);
