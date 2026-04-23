@@ -537,29 +537,66 @@ async function extractTsJsEdges(
   const richer = extractRicherEdges(filePath, content);
   if (!richer) return [];
 
-  log(`[language-config] [AST] Found ${richer.regularImports.length} imports, ${richer.reExportSources.length} re-exports, ${richer.inheritsFrom.length} inherits in ${filePath}`);
+  log(`[language-config] [AST] Found ${richer.regularImports.length} imports, ${richer.reExportSources.length} re-exports, ${richer.inheritsFrom.length} inherits, ${richer.symbols.length} symbols in ${filePath}`);
 
   const edges: EdgeResult[] = [];
 
-  // Regular imports
+  // Regular imports — thread raw specifier through EdgeResult (Phase 33 IMP-03)
   for (const imp of richer.regularImports) {
     const edge = await resolveTsJsImport(imp, filePath, projectRoot, 'imports');
-    if (edge) edges.push(edge);
+    if (edge) edges.push({ ...edge, originalSpecifier: imp });
   }
 
   // Re-exports
   for (const src of richer.reExportSources) {
     const edge = await resolveTsJsImport(src, filePath, projectRoot, 're_exports');
-    if (edge) edges.push(edge);
+    if (edge) edges.push({ ...edge, originalSpecifier: src });
   }
 
   // Inherits (cross-file class extends)
   for (const { sourceSpecifier } of richer.inheritsFrom) {
     const edge = await resolveTsJsImport(sourceSpecifier, filePath, projectRoot, 'inherits');
-    if (edge) edges.push(edge);
+    if (edge) edges.push({ ...edge, originalSpecifier: sourceSpecifier });
   }
 
   return edges;
+}
+
+/**
+ * Phase 33 SYM-02/SYM-04 — returns edges, symbols, and importMeta from a single
+ * extractRicherEdges() call. Callers that need the parser's symbol output (coordinator,
+ * file-watcher, future bulk-extraction gate) use this instead of extractTsJsEdges to
+ * avoid re-parsing.
+ * Returns null for non-TS/JS files so callers can fall back to extractEdges().
+ */
+export async function extractTsJsFileParse(
+  filePath: string,
+  content: string,
+  projectRoot: string
+): Promise<{
+  edges: EdgeResult[];
+  symbols: import('./db/symbol-types.js').Symbol[];
+  importMeta: import('./change-detector/ast-parser.js').ImportMeta[];
+} | null> {
+  const richer = extractRicherEdges(filePath, content);
+  if (!richer) return null;
+
+  const edges: EdgeResult[] = [];
+
+  for (const imp of richer.regularImports) {
+    const edge = await resolveTsJsImport(imp, filePath, projectRoot, 'imports');
+    if (edge) edges.push({ ...edge, originalSpecifier: imp });
+  }
+  for (const src of richer.reExportSources) {
+    const edge = await resolveTsJsImport(src, filePath, projectRoot, 're_exports');
+    if (edge) edges.push({ ...edge, originalSpecifier: src });
+  }
+  for (const { sourceSpecifier } of richer.inheritsFrom) {
+    const edge = await resolveTsJsImport(sourceSpecifier, filePath, projectRoot, 'inherits');
+    if (edge) edges.push({ ...edge, originalSpecifier: sourceSpecifier });
+  }
+
+  return { edges, symbols: richer.symbols, importMeta: richer.importMeta };
 }
 
 // ─── Go extractor ─────────────────────────────────────────────────────────────
@@ -892,10 +929,16 @@ export async function extractEdges(
     return [];
   }
 
-  // Aggregate duplicate targets by summing weights (D-11/D-12).
-  // Key: target + edgeType (same file can be imported AND re-exported — different edges).
+  // Aggregate duplicate targets by summing weights (legacy language behavior).
+  // EXCEPT: edges that carry `originalSpecifier` (TS/JS — D-08) stay as separate rows
+  // so each import_line / imported_names is preserved precisely.
   const accumulator = new Map<string, EdgeResult>();
+  const preserved: EdgeResult[] = [];
   for (const edge of rawEdges) {
+    if (edge.originalSpecifier !== undefined) {
+      preserved.push(edge);
+      continue;
+    }
     const key = `${edge.target}\x00${edge.edgeType}`;
     const existing = accumulator.get(key);
     if (existing) {
@@ -904,7 +947,7 @@ export async function extractEdges(
       accumulator.set(key, { ...edge });
     }
   }
-  return Array.from(accumulator.values());
+  return [...Array.from(accumulator.values()), ...preserved];
 }
 
 // Export buildAstExtractor and buildRegexExtractor for tests and external composition.
