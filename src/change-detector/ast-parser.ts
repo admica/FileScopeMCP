@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { log } from '../logger.js';
 import type { ExportSnapshot, ExportedSymbol } from './types.js';
+import type { Symbol, SymbolKind } from '../db/symbol-types.js';
 
 const _require = createRequire(import.meta.url);
 
@@ -110,6 +111,20 @@ function extractSignature(node: any, source: string): string {
 // ─── Richer edge extraction ────────────────────────────────────────────────
 
 /**
+ * Per-import metadata emitted during the same AST walk as regularImports.
+ * One entry per `import_statement` node (NOT deduplicated by specifier — see D-08).
+ * `importedNames` uses the original exported name, not any local alias (verified via runtime probe).
+ */
+export interface ImportMeta {
+  /** Raw source specifier string (e.g. './utils.js', 'react'). */
+  specifier: string;
+  /** Array of imported names. Values: original named-import identifiers, 'default', or '*' for namespace imports. */
+  importedNames: string[];
+  /** 1-indexed source line of the import_statement. */
+  line: number;
+}
+
+/**
  * Richer edge classification for dependency extraction.
  * Used by extractTsJsEdges() in language-config.ts for edge type categorization.
  */
@@ -120,6 +135,11 @@ export interface RicherEdgeData {
   reExportSources: string[];
   /** className + sourceSpecifier pairs from extends_clause where class is imported from another file */
   inheritsFrom: Array<{ className: string; sourceSpecifier: string }>;
+  // Phase 33 additions — same AST walk as edges.
+  /** Top-level navigable symbols (SYM-01). */
+  symbols:    Symbol[];
+  /** Per-import-statement metadata (IMP-01, IMP-02). */
+  importMeta: ImportMeta[];
 }
 
 /**
@@ -145,6 +165,116 @@ function buildImportNameMap(importNode: any, sourceSpecifier: string, map: Map<s
     for (let i = 0; i < node.childCount; i++) walk(node.child(i));
   }
   walk(importNode);
+}
+
+/**
+ * Returns the list of imported names for an import_statement.
+ * - Named imports:     original exported name (e.g. `foo` for `import { foo as bar }`)
+ * - Default imports:   literal string 'default'
+ * - Namespace imports: literal string '*'
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractImportedNames(importNode: any): string[] {
+  const names: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function walk(node: any): void {
+    if (node.type === 'import_specifier') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) names.push(nameNode.text as string);
+    } else if (node.type === 'identifier' && node.parent?.type === 'import_clause') {
+      names.push('default');
+    } else if (node.type === 'namespace_import') {
+      names.push('*');
+    }
+    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+  }
+  walk(importNode);
+  return names;
+}
+
+/**
+ * Extracts a single bare top-level declaration into zero or more Symbol entries.
+ * Handles all six kinds + const/arrow-function disambiguation + multi-binding const.
+ * Skips: let, var, ambient, anonymous default, anything not in D-22 mapping.
+ *
+ * `positionSource` is the node whose startPosition/endPosition define the symbol's line range.
+ * Defaults to `node` itself. When called from extractExportedSymbol, the export_statement is
+ * passed to capture decorator lines correctly (Pitfall 7).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractBareTopLevelSymbol(node: any, isExport: boolean, out: Symbol[], positionSource?: any): void {
+  const posNode = positionSource ?? node;
+  const startLine = (posNode.startPosition.row as number) + 1;
+  const endLine   = (posNode.endPosition.row as number) + 1;
+
+  switch (node.type) {
+    case 'function_declaration':
+    case 'generator_function_declaration': {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (name) out.push({ name, kind: 'function', startLine, endLine, isExport });
+      break;
+    }
+    case 'class_declaration': {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (name) out.push({ name, kind: 'class', startLine, endLine, isExport });
+      break;
+    }
+    case 'interface_declaration': {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (name) out.push({ name, kind: 'interface', startLine, endLine, isExport });
+      break;
+    }
+    case 'type_alias_declaration': {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (name) out.push({ name, kind: 'type', startLine, endLine, isExport });
+      break;
+    }
+    case 'enum_declaration': {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (name) out.push({ name, kind: 'enum', startLine, endLine, isExport });
+      break;
+    }
+    case 'lexical_declaration': {
+      // const only — skip let/var (Pitfall 2)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const kw = (node.children as any[]).find(c => c.type === 'const' || c.type === 'let' || c.type === 'var');
+      if (kw?.type !== 'const') break;
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child.type === 'variable_declarator') {
+          const name = child.childForFieldName('name')?.text as string | undefined;
+          const valType = child.childForFieldName('value')?.type as string | undefined;
+          if (name) {
+            const kind: SymbolKind = valType === 'arrow_function' ? 'function' : 'const';
+            out.push({ name, kind, startLine, endLine, isExport });
+          }
+        }
+      }
+      break;
+    }
+    // ambient_declaration, variable_declaration (var), others — intentionally skipped
+  }
+}
+
+/**
+ * Extracts a symbol from an `export_statement` node.
+ * Skips re-exports (`export * from`, `export { x } from`) because they have a `source` field.
+ * Skips anonymous defaults (D-06) because they have no declaration or the declaration lacks a name.
+ * For decorator'd classes, both export_statement and its declaration child share the decorator's
+ * startPosition.row, so passing declNode preserves the correct startLine (Pitfall 7).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractExportedSymbol(exportNode: any, out: Symbol[]): void {
+  // Re-exports have a source field — SYM-08 skip
+  if (exportNode.childForFieldName('source')) return;
+
+  const declNode = exportNode.childForFieldName('declaration');
+  if (!declNode) return;  // `export default <expression>` — D-06 anonymous case
+
+  // Pass exportNode as positionSource so decorators preceding the `export` keyword are included
+  // in the symbol's startLine (Pitfall 7 — decorators attach to the export_statement span,
+  // not the inner declaration span).
+  extractBareTopLevelSymbol(declNode, true, out, exportNode);
 }
 
 /**
@@ -174,6 +304,9 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
   const regularImports: string[] = [];
   const reExportSources: string[] = [];
   const inheritsFrom: Array<{ className: string; sourceSpecifier: string }> = [];
+  // Phase 33 accumulators — populated during the same visitNode walk.
+  const symbols: Symbol[] = [];
+  const importMeta: ImportMeta[] = [];
 
   // Build import name → source specifier map for inherits correlation
   const importNameToSource = new Map<string, string>();
@@ -188,6 +321,10 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
           regularImports.push(specifier);
           // Build name map for inherits correlation
           buildImportNameMap(node, specifier, importNameToSource);
+          // Phase 33 IMP-01/02 — same walk, emit per-import metadata.
+          const importedNames = extractImportedNames(node);
+          const line = (node.startPosition.row as number) + 1;
+          importMeta.push({ specifier, importedNames, line });
         }
       }
     } else if (node.type === 'export_statement') {
@@ -248,7 +385,21 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
   }
 
   visitNode(tree.rootNode);
-  return { regularImports, reExportSources, inheritsFrom };
+
+  // Phase 33 SYM-01 — walk top-level children for symbols, reusing the already-parsed tree.
+  // (Nested/inner declarations are intentionally NOT extracted per milestone scope.)
+  // This is the SAME parse output from above — no second parse-call is performed.
+  const root = tree.rootNode;
+  for (let i = 0; i < root.childCount; i++) {
+    const child = root.child(i);
+    if (child.type === 'export_statement') {
+      extractExportedSymbol(child, symbols);
+    } else {
+      extractBareTopLevelSymbol(child, false, symbols);
+    }
+  }
+
+  return { regularImports, reExportSources, inheritsFrom, symbols, importMeta };
 }
 
 // ─── Main extraction function ──────────────────────────────────────────────
