@@ -21,6 +21,9 @@ import {
   writeLlmResult,
   clearStaleness,
   markAllStale,
+  findSymbols,
+  getDependentsWithImports,
+  getSymbolsForFile,
 } from '../../src/db/repository.js';
 
 let tmpDir: string;
@@ -58,13 +61,26 @@ beforeAll(async () => {
       edge_type TEXT DEFAULT 'imports',
       confidence REAL DEFAULT 0.8,
       confidence_source TEXT DEFAULT 'inferred',
-      weight REAL DEFAULT 1.0
+      weight REAL DEFAULT 1.0,
+      imported_names TEXT,
+      import_line INTEGER
     );
     CREATE TABLE IF NOT EXISTS file_communities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       community_id INTEGER NOT NULL,
       file_path TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS symbols (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      is_export INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
+    CREATE INDEX IF NOT EXISTS idx_symbols_path ON symbols(path);
   `);
 });
 
@@ -75,7 +91,7 @@ afterAll(async () => {
 
 function clear(): void {
   const sqlite = getSqlite();
-  sqlite.exec('DELETE FROM files; DELETE FROM file_dependencies; DELETE FROM file_communities;');
+  sqlite.exec('DELETE FROM files; DELETE FROM file_dependencies; DELETE FROM file_communities; DELETE FROM symbols;');
 }
 
 function insertFile(filePath: string, opts: Record<string, any> = {}): void {
@@ -414,11 +430,114 @@ describe('markAllStale', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// find_symbol response contract (Phase 34)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('find_symbol response contract (Phase 34)', () => {
+  it('returns {items: [], total: 0} with no truncated key on zero match', () => {
+    clear();
+    const { items, total } = findSymbols({ name: 'Nothing', exportedOnly: true, limit: 50 });
+    const truncated = items.length < total;
+    const response: Record<string, unknown> = {
+      items: items.map(s => ({ path: s.path, name: s.name, kind: s.kind, startLine: s.startLine, endLine: s.endLine, isExport: s.isExport })),
+      total,
+      ...(truncated && { truncated: true }),
+    };
+    expect(response.items).toEqual([]);
+    expect(response.total).toBe(0);
+    expect('truncated' in response).toBe(false);
+  });
+
+  it('returns items with expected shape keys and omits truncated on full match', () => {
+    clear();
+    const sqlite = getSqlite();
+    sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('/src/a.ts', 'foo', 'function', 1, 5, 1);
+    const { items, total } = findSymbols({ name: 'foo', exportedOnly: true, limit: 50 });
+    const truncated = items.length < total;
+    const response: Record<string, unknown> = {
+      items: items.map(s => ({ path: s.path, name: s.name, kind: s.kind, startLine: s.startLine, endLine: s.endLine, isExport: s.isExport })),
+      total,
+      ...(truncated && { truncated: true }),
+    };
+    expect((response.items as any[])[0]).toEqual({ path: '/src/a.ts', name: 'foo', kind: 'function', startLine: 1, endLine: 5, isExport: true });
+    expect(response.total).toBe(1);
+    expect('truncated' in response).toBe(false);
+  });
+
+  it('includes truncated: true when items.length < total', () => {
+    clear();
+    const sqlite = getSqlite();
+    for (let i = 0; i < 5; i++) {
+      sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(`/src/f${i}.ts`, 'foo', 'function', 1, 5, 1);
+    }
+    const { items, total } = findSymbols({ name: 'foo', exportedOnly: true, limit: 2 });
+    const truncated = items.length < total;
+    const response: Record<string, unknown> = {
+      items,
+      total,
+      ...(truncated && { truncated: true }),
+    };
+    expect(response.total).toBe(5);
+    expect(response.truncated).toBe(true);
+    expect((response.items as any[]).length).toBe(2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// get_file_summary Phase 34 enrichment contract
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('get_file_summary response contract — Phase 34 enrichment', () => {
+  it('exports is an empty array when the file has no symbols', () => {
+    clear();
+    insertFile('/src/go.go', { importance: 5 });
+    const exports = getSymbolsForFile('/src/go.go')
+      .filter(s => s.isExport)
+      .sort((a, b) => a.startLine - b.startLine)
+      .map(s => ({ name: s.name, kind: s.kind, startLine: s.startLine, endLine: s.endLine }));
+    expect(exports).toEqual([]);
+  });
+
+  it('exports is populated from symbols table, isExport=true only, sorted by startLine', () => {
+    clear();
+    insertFile('/src/mod.ts', { importance: 5 });
+    const sqlite = getSqlite();
+    sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('/src/mod.ts', 'zebra', 'function', 30, 35, 1);
+    sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('/src/mod.ts', 'apple', 'class', 10, 15, 1);
+    sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('/src/mod.ts', '_priv', 'function', 20, 25, 0);
+    const exports = getSymbolsForFile('/src/mod.ts')
+      .filter(s => s.isExport)
+      .sort((a, b) => a.startLine - b.startLine)
+      .map(s => ({ name: s.name, kind: s.kind, startLine: s.startLine, endLine: s.endLine }));
+    expect(exports.map(e => e.name)).toEqual(['apple', 'zebra']);
+  });
+
+  it('dependents[0] has shape {path, importedNames, importLines}', () => {
+    clear();
+    insertFile('/src/target.ts', { importance: 5 });
+    insertFile('/src/user.ts', { importance: 5 });
+    const sqlite = getSqlite();
+    sqlite.prepare(
+      'INSERT INTO file_dependencies (source_path, target_path, dependency_type, edge_type, confidence, confidence_source, imported_names, import_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run('/src/user.ts', '/src/target.ts', 'local_import', 'imports', 0.8, 'inferred', JSON.stringify(['foo']), 3);
+    const dependents = getDependentsWithImports('/src/target.ts');
+    expect(dependents).toEqual([
+      { path: '/src/user.ts', importedNames: ['foo'], importLines: [3] },
+    ]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Tool name registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('MCP tool name registry', () => {
-  it('all 13 expected tool names exist in mcp-server.ts source', async () => {
+  it('all 14 expected tool names exist in mcp-server.ts source', async () => {
     const src = await fs.readFile(
       path.join(process.cwd(), 'src/mcp-server.ts'),
       'utf-8'
@@ -438,6 +557,7 @@ describe('MCP tool name registry', () => {
       'detect_cycles',
       'get_cycles_for_file',
       'get_communities',
+      'find_symbol',
     ];
 
     for (const tool of expectedTools) {
