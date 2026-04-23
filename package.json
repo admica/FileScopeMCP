@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node dist/mcp-server.js",
     "bench-scan": "node scripts/bench-scan.mjs",
+    "inspect-symbols": "node scripts/inspect-symbols.mjs",
     "register-mcp": "node scripts/register-mcp.mjs",
     "test": "vitest",
     "coverage": "vitest run --coverage"
