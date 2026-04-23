@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.5 Production-Grade MCP Intelligence Layer (Shipped: 2026-04-23)
+
+**Phases completed:** 4 phases (29-32), 11 plans, 17 tasks
+**Requirements:** 20/21 satisfied (BRKR-04 partial — see audit)
+**Stats:** 54 commits | 104 files changed | +7,767 / -11,206 lines | 6 days (Apr 17-22, 2026)
+**Known deferred items at close:** 11 (see STATE.md Deferred Items) — 7 orphaned quick-task slugs + 4 tech-debt items
+
+**Key accomplishments:**
+
+- Broker lifecycle hardened — dual PID+socket liveness check, module-level crash handlers (uncaughtException/unhandledRejection), Promise.race-bounded drain shutdown with configurable timeout, socket-poll spawn wait replacing fixed sleep
+- All 13 MCP tools migrated from deprecated `server.tool()` to `registerTool()` with `ToolAnnotations`, enriched descriptions, and uniform structured responses (`{ok: true/false, ...}`); deprecated `listChanged` capability removed
+- Protocol-layer integration tests via `InMemoryTransport` exercising all 13 tools end-to-end against real SQLite + real ServerCoordinator (22+ new tests); V8 coverage scoped to 8 production subsystems
+- Broker lifecycle test suite (spawn/SIGTERM/SIGKILL/PID-guard/socket/NDJSON protocol) + MCP stdout pollution CI smoke test + FileWatcher and config loading unit coverage
+- Zero-config Claude Code discovery via committed `.mcp.json` dogfood config; cross-platform `scripts/register-mcp.mjs` ESM helper wired as `npm run register-mcp` with fail-soft ENOENT handling
+- `build.sh` rewritten to delegate to `npm run register-mcp`; 5 legacy OS-specific install templates deleted (`install-mcp-claude.sh`, `mcp.json.{linux,mac,win.txt,claude-code}`); README Quick Start + `docs/mcp-clients.md` restructured around the new registration flow
+
+---
+
 ## v1.4 Deep Graph Intelligence (Shipped: 2026-04-09)
 
 **Phases completed:** 4 phases (25-28), 8 plans, 15 tasks

@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Production-Grade MCP Intelligence Layer
-status: milestone_complete
-stopped_at: Phase 32 complete — milestone v1.5 all 4 phases done (11/11 plans)
-last_updated: "2026-04-22T03:02:52.406Z"
-last_activity: 2026-04-22
+status: completed
+stopped_at: Completed 32-04-PLAN.md (README Quick Start + docs/mcp-clients.md rewrite)
+last_updated: "2026-04-23T06:57:32.596Z"
+last_activity: 2026-04-23
 progress:
   total_phases: 4
   completed_phases: 4
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-17)
 Phase: 32 (zero-config-auto-registration) — COMPLETE
 Plan: 4 of 4 complete
 Status: Phase 32 done; milestone v1.5 complete (4/4 phases, 11/11 plans)
-Last activity: 2026-04-22
+Last activity: 2026-04-23
 
 Progress: [██████████] 100% (v1.5: 4/4 phases)
 
@@ -74,3 +74,21 @@ Stopped at: Completed 32-04-PLAN.md (README Quick Start + docs/mcp-clients.md re
 Resume file: None
 
 **Planned Phase:** 32 (Zero-Config Auto-Registration) — 4 plans — 2026-04-21T23:13:11.420Z
+
+## Deferred Items
+
+Items acknowledged and deferred at v1.5 milestone close on 2026-04-23:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 1-update-readme-md-and-root-roadmap-md-to- | missing |
+| quick_task | 260323-kgd-auto-init-mcp-to-cwd-rename-set-project- | missing |
+| quick_task | 260324-0yz-comprehensive-documentation-update-readm | missing |
+| quick_task | 260401-a19-fix-double-change-impact-and-structured-ou | missing |
+| quick_task | 260401-b7k-fix-cpp-dependency-parsing-and-importance | missing |
+| quick_task | 260414-otc-make-sure-the-install-setup-scripts-of-t | missing |
+| quick_task | 260416-b8w-fix-nexus-tree-view-repo-store-queries-a | missing |
+| tech_debt | BRKR-04: client.ts uses module-level constants instead of reading broker config schema spawnMaxWaitMs field | partial |
+| tech_debt | SUMMARY frontmatter missing `requirements-completed` field for plans 29-01, 29-02, 30-01, 30-02, 31-01, 31-02, 31-03 | cosmetic |
+| tech_debt | Untracked legacy /mcp.json (no dot) file in working tree alongside new .mcp.json | cosmetic |
+| tech_debt | Pre-existing parsers.test.ts 10K-line timeout (5s Vitest default) — unrelated to v1.5 | pre_existing |

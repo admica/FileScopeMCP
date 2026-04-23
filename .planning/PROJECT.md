@@ -8,20 +8,9 @@ A fully autonomous file intelligence system that watches project directories and
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
-## Current Milestone: v1.5 Production-Grade MCP Intelligence Layer
-
-**Goal:** Make FileScopeMCP bulletproof and zero-config for LLM agents — comprehensive testing, MCP spec compliance, and hardened lifecycle management.
-
-**Target features:**
-- Comprehensive automated test coverage across all subsystems (parsers, dep graph, AST diff, broker, MCP transport, cascade, watcher, config)
-- Full official MCP spec compliance (audit tool schemas, add missing capabilities)
-- Zero-config agent integration (eliminate manual JSON editing, auto-registration, crash recovery)
-- Broker lifecycle hardening (PID cleanup, socket management, graceful shutdown, concurrent instance safety)
-- Agent-ready polish (error messages, timeouts, edge case handling)
-
 ## Current State
 
-Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 phases total). Phase 30 complete — MCP spec compliance (migrated 13 tools to registerTool() with ToolAnnotations, structured error responses, removed deprecated APIs).
+Shipped v1.5 Production-Grade MCP Intelligence Layer (2026-04-23). Six milestones complete (32 phases total).
 
 **Architecture:**
 - MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface
@@ -30,7 +19,7 @@ Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 
 
 **Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter, chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js, graphology
 
-**Codebase:** ~19K LOC TypeScript | 260+ tests passing | 28 phases shipped across 5 milestones
+**Codebase:** ~15K LOC TypeScript | 574+ tests passing | 32 phases shipped across 6 milestones
 
 ## Requirements
 
@@ -109,16 +98,27 @@ Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 
 - ✓ Community membership stored in SQLite file_communities table — v1.4
 - ✓ Token budget (maxItems) on list_files and find_important_files — v1.4
 - ✓ MCP tools surface edge types and confidence in responses — v1.4
+- ✓ Broker dual PID+socket liveness check with stale-file cleanup — v1.5
+- ✓ Module-level crash handlers (uncaughtException, unhandledRejection) in broker and MCP server — v1.5
+- ✓ Promise.race-bounded drain shutdown with configurable drainTimeoutMs — v1.5
+- ✓ Socket-poll spawn wait replacing fixed 500ms sleep — v1.5
+- ✓ All 13 MCP tools migrated to registerTool() with ToolAnnotations and structured {ok} responses — v1.5
+- ✓ Deprecated listChanged capability removed — v1.5
+- ✓ MCP transport integration tests via InMemoryTransport for all 13 tools — v1.5
+- ✓ Broker lifecycle test suite (spawn/SIGTERM/SIGKILL/PID/socket/NDJSON) — v1.5
+- ✓ MCP stdout pollution CI smoke test — v1.5
+- ✓ V8 coverage scoped to 8 production subsystems — v1.5
+- ✓ FileWatcher and config loading unit test coverage — v1.5
+- ✓ Zero-config Claude Code discovery via committed .mcp.json dogfood — v1.5
+- ✓ Cross-platform scripts/register-mcp.mjs via `npm run register-mcp` — v1.5
+- ✓ build.sh delegates to npm run register-mcp; 5 legacy install templates deleted — v1.5
+- ✓ README Quick Start + docs/mcp-clients.md rewritten around new registration flow — v1.5
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
 
-- [ ] Comprehensive automated test coverage across all subsystems
-- [ ] Full official MCP spec compliance
-- [ ] One-command agent registration (same-host) — scope refactored in Phase 32 (2026-04-21) from "zero-config" after audit: end users still run `git clone` + `./build.sh`; cross-host cases documented as manual
-- [ ] Broker lifecycle hardening
-- [ ] Agent-ready polish (error messages, timeouts, edge cases)
+None — defining next milestone.
 
 ### Out of Scope
 
@@ -144,7 +144,7 @@ Shipped v1.4 Deep Graph Intelligence (2026-04-09). Five milestones complete (28 
 
 ## Context
 
-Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), and v1.4 (4 phases). The system is a complete autonomous file intelligence platform with a standalone LLM broker, a visual code exploration dashboard (Nexus), and rich graph intelligence — tree-sitter AST extraction for Python/Rust/C/C++/Go/TS/JS with richer edge types (imports, re_exports, inherits), edge weights, confidence labels, Louvain community detection, and token budget caps on MCP tool responses.
+Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), v1.4 (4 phases), and v1.5 (4 phases). The system is a complete autonomous file intelligence platform with a standalone LLM broker, a visual code exploration dashboard (Nexus), rich graph intelligence — tree-sitter AST extraction for Python/Rust/C/C++/Go/TS/JS with richer edge types (imports, re_exports, inherits), edge weights, confidence labels, Louvain community detection, token budget caps on MCP tool responses — and a production-grade agent surface: MCP spec-compliant registerTool() for all 13 tools with structured responses, hardened broker lifecycle (dual liveness check, crash handlers, drain-bounded shutdown), 574+ tests including MCP transport integration coverage, and zero-config Claude Code auto-discovery via committed .mcp.json + cross-platform register-mcp helper.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, graphology, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
 
@@ -187,6 +187,13 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | graphology for Louvain clustering | Mature graph library with community detection algorithms, minimal deps | ✓ Good |
 | Dirty-flag cache for communities | Louvain is batch-only; recompute only when edges change, not on every query | ✓ Good |
 | maxItems rename over backward compat | Zero legacy installs — clean API naming without shims | ✓ Good |
+| Dual PID+socket liveness check | Stale PID alone lies when OS recycles PIDs — socket presence confirms real broker | ✓ Good (v1.5) |
+| Module-level crash handlers | Catches errors during all execution phases including startup | ✓ Good (v1.5) |
+| registerTool() over server.tool() | Current MCP SDK API; deprecated form removes annotations and structured responses | ✓ Good (v1.5) |
+| InMemoryTransport for MCP tests | Protocol-layer coverage without subprocess overhead | ✓ Good (v1.5) |
+| Committed .mcp.json at repo root | Claude Code auto-discovers per-repo MCP servers when scope matches CWD | ✓ Good (v1.5) |
+| ESM .mjs register script | Cross-platform (macOS/Linux/Windows) without bash dependency; process.execPath handles nvm/volta | ✓ Good (v1.5) |
+| Fail-soft ENOENT on claude CLI | Never break ./build.sh for users without Claude Code installed | ✓ Good (v1.5) |
 
 ## Evolution
 
@@ -206,4 +213,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-17 after v1.5 Production-Grade MCP Intelligence Layer milestone started*
+*Last updated: 2026-04-23 after v1.5 Production-Grade MCP Intelligence Layer milestone shipped*

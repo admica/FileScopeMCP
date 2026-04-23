@@ -7,7 +7,7 @@
 - ✅ **v1.2 LLM Broker** — Phases 16-19 (shipped 2026-03-23)
 - ✅ **v1.3 Nexus** — Phases 20-24 (shipped 2026-04-03)
 - ✅ **v1.4 Deep Graph Intelligence** — Phases 25-28 (shipped 2026-04-09)
-- 🚧 **v1.5 Production-Grade MCP Intelligence Layer** — Phases 29-32 (in progress)
+- ✅ **v1.5 Production-Grade MCP Intelligence Layer** — Phases 29-32 (shipped 2026-04-23)
 
 ## Phases
 
@@ -79,76 +79,17 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full phase details.
 
 </details>
 
-### 🚧 v1.5 Production-Grade MCP Intelligence Layer (In Progress)
+<details>
+<summary>✅ v1.5 Production-Grade MCP Intelligence Layer (Phases 29-32) — SHIPPED 2026-04-23</summary>
 
-**Milestone Goal:** Make FileScopeMCP bulletproof and zero-config for LLM agents — comprehensive testing, MCP spec compliance, and hardened lifecycle management.
+- [x] Phase 29: Broker Lifecycle Hardening (2/2 plans) — completed 2026-04-17
+- [x] Phase 30: MCP Spec Compliance (2/2 plans) — completed 2026-04-17
+- [x] Phase 31: Test Infrastructure (3/3 plans) — completed 2026-04-18
+- [x] Phase 32: Zero-Config Auto-Registration (4/4 plans) — completed 2026-04-22
 
-- [x] **Phase 29: Broker Lifecycle Hardening** - Eliminate crash cleanup gaps and spawn timing races in the broker (completed 2026-04-17)
-- [x] **Phase 30: MCP Spec Compliance** - Migrate tool registration to current SDK API and fix false capability declarations (completed 2026-04-17)
-- [x] **Phase 31: Test Infrastructure** - Close the protocol-layer test gap with transport, lifecycle, and subsystem tests (completed 2026-04-18)
-- [x] **Phase 32: Zero-Config Auto-Registration** - Replace broken install script with `.mcp.json` and CLI-based registration (completed 2026-04-22)
+See: `.planning/milestones/v1.5-ROADMAP.md` for full phase details.
 
-## Phase Details
-
-### Phase 29: Broker Lifecycle Hardening
-**Goal**: The broker cleans up its socket and PID file on any exit path and starts reliably under load
-**Depends on**: Phase 28 (previous milestone complete)
-**Requirements**: BRKR-01, BRKR-02, BRKR-03, BRKR-04, BRKR-05
-**Success Criteria** (what must be TRUE):
-  1. Broker liveness check passes only when BOTH the PID is alive AND the socket file exists — a stale PID from a recycled OS process does not prevent respawn
-  2. Sending SIGKILL to the broker leaves no orphaned socket or PID file behind
-  3. Broker accepts new connections only after draining all in-progress jobs on graceful SIGTERM shutdown
-  4. MCP server startup succeeds reliably on a loaded machine — broker socket existence is polled rather than a fixed sleep
-  5. Attempting to start a second concurrent broker instance produces a clear error message rather than silent failure
-**Plans:** 2/2 plans complete
-Plans:
-- [x] 29-01-PLAN.md — Config schema extension + main.ts liveness fix, crash handlers, shutdown wiring
-- [x] 29-02-PLAN.md — Server drain timeout + client spawn poll loop
-
-### Phase 30: MCP Spec Compliance
-**Goal**: All MCP tools are registered via the current SDK API with correct annotations and truthful capability declarations
-**Depends on**: Phase 28 (previous milestone complete — independent of Phase 29)
-**Requirements**: SPEC-01, SPEC-02, SPEC-03, SPEC-04
-**Success Criteria** (what must be TRUE):
-  1. All 13+ tools are registered via `registerTool()` with `z.object()` input schemas — no `server.tool()` calls remain
-  2. The `tools: { listChanged: true }` capability is removed or backed by an actual `sendToolListChanged()` call — MCP clients that cache tool lists get correct behavior
-  3. Read-only tools carry `readOnlyHint: true` and the destructive tool carries `destructiveHint: true` per the MCP 2025-11-25 spec
-  4. Tool error responses return structured `{ ok: false, error: "CODE", message: "..." }` objects that LLM agents can parse programmatically
-**Plans:** 2/2 plans complete
-Plans:
-- [x] 30-01-PLAN.md — Migrate all 13 tools to registerTool() with annotations, enriched descriptions, and structured error/success responses
-- [x] 30-02-PLAN.md — Update test file assertions from server.tool( to server.registerTool( pattern
-
-### Phase 31: Test Infrastructure
-**Goal**: Protocol-layer and subsystem test gaps are closed; CI catches regressions before they reach agents
-**Depends on**: Phase 29 and Phase 30
-**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05, TEST-06, TEST-07, TEST-08, TEST-09
-**Success Criteria** (what must be TRUE):
-  1. MCP tool calls dispatched through `InMemoryTransport` pass for all 13 tools — protocol-layer coverage exists where none did before
-  2. Broker lifecycle tests cover spawn, connect, SIGTERM cleanup, and crash recovery against the actual hardened binary
-  3. File watcher debounce, ignore patterns, and event dispatch are verified via mocked chokidar — no real filesystem waits in tests
-  4. `npm run coverage` produces a V8 coverage report with per-subsystem gap identification
-  5. A CI smoke test asserts the first byte emitted by `dist/mcp-server.js` is `{` — stdout pollution is caught at CI time
-**Plans:** 3/3 plans complete
-Plans:
-- [x] 31-01-PLAN.md — Export registerTools, scope V8 coverage config, MCP transport tests for all 13 tools
-- [x] 31-02-PLAN.md — Broker lifecycle integration tests and stdout pollution smoke test
-- [x] 31-03-PLAN.md — File watcher unit tests, config loading tests, cascade/change-detector gap audit
-
-### Phase 32: Zero-Config Auto-Registration
-**Goal**: Cloning the repo and running `npm run build` is sufficient for Claude Code to discover FileScopeMCP with no manual JSON editing
-**Depends on**: Phase 29, Phase 30, Phase 31
-**Requirements**: ZERO-01, ZERO-02, ZERO-03
-**Success Criteria** (what must be TRUE):
-  1. `.mcp.json` committed at project root causes Claude Code to auto-discover the server on clone without any additional setup steps
-  2. Running `npm run register-mcp` completes successfully using `claude mcp add` CLI and `claude mcp list` confirms registration — no writes to `~/.claude.json`
-  3. Setup documentation reflects the new registration flow and a developer following it from scratch reaches a working installation without manual JSON editing
-**Plans:** 4/4 plans complete
-Plans:
-- [x] 32-01-PLAN.md — Commit `.mcp.json` dogfood config at repo root and verify `.gitignore` (ZERO-01)
-- [x] 32-02-PLAN.md — Implement `scripts/register-mcp.mjs` plus `npm run register-mcp` and fail-soft integration test (ZERO-02)
-- [x] 32-03-PLAN.md — Swap `build.sh` to `npm run register-mcp` and delete five legacy artifacts (ZERO-02)
-- [x] 32-04-PLAN.md — Rewrite `docs/mcp-clients.md` and update README Quick Start (ZERO-03)
+</details>
 
 ## Progress
 
