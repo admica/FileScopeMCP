@@ -464,10 +464,6 @@ export function isExcluded(filePath: string, baseDir: string, isDir?: boolean): 
     return true;
   }
 
-  if (filePath.includes('test_excluded') || path.basename(filePath).startsWith('test_excluded')) {
-    return true;
-  }
-
   const config = getConfig();
   if (!config) {
     log('[isExcluded] Config is null — cannot check excludes');
