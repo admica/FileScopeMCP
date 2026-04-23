@@ -268,14 +268,18 @@ describe('TS/JS richer edge types', () => {
 // ─── Edge weight aggregation ─────────────────────────────────────────────────
 
 describe('edge weight aggregation', () => {
-  it('duplicate imports to same package produce weight > 1', async () => {
-    // Two separate import statements referencing the same package
+  it('duplicate TS/JS imports to same package produce separate rows per import statement (D-08)', async () => {
+    // Two separate import statements referencing the same package.
+    // Phase 33 D-08: TS/JS edges carry originalSpecifier and stay as SEPARATE rows
+    // so each row's imported_names + import_line stays precise.
     const fixture = `import { Foo } from 'shared-dep';\nimport { Bar } from 'shared-dep';`;
     const edges = await extractEdges('/project/test.ts', fixture, '/project');
     const sharedEdges = edges.filter(e => e.target.includes('shared-dep') && e.edgeType === 'imports');
-    // After aggregation, should be exactly 1 edge with weight >= 2
-    expect(sharedEdges.length).toBe(1);
-    expect(sharedEdges[0].weight).toBeGreaterThanOrEqual(2);
+    // Phase 33: 2 separate edges (was 1 aggregated edge with weight>=2 pre-33-04)
+    expect(sharedEdges.length).toBe(2);
+    expect(sharedEdges.every(e => e.weight === 1)).toBe(true);
+    // Each row carries its own raw specifier for downstream ImportMeta matching
+    expect(sharedEdges.every(e => e.originalSpecifier === 'shared-dep')).toBe(true);
   });
 
   it('import and re-export of same package stay separate', async () => {

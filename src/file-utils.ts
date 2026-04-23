@@ -4,9 +4,11 @@ import * as path from 'path';
 import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { getProjectRoot, getConfig, addExclusionPattern, getFilescopeIgnore } from './global-state.js';
 import { log } from './logger.js'; // Import the logger
-import { upsertFile, deleteFile, setEdges } from './db/repository.js';
-import { extractEdges } from './language-config.js';
+import { upsertFile, deleteFile, setEdges, setEdgesAndSymbols } from './db/repository.js';
+import { extractEdges, extractTsJsFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
+import type { Symbol as SymbolRow } from './db/symbol-types.js';
+import type { ImportMeta } from './change-detector/ast-parser.js';
 
 /**
  * Canonical path normalization for the entire codebase.
@@ -822,7 +824,18 @@ export function findNodeByPath(tree: FileNode | null, targetPath: string): FileN
 // Analyzes a single file's dependencies via the LanguageConfig registry.
 // Returns the legacy { dependencies, packageDependencies } shape alongside the
 // enriched edges array so call sites can pass edges to setEdges().
-async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ dependencies: string[]; packageDependencies: PackageDependency[]; edges: EdgeResult[] }> {
+//
+// Phase 33 extension (D-15): for TS/JS files, also returns the parser's
+// symbols + importMeta and signals useAtomicWrite=true so callers can commit
+// edges + symbols + importMeta together via setEdgesAndSymbols.
+async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{
+  dependencies: string[];
+  packageDependencies: PackageDependency[];
+  edges: EdgeResult[];
+  symbols: SymbolRow[];
+  importMeta: ImportMeta[];
+  useAtomicWrite: boolean;
+}> {
   log(`[analyzeNewFile] Analyzing ${filePath}`);
 
   let content: string;
@@ -830,10 +843,30 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
     content = await fsPromises.readFile(filePath, 'utf-8');
   } catch (readError) {
     log(`[analyzeNewFile] Error reading file ${filePath}: ${readError}`);
-    return { dependencies: [], packageDependencies: [], edges: [] };
+    return { dependencies: [], packageDependencies: [], edges: [], symbols: [], importMeta: [], useAtomicWrite: false };
   }
 
-  const edges = await extractEdges(filePath, content, projectRoot);
+  const ext = path.extname(filePath).toLowerCase();
+  const isTsJs = ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx';
+
+  let edges: EdgeResult[] = [];
+  let symbols: SymbolRow[] = [];
+  let importMeta: ImportMeta[] = [];
+  let useAtomicWrite = false;
+
+  if (isTsJs) {
+    const parsed = await extractTsJsFileParse(filePath, content, projectRoot);
+    if (parsed) {
+      edges = parsed.edges;
+      symbols = parsed.symbols;
+      importMeta = parsed.importMeta;
+      useAtomicWrite = true;
+    } else {
+      edges = await extractEdges(filePath, content, projectRoot);
+    }
+  } else {
+    edges = await extractEdges(filePath, content, projectRoot);
+  }
 
   const dependencies = edges
     .filter(e => !e.isPackage)
@@ -849,7 +882,7 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{ 
     });
 
   log(`[analyzeNewFile] Found deps for ${filePath}: ${JSON.stringify({ dependencies: dependencies.length, packageDependencies: packageDependencies.length })}`);
-  return { dependencies, packageDependencies, edges };
+  return { dependencies, packageDependencies, edges, symbols, importMeta, useAtomicWrite };
 }
 
 
@@ -887,7 +920,7 @@ export async function updateFileNodeOnChange(
   const oldDeps = new Set(existingNode.dependencies || []);
 
   // Re-analyze file content
-  const { dependencies: newDeps, packageDependencies: newPkgDeps, edges } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+  const { dependencies: newDeps, packageDependencies: newPkgDeps, edges, symbols, importMeta, useAtomicWrite } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
   const newDepsSet = new Set(newDeps);
 
   // Update mtime
@@ -947,7 +980,11 @@ export async function updateFileNodeOnChange(
 
   // Persist to SQLite
   upsertFile(existingNode);
-  setEdges(existingNode.path, edges);
+  if (useAtomicWrite) {
+    setEdgesAndSymbols(existingNode.path, edges, symbols, importMeta);
+  } else {
+    setEdges(existingNode.path, edges);
+  }
   log(`[updateFileNodeOnChange] Persisted updated node to SQLite: ${normalizedFilePath}`);
 
   log(`[updateFileNodeOnChange] Updated ${normalizedFilePath}: ${newDeps.length} deps, ${newPkgDeps.length} pkg deps`);
@@ -1036,7 +1073,7 @@ export async function addFileNode(
 
     // 4. Analyze the new file's content for dependencies
     // Use the placeholder analysis function
-    const { dependencies, packageDependencies, edges } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+    const { dependencies, packageDependencies, edges, symbols, importMeta, useAtomicWrite } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
     newNode.dependencies = dependencies;
     newNode.packageDependencies = packageDependencies;
 
@@ -1063,7 +1100,11 @@ export async function addFileNode(
 
     // 9. Persist to SQLite
     upsertFile(newNode);
-    setEdges(newNode.path, edges);
+    if (useAtomicWrite) {
+      setEdgesAndSymbols(newNode.path, edges, symbols, importMeta);
+    } else {
+      setEdges(newNode.path, edges);
+    }
     log(`[addFileNode] Persisted node to SQLite: ${normalizedFilePath}`);
 
     log(`[addFileNode] Successfully added node: ${normalizedFilePath}`);
