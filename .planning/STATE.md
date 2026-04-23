@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Symbol-Level Intelligence
-status: ready_to_plan
-stopped_at: Milestone v1.6 started — defining requirements
-last_updated: "2026-04-23T07:05:00.000Z"
+status: executing
+stopped_at: Completed 34-01-PLAN.md
+last_updated: "2026-04-23T22:21:34.050Z"
 last_activity: 2026-04-23
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 0
-  completed_plans: 0
-  percent: 33
+  total_plans: 7
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Milestone v1.6 — Symbol-Level Intelligence (planning)
+**Current focus:** Phase 34 — Symbol-Aware MCP Surface
 
 ## Current Position
 
-Phase: 34
-Plan: Not started
-Status: Ready to plan
+Phase: 34 (Symbol-Aware MCP Surface) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
 Last activity: 2026-04-23
 
 Progress: [░░░░░░░░░░] 0% (v1.6: 0/3 phases)
@@ -46,6 +46,9 @@ v1.6-specific decisions from scope audit (2026-04-23):
 - Parser emits symbols in single AST pass alongside edges — no second walk
 - Additive schema only (`symbols` table); no breaking changes to existing tool responses
 - Deletion tracking deferred — `list_changed_since` returns only existing files with mtime
+- [Phase 34]: Inlined getDependentsWithImports return type — single call site, no new DependentWithImports interface in symbol-types.ts
+- [Phase 34]: Used direct INSERT helper insertDepRow() in tests rather than extending setEdges() — needed fine-grained control over NULL imported_names and package_import rows
+- [Phase 34]: Established GLOB+bracket-escape as the case-sensitive prefix-match pattern (new to codebase, no PRAGMA needed)
 
 ### Pending Todos
 
@@ -68,5 +71,7 @@ None yet — milestone just started.
 ## Session Continuity
 
 Last activity: 2026-04-23
-Stopped at: Milestone v1.6 started — defining requirements
+Stopped at: Completed 34-01-PLAN.md
 Resume file: None
+
+**Planned Phase:** 34 (Symbol-Aware MCP Surface) — 2 plans — 2026-04-23T22:10:51.641Z
