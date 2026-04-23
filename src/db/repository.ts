@@ -364,16 +364,31 @@ export function getAllFiles(): FileNode[] {
  * Deletes all file and dependency records whose paths are NOT under the given
  * project root. Called during init() to clean up ghost records left from a
  * previous project root (e.g. different machine or moved directory).
+ *
+ * Matches rows whose path equals `projectRoot` exactly OR begins with
+ * `projectRoot + '/'`. The trailing separator is critical: without it, a root
+ * of `/foo/bar` would wrongly keep records under `/foo/bar-sibling/...`. LIKE
+ * metacharacters in the root itself are escaped via a custom ESCAPE clause.
  */
 export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; deps: number } {
   const sqlite = getSqlite();
-  const pattern = projectRoot + '%';
+  // Escape SQL LIKE metacharacters so roots containing `%`, `_`, or `\` match literally.
+  const escapedRoot = projectRoot.replace(/[\\%_]/g, (c) => '\\' + c);
+  const childPattern = escapedRoot + '/%';
+
   const depResult = sqlite.prepare(
-    'DELETE FROM file_dependencies WHERE source_path NOT LIKE ? OR target_path NOT LIKE ?'
-  ).run(pattern, pattern);
+    `DELETE FROM file_dependencies
+     WHERE NOT (
+       (source_path = ? OR source_path LIKE ? ESCAPE '\\')
+       AND (target_path = ? OR target_path LIKE ? ESCAPE '\\')
+     )`,
+  ).run(projectRoot, childPattern, projectRoot, childPattern);
+
   const fileResult = sqlite.prepare(
-    'DELETE FROM files WHERE path NOT LIKE ?'
-  ).run(pattern);
+    `DELETE FROM files
+     WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')`,
+  ).run(projectRoot, childPattern);
+
   return { files: fileResult.changes, deps: depResult.changes };
 }
 

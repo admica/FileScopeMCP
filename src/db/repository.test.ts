@@ -14,6 +14,7 @@ import {
   getAllFiles,
   getAllLocalImportEdges,
   purgeRecordsMatching,
+  purgeRecordsOutsideRoot,
 } from './repository.js';
 import type { FileNode, PackageDependency } from '../types.js';
 
@@ -302,5 +303,57 @@ describe('purgeRecordsMatching', () => {
     expect(result.files).toBe(0);
     expect(result.deps).toBe(0);
     expect(getFile('/project/a.ts')).not.toBeNull();
+  });
+});
+
+describe('purgeRecordsOutsideRoot', () => {
+  it('purges records from a sibling directory that shares a prefix with the project root', () => {
+    // Root /home/foo/bar and sibling /home/foo/bar-sibling both begin with
+    // /home/foo/bar. A naive LIKE pattern `projectRoot + '%'` would wrongly
+    // match the sibling and leave its records in the DB.
+    upsertFile(makeFile({ path: '/home/foo/bar/src/keep.ts', name: 'keep.ts' }));
+    upsertFile(makeFile({ path: '/home/foo/bar-sibling/intruder.ts', name: 'intruder.ts' }));
+    upsertFile(makeFile({ path: '/home/foo/bar-other/another.ts', name: 'another.ts' }));
+
+    const result = purgeRecordsOutsideRoot('/home/foo/bar');
+
+    expect(getFile('/home/foo/bar/src/keep.ts')).not.toBeNull();
+    expect(getFile('/home/foo/bar-sibling/intruder.ts')).toBeNull();
+    expect(getFile('/home/foo/bar-other/another.ts')).toBeNull();
+    expect(result.files).toBe(2);
+  });
+
+  it('keeps files exactly under the project root (trailing-separator boundary)', () => {
+    upsertFile(makeFile({ path: '/home/foo/bar/a.ts', name: 'a.ts' }));
+    upsertFile(makeFile({ path: '/home/foo/bar/nested/deep.ts', name: 'deep.ts' }));
+
+    const result = purgeRecordsOutsideRoot('/home/foo/bar');
+
+    expect(getFile('/home/foo/bar/a.ts')).not.toBeNull();
+    expect(getFile('/home/foo/bar/nested/deep.ts')).not.toBeNull();
+    expect(result.files).toBe(0);
+  });
+
+  it('escapes LIKE metacharacters in the project root', () => {
+    // If the project root contains % or _, a raw LIKE treats them as wildcards.
+    // /tmp/a_b should NOT match /tmp/aXb or /tmp/a/b.
+    upsertFile(makeFile({ path: '/tmp/a_b/src/keep.ts', name: 'keep.ts' }));
+    upsertFile(makeFile({ path: '/tmp/aXb/intruder.ts', name: 'intruder.ts' }));
+
+    const result = purgeRecordsOutsideRoot('/tmp/a_b');
+
+    expect(getFile('/tmp/a_b/src/keep.ts')).not.toBeNull();
+    expect(getFile('/tmp/aXb/intruder.ts')).toBeNull();
+    expect(result.files).toBe(1);
+  });
+
+  it('purges matching dependency edges', () => {
+    upsertFile(makeFile({ path: '/home/foo/bar/a.ts', name: 'a.ts' }));
+    upsertFile(makeFile({ path: '/home/foo/bar-sibling/b.ts', name: 'b.ts' }));
+    setDependencies('/home/foo/bar/a.ts', ['/home/foo/bar-sibling/b.ts'], []);
+
+    purgeRecordsOutsideRoot('/home/foo/bar');
+
+    expect(getDependencies('/home/foo/bar/a.ts')).toHaveLength(0);
   });
 });
