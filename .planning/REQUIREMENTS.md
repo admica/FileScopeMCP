@@ -10,20 +10,20 @@
 
 ### Symbol Extraction (parser + schema)
 
-- [ ] **SYM-01**: Parser extracts top-level symbols from TS/JS files during scan, emitting name, kind (`function` / `class` / `interface` / `type` / `enum` / `const`), `startLine`, `endLine`, and `isExport` flag
-- [ ] **SYM-02**: Symbol extraction MUST share the existing AST walk with edge extraction — no second parser pass per file
-- [ ] **SYM-03**: New `symbols` SQLite table with columns (path, name, kind, startLine, endLine, isExport) and indexes on `(name)` and `(path)`; schema migration is additive and safe for existing DBs
-- [ ] **SYM-04**: Repository functions `upsertSymbols(path, Symbol[])`, `getSymbolsByName(name, kind?)`, `getSymbolsForFile(path)`, `deleteSymbolsForFile(path)` with transactional writes
-- [ ] **SYM-05**: Migration-time bulk extraction — on first startup after v1.6 upgrade, iterate all tracked files and populate `symbols` (one-shot; no per-query lazy extraction)
-- [ ] **SYM-06**: `npm run inspect-symbols <path>` CLI emits the extracted symbol set for a single file — parser debugging tool, exposed via package.json scripts
-- [ ] **SYM-07**: React JSX components are classified as `function` kind (no separate `component` kind); no heuristic needed beyond existing function/arrow-function AST nodes
-- [ ] **SYM-08**: Re-exports (`export * from './foo'`) are NOT populated as symbols on the re-exporting file — direct exports only
+- [x] **SYM-01**: Parser extracts top-level symbols from TS/JS files during scan, emitting name, kind (`function` / `class` / `interface` / `type` / `enum` / `const`), `startLine`, `endLine`, and `isExport` flag
+- [x] **SYM-02**: Symbol extraction MUST share the existing AST walk with edge extraction — no second parser pass per file
+- [x] **SYM-03**: New `symbols` SQLite table with columns (path, name, kind, startLine, endLine, isExport) and indexes on `(name)` and `(path)`; schema migration is additive and safe for existing DBs
+- [x] **SYM-04**: Repository functions `upsertSymbols(path, Symbol[])`, `getSymbolsByName(name, kind?)`, `getSymbolsForFile(path)`, `deleteSymbolsForFile(path)` with transactional writes
+- [x] **SYM-05**: Migration-time bulk extraction — on first startup after v1.6 upgrade, iterate all tracked files and populate `symbols` (one-shot; no per-query lazy extraction)
+- [x] **SYM-06**: `npm run inspect-symbols <path>` CLI emits the extracted symbol set for a single file — parser debugging tool, exposed via package.json scripts
+- [x] **SYM-07**: React JSX components are classified as `function` kind (no separate `component` kind); no heuristic needed beyond existing function/arrow-function AST nodes
+- [x] **SYM-08**: Re-exports (`export * from './foo'`) are NOT populated as symbols on the re-exporting file — direct exports only
 
 ### Import-Name Extraction (enriches edges)
 
-- [ ] **IMP-01**: TS/JS dep parser, at the same AST pass, records the imported names (named imports + default import) and the source line number for each dependency edge
-- [ ] **IMP-02**: Namespace imports (`import * as ns from './foo'`) record target as `*` placeholder; no symbol-level splitting
-- [ ] **IMP-03**: Schema carries imported names and line via a join table or columns on `file_dependencies` — additive, no breaking changes to existing `file_dependencies` rows
+- [x] **IMP-01**: TS/JS dep parser, at the same AST pass, records the imported names (named imports + default import) and the source line number for each dependency edge
+- [x] **IMP-02**: Namespace imports (`import * as ns from './foo'`) record target as `*` placeholder; no symbol-level splitting
+- [x] **IMP-03**: Schema carries imported names and line via a join table or columns on `file_dependencies` — additive, no breaking changes to existing `file_dependencies` rows
 
 ### find_symbol Tool
 
@@ -56,7 +56,7 @@
 
 ### Performance Budget
 
-- [ ] **PERF-01**: Baseline captured before Phase 33: FileScopeMCP self-scan wall time and `medium-repo` fixture scan wall time
+- [x] **PERF-01**: Baseline captured before Phase 33: FileScopeMCP self-scan wall time and `medium-repo` fixture scan wall time
 - [ ] **PERF-02**: Scan wall time MUST NOT regress more than 15% from baseline at end of milestone; hard fail at 25% regression — phases revisited before merge
 
 ---
