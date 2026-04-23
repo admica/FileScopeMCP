@@ -16,8 +16,11 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
-import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
-import { extractEdges } from './language-config.js';
+import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
+import { extractEdges, extractTsJsFileParse } from './language-config.js';
+import type { EdgeResult } from './language-config.js';
+import type { Symbol as SymbolRow } from './db/symbol-types.js';
+import type { ImportMeta } from './change-detector/ast-parser.js';
 import { ChangeDetector } from './change-detector/change-detector.js';
 import type { SemanticChangeSummary } from './change-detector/types.js';
 import { cascadeStale, markSelfStale } from './cascade/cascade-engine.js';
@@ -730,9 +733,29 @@ export class ServerCoordinator {
 
       try {
         const content = await fs.readFile(filePath, 'utf-8');
-        const edges = await extractEdges(filePath, content, config.baseDirectory);
+        const ext = path.extname(filePath).toLowerCase();
+        const isTsJs = ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx';
 
-        // Map edges to legacy arrays for in-memory tree
+        let edges: EdgeResult[] = [];
+        let symbols: SymbolRow[] = [];
+        let importMeta: ImportMeta[] = [];
+        let useAtomicWrite = false;
+
+        if (isTsJs) {
+          const parsed = await extractTsJsFileParse(filePath, content, config.baseDirectory);
+          if (parsed) {
+            edges = parsed.edges;
+            symbols = parsed.symbols;
+            importMeta = parsed.importMeta;
+            useAtomicWrite = true;
+          } else {
+            edges = await extractEdges(filePath, content, config.baseDirectory);
+          }
+        } else {
+          edges = await extractEdges(filePath, content, config.baseDirectory);
+        }
+
+        // Map edges to legacy arrays for in-memory tree (unchanged behavior)
         for (const edge of edges) {
           if (edge.isPackage) {
             const pkgDep = PackageDependency.fromPath(edge.target);
@@ -744,8 +767,10 @@ export class ServerCoordinator {
           }
         }
 
-        // Store enriched edges in SQLite
-        if (edges.length > 0) {
+        if (useAtomicWrite) {
+          // TS/JS: atomic per-file write of edges + symbols + importMeta (D-15).
+          setEdgesAndSymbols(filePath, edges, symbols, importMeta);
+        } else if (edges.length > 0) {
           setEdges(filePath, edges);
         }
       } catch (error) {
