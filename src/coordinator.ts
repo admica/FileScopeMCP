@@ -16,6 +16,7 @@ import { FileWatcher, FileEventType } from './file-watcher.js';
 import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
+import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
 import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
 import { extractEdges, extractTsJsFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
@@ -272,6 +273,14 @@ export class ServerCoordinator {
       runMigrationIfNeeded(projectRoot, getSqlite());
     } catch (err) {
       log(`Migration failed (non-fatal): ${err}`);
+    }
+
+    // Phase 33 SYM-05 — populate symbols + imported_names for every TS/JS file on first boot.
+    // Non-fatal: a failure here logs and continues; the in-memory file tree is built either way.
+    try {
+      await runSymbolsBulkExtractionIfNeeded(projectRoot);
+    } catch (err) {
+      log(`Bulk symbol extraction failed (non-fatal): ${err}`);
     }
 
     try {
