@@ -29,7 +29,11 @@ import {
   getCommunities,
   getCommunityForFile,
   searchFiles,
+  findSymbols,
+  getDependentsWithImports,
+  getSymbolsForFile,
 } from './db/repository.js';
+import type { SymbolKind } from './db/symbol-types.js';
 import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
 import { detectCycles } from './cycle-detection.js';
 import { detectCommunities } from './community-detection.js';
@@ -272,7 +276,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("get_file_summary", {
     title: "Get File Summary",
-    description: "Get full intelligence for a single file: LLM-generated summary, importance score (0-10), dependency list with edge types (imports/inherits/re_exports) and confidence scores, dependents, package dependencies, concepts, change impact analysis, and staleness flags. Use this before editing a file to understand its role and relationships. Returns NOT_FOUND if the file is not in the scan database.",
+    description: "Get full intelligence for a single file: LLM-generated summary, importance score (0-10), dependency list with edge types (imports/inherits/re_exports) and confidence scores, dependents with the imported names + line numbers each dependent uses (use importLines to jump directly to the import statement), exported top-level symbols (exports[] with name/kind/startLine/endLine — Phase 34), package dependencies, concepts, change impact analysis, and staleness flags. Use this before editing a file to understand its role and relationships. Returns NOT_FOUND if the file is not in the scan database.",
     inputSchema: {
       filepath: z.string().describe("The path to the file to check"),
     },
@@ -307,7 +311,13 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
         edgeType: d.edge_type,
         confidence: d.confidence,
       })),
-      dependents: node.dependents || [],
+      // D-12 through D-16 (Phase 34 SUM-02): dependents upgraded from string[] to {path, importedNames, importLines}[]
+      dependents: getDependentsWithImports(normalizedPath),
+      // D-09 through D-11 (Phase 34 SUM-01/SUM-04): exports from symbols table, isExport=true only, sorted by startLine
+      exports: getSymbolsForFile(normalizedPath)
+        .filter(s => s.isExport)
+        .sort((a, b) => a.startLine - b.startLine)
+        .map(s => ({ name: s.name, kind: s.kind, startLine: s.startLine, endLine: s.endLine })),
       packageDependencies: node.packageDependencies || [],
       summary: node.summary || null,
       ...(staleness.summaryStale !== null && { summaryStale: staleness.summaryStale }),
@@ -315,6 +325,55 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
       ...(staleness.changeImpactStale !== null && { changeImpactStale: staleness.changeImpactStale }),
       concepts: llmData?.concepts ? JSON.parse(llmData.concepts) : null,
       changeImpact: llmData?.change_impact ? JSON.parse(llmData.change_impact) : null,
+    });
+  });
+
+  server.registerTool("find_symbol", {
+    title: "Find Symbol",
+    description: [
+      "Resolve a symbol name (function/class/interface/type/enum/const) to its defining file + line range in a single call — no need to grep source.",
+      "Exact case-sensitive match; trailing `*` switches to prefix match (e.g. `React*` matches `React`, `ReactDOM`, `Reactive`). Any other `*` in the name is treated as a literal character.",
+      "`kind` accepts: \"function\" | \"class\" | \"interface\" | \"type\" | \"enum\" | \"const\". Unknown kind returns an empty result, never an error.",
+      "`exportedOnly` defaults to `true` — private helpers only appear when you pass `exportedOnly: false`.",
+      "`maxItems` defaults to 50, clamped to [1, 500].",
+      "Response: `{items: [{path, name, kind, startLine, endLine, isExport}], total, truncated?: true}`. `total` is the pre-truncation count; `truncated` is present only when items were dropped.",
+      "Use `find_symbol` when you know a symbol name; use `get_file_summary` when you have a path and want its exports + dependents.",
+      "Returns `NOT_INITIALIZED` if the server hasn't been set up. All other outcomes (no match, unknown kind, empty prefix) return `{items: [], total: 0}` — never an error.",
+      "Example: `find_symbol(\"useState*\")` returns every symbol whose name starts with `useState`."
+    ].join(' '),
+    inputSchema: {
+      name: z.string().min(1).describe("Symbol name; trailing `*` triggers prefix match"),
+      kind: z.string().optional().describe("function | class | interface | type | enum | const (unknown kind returns empty)"),
+      exportedOnly: z.coerce.boolean().default(true).describe("Default true — pass false to include private helpers"),
+      maxItems: z.coerce.number().int().optional().describe("Max items to return, clamped to [1, 500], default 50"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ name, kind, exportedOnly, maxItems }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
+
+    // D-04: clamp maxItems to [1, 500], default 50. Zero/negative silently clamped to 1.
+    const limit = Math.max(1, Math.min(500, maxItems ?? 50));
+    // D-06: unknown kind is NOT an error — pass through to SQL, which returns 0 rows.
+    const kindFilter = kind as SymbolKind | undefined;
+    const { items, total } = findSymbols({ name, kind: kindFilter, exportedOnly, limit });
+    const truncated = items.length < total;
+
+    return mcpSuccess({
+      items: items.map(s => ({
+        path: s.path,
+        name: s.name,
+        kind: s.kind,
+        startLine: s.startLine,
+        endLine: s.endLine,
+        isExport: s.isExport,
+      })),
+      total,
+      ...(truncated && { truncated: true }),
     });
   });
 
