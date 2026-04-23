@@ -238,6 +238,65 @@ export function getDependents(filePath: string): string[] {
 }
 
 /**
+ * Phase 34 SUM-02 + D-18. Returns dependents enriched with the imported-name
+ * metadata populated by phase 33 (imported_names JSON column + import_line).
+ * One entry per source_path; names deduped + alphabetically sorted; lines
+ * ascending. Only `local_import` rows are considered (package_import excluded,
+ * matching getDependenciesWithEdgeMetadata at :220).
+ *
+ * NULL imported_names → []; NULL import_line → excluded (D-14). Never returns null on wire.
+ */
+export function getDependentsWithImports(targetPath: string): Array<{
+  path: string;
+  importedNames: string[];
+  importLines: number[];
+}> {
+  const sqlite = getSqlite();
+  const rows = sqlite
+    .prepare(
+      `SELECT source_path, imported_names, import_line
+       FROM file_dependencies
+       WHERE target_path = ? AND dependency_type = 'local_import'`
+    )
+    .all(targetPath) as Array<{
+      source_path: string;
+      imported_names: string | null;
+      import_line: number | null;
+    }>;
+
+  const bySource = new Map<string, { names: Set<string>; lines: number[] }>();
+  for (const r of rows) {
+    let bucket = bySource.get(r.source_path);
+    if (!bucket) {
+      bucket = { names: new Set(), lines: [] };
+      bySource.set(r.source_path, bucket);
+    }
+    // D-14: NULL → []; malformed JSON → [] (matches getExportsSnapshot:488 semantics)
+    if (r.imported_names !== null) {
+      try {
+        const arr = JSON.parse(r.imported_names) as unknown;
+        if (Array.isArray(arr)) {
+          for (const n of arr) {
+            if (typeof n === 'string') bucket.names.add(n);
+          }
+        }
+      } catch {
+        /* corrupt JSON — treat as empty; do not throw */
+      }
+    }
+    if (r.import_line !== null) bucket.lines.push(r.import_line);
+  }
+
+  return Array.from(bySource.entries())
+    .map(([path, { names, lines }]) => ({
+      path,
+      importedNames: Array.from(names).sort(),          // alphabetical (stable diffs, CONTEXT Specifics §)
+      importLines: lines.slice().sort((a, b) => a - b), // ascending per D-13
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));      // D-15
+}
+
+/**
  * Returns all local_import dependency edges in one batch query.
  * Used by cycle detection to build the full dependency graph without N+1 queries.
  * Package imports are excluded — they are not actionable for cycle detection.
