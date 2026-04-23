@@ -8,6 +8,18 @@ A fully autonomous file intelligence system that watches project directories and
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
+## Current Milestone: v1.6 Symbol-Level Intelligence
+
+**Goal:** Elevate FileScopeMCP from file-granular to symbol-granular for three daily-use LLM queries — kill grep for symbol navigation, expose import-names on dependent edges, add "changed since" re-orientation.
+
+**Target features:**
+- Symbol extraction (TS/JS only) — function/class/interface/type/enum/const with line ranges
+- `find_symbol` MCP tool with kind filter and exportedOnly default
+- `get_file_summary` enriched with `exports[]` + `dependents[].importedNames[]` + `importLines[]`
+- `list_changed_since` MCP tool (timestamp + git-SHA modes, no deletion tracking)
+- Parser single-pass: symbols emit alongside edges, no second AST walk
+- `npm run inspect-symbols` CLI for parser debugging
+
 ## Current State
 
 Shipped v1.5 Production-Grade MCP Intelligence Layer (2026-04-23). Six milestones complete (32 phases total).
@@ -141,6 +153,15 @@ None — defining next milestone.
 - Graph diff between scans — no clear use case
 - Real-time community updates — Louvain is batch-only; dirty-flag cache is correct pattern
 - One-script LLM backend setup — llama.cpp across platforms (Windows host, remote LAN, etc.) is inherently complex; zero-config goal applies to MCP/broker lifecycle only
+- Method-level symbols (v1.6) — reachable via class line ranges; adds parser surface without proportional query value
+- Cross-file call-site resolution (`who calls foo`) — needs full type registry, HIGH complexity
+- Fuzzy symbol search — exact + prefix match sufficient for known-name lookup
+- Re-export transitive symbols (`export * from './foo'`) — parser complexity not justified; direct exports only
+- Symbol importance scoring — file-level importance is already approximate, per-symbol is noise
+- `get_neighborhood` 2-hop graph tool — audit cut (2026-04-23): with symbol+line data, one-hop suffices; tree demos look cool but bloat at edit time
+- `find_risky_files` (changeImpact-sorted list) — audit cut (2026-04-23): LLM-generated risk scores unreliable; agents verify via tests
+- `summarize_paths` immediate-queue tool — audit cut (2026-04-23): agents prefer raw file over paragraph-about-file when editing
+- Deletion-tracking on `list_changed_since` — deferred until `deleted_files` tombstone table needed elsewhere
 
 ## Context
 
