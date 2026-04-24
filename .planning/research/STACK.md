@@ -1,192 +1,222 @@
 # Stack Research
 
-**Domain:** Production-grade MCP server hardening — testing infrastructure, MCP spec compliance, and broker lifecycle management
-**Researched:** 2026-04-17
+**Domain:** v1.7 Multi-Lang Symbols + Call-Site Edges — targeted additions to existing FileScopeMCP stack
+**Researched:** 2026-04-23
 **Confidence:** HIGH
 
 ## Context
 
-This is a targeted v1.5 addition to an existing TypeScript 5.8 / Node.js 22 / ESM / esbuild stack.
-The core stack is validated and NOT re-researched here. This document covers only the
-**new capability domains** for the v1.5 Production-Grade MCP Intelligence Layer milestone:
+This is a targeted v1.7 addition to the existing validated stack. The core stack is NOT
+re-researched here. This document covers only the **new capability domains** for v1.7:
 
-1. MCP transport mocking for in-process tool call testing
-2. Unix domain socket testing for the broker server/client
-3. File watcher testing for chokidar-based watchers with debounce
-4. MCP spec compliance validation tooling
-5. Process lifecycle management patterns (no new library needed)
+1. Go symbol extraction via tree-sitter (D-06 reconfirmation)
+2. Ruby symbol extraction via tree-sitter-ruby
+3. Python symbol extraction (already has tree-sitter-python for edges; extend to symbols)
+4. TS/JS symbol-level call-site edges — new `symbol_dependencies` schema + AST walk extension
 
 **Retained stack (do not change):** TypeScript 5.8, Node.js 22, ESM, esbuild,
-`@modelcontextprotocol/sdk@1.27.1`, `chokidar`, `zod`, `vitest@3.2.4`, `@vitest/coverage-v8`,
-`better-sqlite3`, `drizzle-orm`, `tree-sitter` (all grammars), `graphology` ecosystem,
-Vercel AI SDK, Fastify 5, Svelte 5, Vite 8.
+`@modelcontextprotocol/sdk`, `chokidar`, `zod`, `vitest@3.1.4`, `@vitest/coverage-v8`,
+`better-sqlite3@12.6.2`, `drizzle-orm@0.45.1`, `tree-sitter@0.25.0`,
+`tree-sitter-python@0.25.0`, `tree-sitter-typescript@0.23.2`, `tree-sitter-javascript@0.25.0`,
+`tree-sitter-rust@0.24.0`, `tree-sitter-c@0.24.1`, `tree-sitter-cpp@0.23.4`,
+`graphology` ecosystem, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8.
 
-**Current test setup:** `vitest@3.2.4`, `@vitest/coverage-v8@3.1.4`, 260+ tests passing,
-`globals: true`, `environment: 'node'`, v8 coverage with text/json/html reporters.
-Tests live in `src/**/*.test.ts` and `tests/**/*.test.ts`.
+---
+
+## D-06 Reconfirmation: Go Grammar Ecosystem (2026-04-23)
+
+**Decision D-06 is REVERSED for v1.7. Use `tree-sitter-go@0.25.0`.**
+
+Audit findings:
+
+- `tree-sitter-go@0.25.0` is now published on npm. Version 0.25.0 was released ~7 months ago (2025-09).
+- peerDependency is `tree-sitter: ^0.25.0` — exact match with the installed `tree-sitter@0.25.0`. No ABI conflict.
+- Grammar exports the standard `language` object via `bindings/node` — same pattern as all other tree-sitter grammars already in use.
+- Verified by live parse: `source_file` root → `function_declaration`, `method_declaration`, `type_declaration`, `const_declaration`, `var_declaration` all parse correctly.
+- The regex-based `resolveGoImports()` will be KEPT for edge extraction (Go import paths still work fine with regex). The new grammar is added ONLY for Go symbol extraction (v1.7 scope).
+
+The Go extractor in `language-config.ts` stays on regex for `extractEdges()`. A new `extractGoSymbols()` function uses `tree-sitter-go@0.25.0`.
 
 ---
 
 ## Recommended Stack — New Additions Only
 
-### Core Testing Infrastructure
+### New npm Packages
 
 | Package | Version | Purpose | Why |
 |---------|---------|---------|-----|
-| `memfs` | `^4.57.2` | In-memory file system for chokidar watcher tests | Officially recommended by the Vitest team for fs mocking. Replaces real-fs calls with an in-memory vol; avoids flaky timing-based watcher tests. Used via `vi.mock('node:fs')` + `vi.mock('node:fs/promises')` pointing at memfs. v4.x is the current major. |
-| `@modelcontextprotocol/inspector` | `^0.21.2` | MCP spec compliance smoke-testing via CLI | The official MCP protocol compliance tool. CLI mode (`--cli`) produces JSON output suitable for scripting. Used as a `devDependency` and invoked via npm script against the built server binary to verify tool schemas, capabilities, and response shapes comply with the MCP spec. Not used in the vitest suite itself — a separate npm script. |
+| `tree-sitter-go` | `^0.25.0` | Go grammar for tree-sitter — Go symbol extraction | Stable npm package, peerDep ^0.25.0 matches installed tree-sitter exactly. No binary conflict. Provides `function_declaration`, `method_declaration`, `type_declaration`, `const_declaration` for Go symbol extraction. |
+| `tree-sitter-ruby` | `^0.23.1` | Ruby grammar for tree-sitter — Ruby symbol extraction | Latest version. peerDep ^0.21.1 (^0.21.1 = >=0.21.1 <1.0.0 in semver, compatible with 0.25.0). Live-tested: loads cleanly with tree-sitter@0.25.0, parses `program` → `method`, `singleton_method`, `class`, `module` correctly. |
 
-**NOT adding (see What NOT to Add section):**
-- No new test runner — vitest@3.2.4 is the right version (do not upgrade to v4 yet)
-- No additional assertion libraries — vitest's built-in Chai assertions are sufficient
-- No process manager library (PM2, execa, etc.) — Node.js `child_process` is sufficient for the broker lifecycle patterns needed
+### No New Packages for Call-Site Edges
 
-### What's Already Available (No New Packages)
+Call-site edge extraction for TS/JS uses the **existing tree-sitter parsers** (already installed).
+The call_expression walk is added to `extractRicherEdges()` in `ast-parser.ts` — same single AST pass.
+No ts-morph, no TypeScript language service. See trade-off analysis below.
 
-| Capability | Source | How |
-|------------|--------|-----|
-| MCP transport mocking | `@modelcontextprotocol/sdk@1.27.1` (already installed) | `InMemoryTransport.createLinkedPair()` from `@modelcontextprotocol/sdk/inMemory.js` — verified importable in this project. Pairs a server-side and client-side transport for in-process MCP testing without spawning a subprocess. |
-| MCP client for tool invocation | `@modelcontextprotocol/sdk@1.27.1` (already installed) | `Client` from `@modelcontextprotocol/sdk/client/index.js` — provides `listTools()` and `callTool()`. Used with `InMemoryTransport` to exercise MCP tools without any stdio involvement. |
-| Unix socket testing | Node.js 22 `node:net` (built-in) | `net.createServer()` / `net.createConnection()` with a per-test socket path (e.g., `\0filescope-test-${process.pid}` for Linux abstract sockets that auto-cleanup). Wrap callbacks in Promises for vitest's async test pattern. |
-| Fake timers for debounce/backoff | `vitest@3.2.4` (already installed) | `vi.useFakeTimers()` / `vi.advanceTimersByTime()` — vitest uses `@sinonjs/fake-timers` internally. Controls setTimeout/setInterval debounce in watcher and broker reconnect logic without real-time waits. |
-| Process signal testing | Node.js 22 `process` (built-in) | `process.emit('SIGTERM')` to trigger shutdown handlers in tests. Broker lifecycle cleanup (PID files, socket unlink) verified by testing the registered signal handlers directly without spawning child processes. |
+### Schema Addition (No New Library)
+
+A new `symbol_dependencies` table in `schema.ts` using the existing `drizzle-orm` and `better-sqlite3`.
+Raw `getSqlite().prepare(...)` is used for the "who calls foo" and "what does foo call" queries —
+consistent with the existing pattern in `repository.ts` (getSqlite is already used for 60%+ of queries).
+No recursive CTEs needed in v1.7 (transitive call graph is Out of Scope per PROJECT.md).
+
+---
+
+## Symbol Kind Additions to SymbolKind Type
+
+The current `SymbolKind = 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const'` needs extension
+for the new languages. Additions are additive — the `find_symbol` tool already accepts unknown kinds and
+returns empty (never an error), so existing callers are safe.
+
+| New Kind | Language | Source Node Type | Notes |
+|----------|----------|-----------------|-------|
+| `'module'` | Ruby | `module` AST node | Ruby modules are top-level namespaces — distinct from classes. Equivalent to TS `namespace`. |
+| `'variable'` | Go | `var_declaration` → `var_spec` | Go module-level `var` declarations. Distinct from `const`. |
+| `'struct'` | Go | `type_declaration` → `type_spec` with `struct_type` inner | Go structs are the primary data type, more specific than `class`. |
+
+TS/JS-originated kinds (`interface`, `type`, `enum`, `const`) remain unchanged.
+Python adds no new kinds: `function_definition` → `'function'`, `class_definition` → `'class'`.
+
+---
+
+## AST Node Types for Symbol Extraction
+
+### Python (tree-sitter-python@0.25.0 — already installed)
+
+Python symbol extraction at `extractTsJsFileParse()` parity — single AST pass alongside edges.
+
+| Node Type | Maps To | Key Fields | Notes |
+|-----------|---------|-----------|-------|
+| `function_definition` | `'function'` | `name: (identifier)` | Covers both sync and async. Async functions have an `async` keyword child but node type is still `function_definition` (verified live). `startPosition.row` includes `async` keyword. |
+| `class_definition` | `'class'` | `name: (identifier)` | Includes superclass via `superclasses` field. |
+| `decorated_definition` | Depends on inner | inner child is `function_definition` or `class_definition` | Use `positionSource = decorated_definition` for startLine (decorator lines included), inner node's `name` field for symbol name. Same Pitfall 7 pattern as TS/JS decorators. |
+
+NOT extracted: `expression_statement` wrapping `assignment` (module-level variables like `MY_VAR = 42`).
+Python variables lack explicit type annotations at module level, making kind classification ambiguous.
+Scope cut: same rationale as TS `let`/`var` — `const` equivalent in Python is convention, not syntax.
+
+### Ruby (tree-sitter-ruby@0.23.1 — NEW)
+
+| Node Type | Maps To | Key Fields | Notes |
+|-----------|---------|-----------|-------|
+| `method` | `'function'` | `name: (identifier)` | `def foo ... end` — top-level or within class body. At top-level, `is_export` = false (Ruby has no export keyword). |
+| `singleton_method` | `'function'` | `name: (identifier)`, `object: (self)` | `def self.foo ... end` — class methods. `is_export` = false. |
+| `class` | `'class'` | `name: (constant)` or `name: (scope_resolution)` | `class Foo ... end`. Name can be `constant` or `Foo::Bar` scope resolution. |
+| `module` | `'module'` | `name: (constant)` | `module Foo ... end`. |
+
+Ruby `program` node is the root (equivalent to JS `program` or TS `program`).
+Top-level walk: iterate `root.namedChildren`, check type, recurse into `body_statement` of `class`/`module` nodes for nested definitions.
+
+**Nesting decision:** Extract only top-level symbols (same as TS/JS v1.6 scope). Methods nested inside a class are NOT extracted at the first iteration — they are reachable via class `startLine`/`endLine` range. v1.8 can add nested extraction if needed.
+
+### Go (tree-sitter-go@0.25.0 — NEW)
+
+| Node Type | Maps To | Key Fields | Notes |
+|-----------|---------|-----------|-------|
+| `function_declaration` | `'function'` | `name: (identifier)` | `func Foo() {}`. Package-level function. |
+| `method_declaration` | `'function'` | `name: (field_identifier)`, `receiver: (parameter_list)` | `func (r *T) Foo() {}`. Method on a type. |
+| `type_declaration` → `type_spec` with `struct_type` | `'struct'` | `type_spec.name: (type_identifier)` | `type Foo struct {}`. |
+| `type_declaration` → `type_spec` with `interface_type` | `'interface'` | `type_spec.name: (type_identifier)` | `type Foo interface {}`. |
+| `type_declaration` → `type_alias` | `'type'` | `type_alias.name: (type_identifier)` | `type MyError = error`. |
+| `const_declaration` → `const_spec` | `'const'` | `const_spec.name` (first named child of const_spec) | `const MaxSize = 100`. |
+
+NOT extracted: `var_declaration` (Go module-level vars). Low value for symbol navigation.
+NOT extracted: `type_declaration` → `type_spec` with other inner types (e.g., channel, map types) — too obscure.
+
+Go `source_file` is the root node. Walk immediate children of `source_file` only (top-level symbols).
+
+---
+
+## Call-Site Edge Extraction: Tree-Sitter Walk (Not ts-morph)
+
+### Decision: Extend `extractRicherEdges()` in `ast-parser.ts`
+
+Use the existing tree-sitter walk in `extractRicherEdges()` to also collect `call_expression` nodes.
+Resolve callee names against the import name map already built during the same walk.
+
+**Resolution algorithm (in-file AST walk):**
+1. During the `visitNode()` pass, collect `call_expression` nodes. For each:
+   - Extract callee = `node.childForFieldName('function')`.
+   - If callee is `identifier`: base name = `callee.text`.
+   - If callee is `member_expression`: base name = `callee.childForFieldName('object').text`.
+2. Look up base name in `importNameToSource` map (already built from `import_statement` nodes).
+   - If found: edge is cross-file. Record `(callee_name, source_specifier, call_line)`.
+   - If not found: edge is intra-file (local function call). Record `(callee_name, null, call_line)`.
+3. After extracting the file's own symbols, resolve intra-file calls: look up callee_name in the
+   file's own symbol list (just built in the same pass). Match by `symbol.name === callee_name`.
+4. For cross-file calls: defer resolution to a post-pass that queries the `symbols` table for
+   `(path = resolved_target_file, name = callee_name)`. This is a synchronous `better-sqlite3`
+   query against the already-populated symbols table.
+
+The result is a list of `(caller_symbol_id, callee_symbol_id, call_line)` tuples written to
+the new `symbol_dependencies` table.
+
+**Confidence of call-site edges:** INFERRED (0.8). Name-based matching without type information
+means overloaded names (same function name in multiple files) may produce false positives.
+The confidence field on `symbol_dependencies` encodes this.
+
+### Why NOT ts-morph
+
+| Criterion | tree-sitter (chosen) | ts-morph |
+|-----------|---------------------|---------|
+| Startup cost | 0 (parsers already loaded) | 235ms+ import, 500ms-2s for large project load |
+| Per-file cost | O(file_size), streaming | O(project_size), batch |
+| Incremental fit | Fits existing single-pass model | Breaks incremental model |
+| Memory footprint | ~0 additional | 100-300MB TypeScript language service |
+| Accuracy | Name-based (INFERRED 0.8) | Type-aware (would be EXTRACTED 1.0) |
+| Dependency | No new dep | ts-morph@28 (though TS already in devDeps) |
+| Correctness for overloads | False positives possible | Resolves correctly |
+| Cross-file resolution | Import map + DB lookup | Full TypeScript resolution |
+
+ts-morph is the right choice IF the requirement is "cross-file call resolution with full type accuracy."
+PROJECT.md lists "Cross-file call resolution — requires type registry, HIGH complexity" as Out of Scope.
+The v1.7 goal is "resolve call expressions to symbol IDs" — name-based resolution is sufficient for
+the primary use case ("who calls foo" in a focused agent query context).
+
+ts-morph can be reconsidered in a future milestone if type-accurate resolution is needed.
+
+---
+
+## New Schema: symbol_dependencies
+
+Add to `src/db/schema.ts`. No new library required — uses existing `drizzle-orm/sqlite-core` imports.
+
+```typescript
+// Phase N — symbol-level call-site edges.
+// caller_symbol_id / callee_symbol_id reference symbols(id) logically (no FK — same rationale as symbols table).
+// Purged via deleteSymbolDepsForFile() when a file is deleted or re-extracted.
+export const symbol_dependencies = sqliteTable('symbol_dependencies', {
+  id:               integer('id').primaryKey({ autoIncrement: true }),
+  caller_symbol_id: integer('caller_symbol_id').notNull(),
+  callee_symbol_id: integer('callee_symbol_id').notNull(),
+  call_line:        integer('call_line'),           // 1-indexed source line of the call_expression
+  confidence:       real('confidence').notNull().default(0.8),
+}, (t) => [
+  index('symdep_caller_idx').on(t.caller_symbol_id),   // "what does foo call"
+  index('symdep_callee_idx').on(t.callee_symbol_id),   // "who calls foo"
+]);
+```
+
+Both indices are required. "Who calls foo" (callee lookup) is the primary MCP query pattern.
+"What does foo call" (caller lookup) is secondary but needed for impact analysis.
+
+**No recursive CTEs in v1.7.** The "who calls foo transitively" use case is Out of Scope per PROJECT.md.
+When needed in v1.8+, `getSqlite().prepare('WITH RECURSIVE ...')` works fine with better-sqlite3.
+Drizzle's `db.$with()` supports non-recursive CTEs only; recursive CTEs require raw SQL.
 
 ---
 
 ## Installation
 
 ```bash
-# New dev dependencies
-npm install -D memfs @modelcontextprotocol/inspector
+# Two new production dependencies
+npm install tree-sitter-go tree-sitter-ruby
 ```
 
 That is the complete install step. No other packages needed.
 
----
-
-## Integration Patterns
-
-### Pattern 1: In-Process MCP Tool Testing (InMemoryTransport)
-
-The correct pattern for testing MCP tool handlers without spawning a subprocess:
-
-```typescript
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
-// In your test:
-const server = new McpServer({ name: 'test', version: '1.0.0' });
-// Register tools the same way your production code does
-
-const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-await server.connect(serverTransport);
-
-const client = new Client({ name: 'test-client', version: '1.0.0' });
-await client.connect(clientTransport);
-
-const tools = await client.listTools();
-const result = await client.callTool({ name: 'get_file_summary', arguments: { path: '/some/file.ts' } });
-
-await client.close();
-```
-
-**Why this pattern:** Tests the actual MCP protocol layer (JSON-RPC serialization, tool dispatch, response shapes) without any process boundaries. `InMemoryTransport` is verified present in the installed SDK v1.27.1 at `dist/esm/inMemory.js` and importable from `@modelcontextprotocol/sdk/inMemory.js`.
-
-**Important SDK version note:** The Context7/migration docs mention `InMemoryTransport` was moved in a v2 SDK refactor. The installed SDK is v1.27.1 (not v2) — `InMemoryTransport` is importable from the public `inMemory.js` path and `createLinkedPair()` is confirmed working.
-
-### Pattern 2: Unix Socket Testing (Broker)
-
-```typescript
-import * as net from 'node:net';
-import * as os from 'node:os';
-import * as path from 'node:path';
-
-// Use Linux abstract socket (no file cleanup needed)
-const SOCK = `\0filescope-test-${process.pid}`;
-
-describe('BrokerServer', () => {
-  let server: net.Server;
-
-  beforeAll(() => new Promise<void>((resolve) => {
-    server = net.createServer(handleConnection);
-    server.listen(SOCK, resolve);
-  }));
-
-  afterAll(() => new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  }));
-
-  it('handles submit message', () => new Promise<void>((resolve) => {
-    const client = net.createConnection(SOCK, () => {
-      client.write(JSON.stringify({ type: 'submit', ... }) + '\n');
-    });
-    client.once('data', (data) => {
-      const msg = JSON.parse(data.toString());
-      expect(msg.type).toBe('result');
-      client.destroy();
-      resolve();
-    });
-  }));
-});
-```
-
-**Abstract socket note:** `\0<name>` is Linux-only and auto-cleans when all refs close — no `fs.unlinkSync` cleanup needed. The project already targets Linux/WSL2 only (confirmed in PROJECT.md runtime constraint), so this is safe.
-
-**Alternatively** use `path.join(os.tmpdir(), 'filescope-test-' + process.pid + '.sock')` for portability, with explicit unlink in `afterAll`.
-
-### Pattern 3: File Watcher Testing (chokidar + memfs)
-
-```typescript
-import { vi } from 'vitest';
-import { fs, vol } from 'memfs';
-
-vi.mock('node:fs', async () => {
-  const { fs } = await vi.importActual('memfs') as typeof import('memfs');
-  return { default: fs, ...fs };
-});
-vi.mock('node:fs/promises', async () => {
-  const { fs } = await vi.importActual('memfs') as typeof import('memfs');
-  return { default: fs.promises, ...fs.promises };
-});
-
-// Mock chokidar to emit events manually (avoids real FS watching)
-const mockWatcher = new EventEmitter();
-vi.mock('chokidar', () => ({
-  default: { watch: vi.fn(() => mockWatcher) },
-}));
-
-beforeEach(() => {
-  vol.reset();  // Fresh in-memory fs for each test
-  vi.useFakeTimers();
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
-
-it('debounces rapid file changes', () => {
-  mockWatcher.emit('change', '/src/foo.ts');
-  mockWatcher.emit('change', '/src/foo.ts');
-  vi.advanceTimersByTime(500); // advance past debounce window
-  expect(handleChange).toHaveBeenCalledTimes(1); // deduplicated
-});
-```
-
-**Why vi.mock chokidar instead of real fs events:** Chokidar uses OS-level inotify/kqueue/FSEvents which don't fire on memfs writes. Mocking chokidar's `watch()` return value gives full control over event timing and avoids flaky real-watcher tests.
-
-### Pattern 4: MCP Inspector Compliance Script
-
-Add to `package.json` scripts (not a vitest test):
-
-```json
-"scripts": {
-  "test:mcp-compliance": "npx @modelcontextprotocol/inspector --cli node dist/mcp-server.js -- --project /tmp/test-repo 2>/dev/null | node scripts/verify-compliance.cjs"
-}
-```
-
-The inspector CLI outputs JSON. A small Node.js script (`scripts/verify-compliance.cjs`) parses the JSON and asserts required tools exist with correct schema shapes. This runs in CI after `npm run build`, separate from the vitest suite.
+Expected output: `tree-sitter-go@0.25.0`, `tree-sitter-ruby@0.23.1`.
 
 ---
 
@@ -194,14 +224,11 @@ The inspector CLI outputs JSON. A small Node.js script (`scripts/verify-complian
 
 | Recommended | Alternative | Why Not |
 |-------------|-------------|---------|
-| `InMemoryTransport` (built-in to SDK) | `StdioClientTransport` spawning a subprocess | Subprocess tests are slow (200-500ms per spawn), hard to control timing, and don't isolate the tool handler logic from process startup. InMemoryTransport tests are synchronous and 10-50x faster. |
-| `InMemoryTransport` (built-in to SDK) | Mocking the entire `McpServer` | Mocking McpServer means not testing the actual MCP dispatch layer. InMemoryTransport exercises the real JSON-RPC serialization path. |
-| `memfs` for fs mocking | Real temp directories | Real directories require cleanup, are affected by OS file system limits, and make tests depend on disk I/O timing. memfs is instantaneous and deterministic. |
-| `vi.mock('chokidar', ...)` | Real chokidar with memfs | Chokidar uses OS-level inotify which does NOT fire for memfs writes — mixing them produces tests that never emit events. Mock chokidar entirely and emit events manually. |
-| `vi.useFakeTimers()` for debounce | `setTimeout` with real waits | Real waits make watcher debounce tests take 500ms+ each. Fake timers make them instant. |
-| Linux abstract sockets (`\0name`) | Temp file sockets | Abstract sockets auto-cleanup, need no unlink, and don't risk path length issues (`sockaddr_un.sun_path` limit is 107 bytes on Linux). The project is WSL2/Linux only. |
-| `@modelcontextprotocol/inspector` CLI | Writing a custom MCP client validator | Inspector is the official reference client maintained by the MCP team. It knows about all protocol nuances. A custom validator would need constant maintenance as the spec evolves. |
-| vitest@3.2.4 (keep current) | Upgrade to vitest@4.x | Vitest 4 requires Vite >= 6 (currently on Vite 8 — this is actually compatible), but the coverage V8 changes produce different coverage numbers and `vi.restoreAllMocks()` behavior changed (no longer resets `vi.fn()` mocks). The v3 → v4 migration risk is not worth it for this milestone. Upgrade is a separate task. |
+| `tree-sitter-go@0.25.0` for Go symbols | Continue D-06 regex path | Regex extractGoImports works for edges but produces no symbol names or line ranges. Now that tree-sitter-go is stable on npm with the right peerDep, the grammar path is superior for symbols. Edge extraction stays on regex — no regression. |
+| `tree-sitter-ruby@0.23.1` for Ruby symbols | Regex-based Ruby symbol extraction | No reliable regex for Ruby method/class/module extraction (Ruby syntax is complex, blocks look like method bodies). Tree-sitter gives accurate line ranges and handles edge cases (one-liner defs, endless methods). |
+| tree-sitter call_expression walk for call-site edges | ts-morph `findReferences()` | ts-morph requires loading entire project TypeScript language service (235ms import + project-size startup), breaks incremental per-file model, adds 13MB+ to node_modules. Name-based resolution at INFERRED 0.8 is sufficient for v1.7 agent queries. |
+| `symbol_dependencies` table with symbol IDs | Denormalized table with (caller_path, caller_name, callee_path, callee_name) | Denormalized table duplicates data already in `symbols` table. ID-based JOIN is slightly more complex but keeps data normalized, and the query pattern (lookup by callee_symbol_id) maps directly to a single index. |
+| Raw `getSqlite()` for call graph queries | drizzle-orm query builder | Drizzle doesn't support recursive CTEs (future need) and the JOINs across `symbols` + `symbol_dependencies` are cleaner in raw SQL. Consistent with existing repository.ts pattern. |
 
 ---
 
@@ -209,42 +236,61 @@ The inspector CLI outputs JSON. A small Node.js script (`scripts/verify-complian
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `execa` or `cross-spawn` | Adding a subprocess library for broker lifecycle testing adds a dependency purely for test infrastructure. The broker's signal handlers and PID cleanup can be tested by calling the registered handlers directly (no subprocess needed). | `process.emit('SIGTERM')` to trigger shutdown logic directly in unit tests |
-| `pm2` or `forever` | Process managers for production runtime. The broker is a standalone Node.js process managed by users, not by a process manager. Adding PM2 coupling would complicate zero-config goals. | SIGTERM/SIGINT handlers + PID file pattern (pure Node.js stdlib) |
-| `jest-mock-extended` or `sinon` | Redundant with vitest's built-in `vi.fn()`, `vi.spyOn()`, and `vi.mock()`. Adding another mock library creates two mock systems in the same codebase. | `vi.fn()`, `vi.spyOn()`, `vi.mock()` (already in vitest) |
-| `@vitest/ui` | Browser-based test UI. No value for CI or LLM-agent workflows. Adds overhead. | `vitest --reporter=verbose` for human review |
-| `supertest` or `axios` for broker testing | HTTP testing libraries are irrelevant — the broker uses Unix domain socket + NDJSON, not HTTP. | `node:net` directly |
-| `nock` or `msw` | HTTP interceptors for mocking network calls. The system uses a local Ollama instance, and LLM calls should be vi.mock'd at the Vercel AI SDK adapter level, not intercepted at HTTP. | `vi.mock('../../src/broker/worker.js', ...)` to prevent real Ollama calls in tests |
-| `@modelcontextprotocol/core` | Internal MCP SDK package only meant for testing per migration docs. The public `@modelcontextprotocol/sdk/inMemory.js` path is sufficient and stable in v1.27.1. | `@modelcontextprotocol/sdk/inMemory.js` (already installed) |
-| `vitest-memfs` (companion package) | Adds snapshot-based filesystem matchers. The project doesn't need filesystem snapshot testing — it needs mocked fs for watcher isolation. The base `memfs` package is sufficient. | `memfs` directly |
+| `ts-morph` | Type-aware call resolution is not required for v1.7. Adds 235ms startup overhead, ~13MB, and fundamentally breaks the per-file streaming model that keeps scan wall-time under budget. | tree-sitter call_expression walk in existing `extractRicherEdges()` |
+| TypeScript Compiler API directly (`typescript` pkg) | Same problems as ts-morph, more verbose, no benefit. | Same |
+| `tree-sitter-go@<0.25.0` | Older versions have peerDep ^0.21.x — potentially ABI-incompatible with installed tree-sitter@0.25.0. | `tree-sitter-go@^0.25.0` only |
+| A separate Go symbol-extractor that re-uses `resolveGoImports()` regex | Symbol extraction needs line ranges, which regex cannot provide reliably for multi-line function signatures. | `tree-sitter-go@0.25.0` AST walk |
+| `@typescript/language-server` or language-server protocol deps | Language servers are designed for editor integration, not daemon extraction. | tree-sitter |
+| `acorn` or `babel/parser` | Redundant — tree-sitter-typescript/javascript already parse TS/JS. Two AST libraries for the same language is waste. | tree-sitter (already installed) |
+| Drizzle schema migrations for `symbol_dependencies` | The project uses manual SQLite migrations (additive ALTER TABLE or CREATE TABLE IF NOT EXISTS) with a version integer, not drizzle-kit migrations in production. Match existing pattern. | Manual `CREATE TABLE IF NOT EXISTS` in migration logic |
+| Recursive CTE infrastructure | Transitive call graph queries are Out of Scope per PROJECT.md. Don't over-engineer. | Simple JOIN on `symbol_dependencies` |
 
 ---
 
 ## Version Compatibility
 
-| Package | Version | Compatible With | Notes |
-|---------|---------|-----------------|-------|
-| `memfs@^4.57.2` | latest | Node.js 22, vitest@3.2.4, ESM | v4.x works with both `node:fs` and `node:fs/promises` mocking. Load via `vi.importActual('memfs')` in mock factory. |
-| `@modelcontextprotocol/inspector@^0.21.2` | latest | Node.js 22 | Used only as `npx` invocation in npm scripts or as devDep. Not imported into test files. |
-| `@modelcontextprotocol/sdk@1.27.1` (existing) | installed | `InMemoryTransport` confirmed available at `dist/esm/inMemory.js` | The migration note about `InMemoryTransport` moving to `@modelcontextprotocol/core` applies to a hypothetical future v2 SDK — not the current v1.27.1. Import from `@modelcontextprotocol/sdk/inMemory.js`. |
-| `vitest@3.2.4` (existing) | installed | Node.js 22, `@sinonjs/fake-timers` built-in | Do NOT upgrade to v4 in this milestone. The coverage V8 changes and `vi.restoreAllMocks()` behavior change in v4 would require a separate migration audit. |
+| Package | Version | Compatible With | Verified |
+|---------|---------|-----------------|---------|
+| `tree-sitter-go@0.25.0` | latest | `tree-sitter@0.25.0` (peerDep ^0.25.0 — exact match) | HIGH — peerDep verified via `npm view`, live parse test confirmed `function_declaration`/`method_declaration`/`type_declaration`/`const_declaration` |
+| `tree-sitter-ruby@0.23.1` | latest | `tree-sitter@0.25.0` (peerDep ^0.21.1 = >=0.21.1 <1.0.0, covers 0.25.0) | HIGH — live test confirmed: loads cleanly, parses `program` → `method`, `singleton_method`, `class`, `module` without error |
+| `tree-sitter-python@0.25.0` | already installed | `tree-sitter@0.25.0` | HIGH — already working in production (v1.4+) |
+| `better-sqlite3@12.6.2` | already installed | New `symbol_dependencies` table | HIGH — existing `getSqlite().prepare()` pattern, no new library needed |
+| `drizzle-orm@0.45.1` | already installed | `symbol_dependencies` table schema definition | HIGH — table added to schema.ts same as `symbols` table |
+
+---
+
+## Key Decisions for v1.7
+
+| Decision | Rationale |
+|----------|-----------|
+| D-06 reversed: tree-sitter-go@0.25.0 for Go symbols | Grammar is now stable on npm with correct peerDep. Use for symbols only — edge extraction stays on regex. |
+| tree-sitter-ruby@0.23.1 for Ruby symbols | Only reliable option for line-range symbol extraction. peerDep semver-compatible with tree-sitter@0.25.0. Tested. |
+| Python symbol extraction extends existing tree-sitter-python (no new package) | tree-sitter-python already installed and working for edges. Symbol walk is additive to `extractPythonEdges()`. |
+| Call-site edges via tree-sitter call_expression walk (not ts-morph) | Fits incremental per-file model. No startup overhead. INFERRED 0.8 confidence is sufficient for v1.7 agent queries. |
+| `symbol_dependencies` table with dual indices | Simple JOIN queries for "who calls foo" and "what does foo call". No recursive CTEs in v1.7. |
+| SymbolKind extended with 'module', 'struct' | Ruby modules and Go structs are distinct from 'class'. Additive — find_symbol tool handles unknown kinds gracefully. |
+| Top-level symbols only for Python/Ruby/Go | Same scope as TS/JS v1.6. Nested method extraction deferred to v1.8. Line ranges make nesting navigable anyway. |
+| isExport = false for all Ruby/Python/Go symbols | These languages have no `export` keyword. The `is_export` field is TS/JS-specific; defaults false for other languages. |
 
 ---
 
 ## Sources
 
-- `/home/autopcap/FileScopeMCP/node_modules/@modelcontextprotocol/sdk/dist/esm/inMemory.d.ts` — confirmed `InMemoryTransport.createLinkedPair()` available in v1.27.1 (HIGH confidence — live codebase)
-- `node --input-type=module` verification — confirmed `import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'` works and `createLinkedPair` is a function (HIGH confidence — live verification)
-- `/modelcontextprotocol/typescript-sdk` via Context7 — confirmed InMemoryTransport usage pattern, StdioClientTransport for subprocess testing, Client listTools/callTool API (HIGH confidence — official docs)
-- `npm view memfs version` — confirmed v4.57.2 is current (HIGH confidence — live npm registry)
-- `npm view @modelcontextprotocol/inspector version` — confirmed v0.21.2 is current (HIGH confidence — live npm registry)
-- [Vitest file system mocking docs](https://vitest.dev/guide/mocking/file-system) — official recommendation of memfs for fs mocking (HIGH confidence — official docs)
-- [Vitest fake timers docs](https://vitest.dev/guide/mocking/timers) — confirmed vi.useFakeTimers() / vi.advanceTimersByTime() API (HIGH confidence — official docs)
-- [MCP Inspector GitHub](https://github.com/modelcontextprotocol/inspector) — confirmed CLI mode (`--cli` flag), JSON output for automation (HIGH confidence — official)
-- [Node.js net docs](https://nodejs.org/api/net.html) — confirmed Linux abstract socket pattern `\0name` for test isolation (HIGH confidence — official docs)
-- [Vitest 4.0 release notes](https://vitest.dev/blog/vitest-4) — confirmed breaking changes in vi.restoreAllMocks() and coverage V8; rationale for staying on v3 (HIGH confidence — official release notes)
+- `npm view tree-sitter-go` — confirmed `0.25.0` latest, `peerDependencies: { tree-sitter: '^0.25.0' }` (HIGH confidence — live npm registry, 2026-04-23)
+- `npm view tree-sitter-ruby` — confirmed `0.23.1` latest, `peerDependencies: { tree-sitter: '^0.21.1' }` (HIGH confidence — live npm registry, 2026-04-23)
+- Live parse test: `tree-sitter-ruby@0.23.1` + `tree-sitter@0.25.0` in `/tmp/test-ts-ruby` — confirmed load + parse without errors (HIGH confidence — live test)
+- Live parse test: `tree-sitter-go@0.25.0` + `tree-sitter@0.25.0` — confirmed `function_declaration`, `method_declaration`, `type_declaration`, `const_declaration` (HIGH confidence — live test)
+- Live Python AST probe: `async def` nodes have type `function_definition` (not `async_function_definition`) — `async` is a keyword child (HIGH confidence — live test against installed `tree-sitter-python@0.25.0`)
+- Context7 `/tree-sitter/tree-sitter-python` — `decorated_definition` node wraps `function_definition` or `class_definition` with `decorator` children (HIGH confidence)
+- Context7 `/tree-sitter/tree-sitter-ruby` — `method`, `singleton_method`, `class`, `module` node types with `name` field; `body_statement` wraps class body (HIGH confidence)
+- Context7 `/tree-sitter/tree-sitter-go` — `function_declaration`, `method_declaration`, `type_spec`, `const_spec` node types (HIGH confidence)
+- Context7 `/dsherret/ts-morph` — `findReferences()` API, `Project.addSourceFilesAtPaths()` semantics; confirms whole-project loading model (HIGH confidence)
+- Live ts-morph startup benchmark: `import { Project } from 'ts-morph'` = 235ms in `/tmp/test-tsmorph` (HIGH confidence — live measurement)
+- `/home/autopcap/FileScopeMCP/src/db/schema.ts` — existing schema patterns for additive table design (HIGH confidence — codebase)
+- `/home/autopcap/FileScopeMCP/src/language-config.ts` — existing Go regex path (D-06), grammar loading pattern (HIGH confidence — codebase)
+- `/home/autopcap/FileScopeMCP/src/change-detector/ast-parser.ts` — `extractRicherEdges()` single-pass model, `importNameToSource` map (HIGH confidence — codebase)
 
 ---
 
-*Stack research for: FileScopeMCP v1.5 Production-Grade MCP Intelligence Layer — new testing capabilities only*
-*Researched: 2026-04-17*
+*Stack research for: FileScopeMCP v1.7 Multi-Lang Symbols + Call-Site Edges — new capabilities only*
+*Researched: 2026-04-23*

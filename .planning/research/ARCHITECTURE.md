@@ -1,496 +1,553 @@
 # Architecture Research
 
-**Domain:** Production hardening of an existing MCP server + standalone LLM broker
-**Researched:** 2026-04-17
-**Confidence:** HIGH
+**Domain:** Incremental extension of an existing MCP server — multi-language symbol extraction and call-site dependency edges
+**Researched:** 2026-04-23
+**Confidence:** HIGH (all claims based on direct codebase inspection)
 
 ---
 
-## Existing System Overview
+## System Context: What v1.7 Is Adding To
+
+The existing v1.6 system already has a clean, well-factored extraction pipeline:
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                        Claude Code (MCP host)                                 │
-│  ┌──────────────────────────────────────────────────────────────────────┐    │
-│  │             MCP stdio JSON-RPC (per-repo process)                    │    │
-│  └─────────────────────────┬────────────────────────────────────────────┘    │
-└───────────────────────────-┼─────────────────────────────────────────────────┘
-                             │ stdin/stdout
-┌────────────────────────────▼─────────────────────────────────────────────────┐
-│                    dist/mcp-server.js (MCP mode)                              │
-│                                                                               │
-│  StdioTransport  ──▶  McpServer (SDK v1.27.1)                                │
-│                         │                                                     │
-│                         ▼  registerTools() — 14 tools via server.tool()      │
-│                    ServerCoordinator                                           │
-│                    ┌─────────────────────────────────────────┐                │
-│                    │  AsyncMutex (serializes tree mutations)  │                │
-│                    │  FileWatcher (chokidar, 2s debounce)    │                │
-│                    │  ChangeDetector (AST + LLM diff)        │                │
-│                    │  CascadeEngine                           │                │
-│                    │  BrokerClient (connect/submit)           │                │
-│                    └──────────────────┬──────────────────────┘                │
-│                                      │                                        │
-│                    ┌─────────────────▼──────────────────────┐                │
-│                    │  SQLite (.filescope/data.db)             │                │
-│                    │  drizzle-orm + better-sqlite3, WAL mode  │                │
-│                    │  tables: files, file_dependencies,       │                │
-│                    │          file_communities, schema_version│                │
-│                    └─────────────────────────────────────────┘                │
-└──────────────────────────────────────┬───────────────────────────────────────┘
-                                       │ Unix socket IPC (NDJSON)
-                                       │ ~/.filescope/broker.sock
-┌──────────────────────────────────────▼───────────────────────────────────────┐
-│                    dist/broker/main.js (singleton daemon)                     │
-│                                                                               │
-│  BrokerServer (net.Server)                                                    │
-│  ┌──────────────────────────────────────────────────────────────────────┐    │
-│  │  PriorityQueue (binary heap, dedup map, lazy deletion)               │    │
-│  │  BrokerWorker (serial Ollama calls via Vercel AI SDK)                │    │
-│  │  PID guard + stale socket cleanup on startup                         │    │
-│  │  Stats persistence (~/.filescope/stats.json)                         │    │
-│  └──────────────────────────────────────────────────────────────────────┘    │
-│                                                                               │
-│  Lifecycle files:                                                             │
-│    ~/.filescope/broker.sock   — Unix domain socket                           │
-│    ~/.filescope/broker.pid    — PID file (live guard)                        │
-│    ~/.filescope/broker.log    — structured log                               │
-│    ~/.filescope/broker.json   — config (auto-copied from broker.default.json)│
-└──────────────────────────────────────────────────────────────────────────────┘
+coordinator.ts (scan pass 2)
+    |── isTsJs? YES → extractTsJsFileParse()  ← single AST pass for edges + symbols + importMeta
+    |                        |
+    |                 setEdgesAndSymbols()       ← atomic transaction: file_dependencies + symbols
+    |
+    └── otherwise → extractEdges()              ← language-config registry dispatch
+                         |
+                   setEdges()                   ← file_dependencies only (no symbols)
 ```
+
+The `LanguageConfig` registry in `src/language-config.ts` has one entry per file extension, each entry holding an `extract(filePath, content, projectRoot): Promise<EdgeResult[]>` function. The single public API is `extractEdges()`. For TS/JS, a parallel function `extractTsJsFileParse()` exists to return edges + symbols + importMeta in one call.
+
+The `symbols` table stores: `(id, path, name, kind, start_line, end_line, is_export)`. No language column. The `file_dependencies` table stores edge metadata including `imported_names` (JSON string array) and `import_line` (nullable, only populated for TS/JS).
+
+The `deleteFile()` function in `repository.ts` runs a three-DELETE transaction (file_dependencies + symbols + files) to handle file unlink without orphaned rows.
 
 ---
 
-## Component Responsibilities (Existing)
+## Question 1: Multi-Language Symbol Extraction Integration
 
-| Component | Responsibility | Key Files |
-|-----------|---------------|-----------|
-| `StdioTransport` | Custom stdio JSON-RPC transport with 10MB buffer guard | `src/mcp-server.ts` |
-| `McpServer` (SDK) | MCP protocol, tool dispatch, `listChanged` notification | `src/mcp-server.ts` |
-| `ServerCoordinator` | All orchestration state: init, file tree, watcher, broker connect | `src/coordinator.ts` |
-| `registerTools()` | Binds 14 MCP tools to coordinator methods + repository calls | `src/mcp-server.ts` |
-| `AsyncMutex` | Serializes all tree mutations (watcher + integrity sweep) | `src/coordinator.ts` |
-| `FileWatcher` | chokidar wrapper, 2s debounce, `.filescopeignore` support | `src/file-watcher.ts` |
-| `ChangeDetector` | Tree-sitter AST diff for TS/JS/Python/Rust/C/C++; LLM fallback | `src/change-detector/` |
-| `CascadeEngine` | BFS staleness propagation through dependency graph | `src/cascade/cascade-engine.ts` |
-| `BrokerClient` | Unix socket client, reconnect loop, auto-spawn broker if absent | `src/broker/client.ts` |
-| `BrokerServer` | Net.Server over Unix socket, routes submit/status to queue+worker | `src/broker/server.ts` |
-| `PriorityQueue` | Binary heap with dedup map (repoPath+filePath+jobType), lazy deletion | `src/broker/queue.ts` |
-| `BrokerWorker` | Serial LLM call loop, AbortController timeout, result callbacks | `src/broker/worker.ts` |
-| `Repository` | All SQL via drizzle-orm; hides DB from callers | `src/db/repository.ts` |
-| `LanguageConfig` | O(1) dispatch to tree-sitter or regex extractor per extension | `src/language-config.ts` |
-| `CommunityDetection` | Louvain via graphology; dirty-flag cache invalidation | `src/community-detection.ts` |
+### Should extractEdges() become extractSymbolsAndEdges()?
+
+No. The correct extension is a parallel path to `extractTsJsFileParse()`, not a rename of `extractEdges()`.
+
+The v1.6 pattern established two co-existing callsites in `coordinator.ts`:
+- `extractTsJsFileParse()` — returns `{ edges, symbols, importMeta }` for TS/JS
+- `extractEdges()` — returns `EdgeResult[]` only, for everything else
+
+The v1.7 pattern should extend this to a three-way dispatch in `coordinator.ts`:
+
+```typescript
+if (isTsJs) {
+  // v1.6 path: unchanged
+  const parsed = await extractTsJsFileParse(filePath, content, projectRoot);
+  ...setEdgesAndSymbols(...)
+} else if (isPythonGoRuby) {
+  // v1.7 path: new
+  const parsed = await extractLangFileParse(filePath, content, projectRoot);
+  // parsed = { edges: EdgeResult[], symbols: Symbol[] }
+  // no importMeta (not applicable to these languages)
+  setEdgesAndSymbols(filePath, parsed.edges, parsed.symbols);
+} else {
+  // existing generic path: unchanged
+  const edges = await extractEdges(filePath, content, projectRoot);
+  setEdges(filePath, edges);
+}
+```
+
+A new exported function `extractLangFileParse()` in `language-config.ts` mirrors `extractTsJsFileParse()` but for Python/Go/Ruby. It returns `{ edges, symbols }` (no `importMeta` — those fields stay TS/JS-only for v1.7). Returning `null` for unsupported extensions maintains the same fallback pattern already established.
+
+### Where does per-language symbol kind mapping live?
+
+Inside each language-specific extractor function in `src/language-config.ts`, co-located with the existing edge extraction logic for that language. There is no separate registry file or separate `src/symbols/` directory needed.
+
+The pattern from v1.6 `extractBareTopLevelSymbol()` in `ast-parser.ts` demonstrates this: kind mapping is a local `switch` statement next to the AST visitor. Repeat this pattern:
+
+- Python: inside `extractPythonEdges()` — extend it to also populate a `Symbol[]` while visiting the same tree nodes. Function defs map to `'function'`, class defs to `'class'`, top-level assignments to `'const'`.
+- Ruby: inside `extractRubyEdges()` — but Ruby currently uses regex (no tree-sitter grammar), so symbol extraction requires either a regex approach (limited, misses nesting) or adding `tree-sitter-ruby`. The cleanest path is to keep Ruby on regex for edges and emit no symbols for v1.7 (deferred until tree-sitter-ruby is validated), consistent with how Go is handled (regex edges, no symbols). Verify `tree-sitter-ruby` npm availability before committing to AST.
+- Go: inside `extractGoEdges()` — regex-only. Add regex passes for `func \w+` and `type \w+ struct|interface`. Emit `Symbol[]` with `isExport` set by Go export convention (capitalized name). Same return shape as AST extractors.
+
+### How does Go's regex path emit symbols in the same return shape?
+
+The `Symbol` interface (`src/db/symbol-types.ts`) requires `name`, `kind`, `startLine`, `endLine`, `isExport`. All are derivable from regex with line number tracking:
+
+```typescript
+// Inside extractGoEdges() (or a new extractGoSymbols() helper called from it):
+const GO_FUNC_RE = /^func\s+(?:\([^)]+\)\s+)?([A-Z]\w*)\s*\(/gm;
+const GO_TYPE_RE = /^type\s+(\w+)\s+(struct|interface)/gm;
+// Track line numbers by counting newlines to the match offset
+```
+
+`isExport = name[0] === name[0].toUpperCase()` — Go's capitalization convention.
+
+`endLine` from regex is approximate (regex cannot find the closing brace without a full parser). Two practical options:
+1. Emit `endLine = startLine` (single-line point reference). Simple, honest.
+2. Run a brace-depth counter from the match position to find the closing brace. More accurate but adds complexity.
+
+Recommendation: start with `endLine = startLine` for Go (regex limitation is known). The `find_symbol` query result already shows `startLine` and `endLine`, so the agent can navigate to startLine and read forward. Go symbols are typically short; a point reference is usable.
+
+### Does the symbols table need a language column?
+
+No. `file_id`'s path extension already encodes the language. Queries that need language filtering (e.g., "only Python symbols") can join against the file path with `LIKE '%.py'`. Adding a `language` column would be denormalization without a concrete query benefit. The `kind` values do not conflict across languages (all languages use `function`, `class`, `const` where applicable). The schema stays unchanged.
 
 ---
 
-## What v1.5 Hardening Adds: New vs Modified Components
+## Question 2: Call-Site Edge Architecture
 
-### New Components
+### New table or extend file_dependencies?
 
-```
-tests/
-├── integration/
-│   ├── file-pipeline.test.ts       — EXISTS: scan→dep→importance→cascade
-│   ├── broker-lifecycle.test.ts    — NEW: spawn, connect, disconnect, crash recovery
-│   └── mcp-transport.test.ts       — NEW: in-process MCP tool call contracts
-└── unit/
-    ├── broker-queue.test.ts        — EXISTS: full PriorityQueue coverage
-    ├── parsers.test.ts             — EXISTS: all language parsers
-    ├── ast-diffing.test.ts         — EXISTS: semantic diff
-    ├── dependency-graph.test.ts    — EXISTS: graph operations
-    ├── importance-scoring.test.ts  — EXISTS: scoring logic
-    └── tool-outputs.test.ts        — EXISTS: MCP response shape contracts
+New table `symbol_dependencies`. Extending `file_dependencies` with nullable `source_symbol_id`/`target_symbol_id` would make the existing file-level edge queries more complex (must filter `WHERE source_symbol_id IS NULL`) and couples two distinct concepts in one table. A separate table is cleaner and avoids touching the column contract of every existing `file_dependencies` query.
 
-scripts/
-└── register-mcp.ts                 — NEW: replaces install-mcp-claude.sh with
-                                           programmatic Claude Code registration
+**New table definition:**
+
+```sql
+CREATE TABLE symbol_dependencies (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_symbol_id  INTEGER NOT NULL,   -- FK to symbols.id (caller)
+  target_symbol_id  INTEGER NOT NULL,   -- FK to symbols.id (callee)
+  call_line         INTEGER NOT NULL,   -- 1-indexed source line of the call site
+  edge_type         TEXT NOT NULL DEFAULT 'calls',
+  confidence        REAL NOT NULL DEFAULT 1.0
+);
+CREATE INDEX sym_dep_source_idx ON symbol_dependencies(source_symbol_id);
+CREATE INDEX sym_dep_target_idx ON symbol_dependencies(target_symbol_id);
 ```
 
-### Modified Components
+No FK constraint enforcement (consistent with existing `symbols` table which deliberately has no FK to `files`). Cascade deletes are handled explicitly in `deleteFile()` and any new per-file-reset logic.
 
-| Component | What Changes | Why |
-|-----------|-------------|-----|
-| `src/mcp-server.ts` | `server.tool()` → `server.registerTool()` with `inputSchema: z.object(...)`, add `annotations` per-tool, bump `version` string to `"1.5.0"`, add `logging: {}` capability | MCP spec compliance: standard schema, tool behavior hints, structured logging capability |
-| `src/mcp-server.ts` → `registerTools()` | Add `readOnlyHint: true` on read-only tools, `destructiveHint: true` on exclude_and_remove | Spec-compliant annotations help agents understand tool semantics |
-| `src/broker/main.ts` | Add `process.on('uncaughtException')` and `process.on('unhandledRejection')` handlers that clean up PID/socket files before exiting | Lifecycle hardening: ensures files are cleaned up on crash, not just on SIGTERM/SIGINT |
-| `src/broker/client.ts` | Replace hardcoded 500ms sleep after spawn with socket-existence poll (100ms interval, up to 3s total) | Eliminates flaky startup race on slow or loaded machines |
-| `src/coordinator.ts` | Ensure `shutdown()` removes `instance.pid` even when shutdown throws | Consistent instance lifecycle; prevent stale PID accumulation |
+### Reference resolution: during AST walk or separate pass?
+
+During the AST walk, but only for same-file calls (no cross-file resolution in v1.7).
+
+The v1.7 scope as defined in PROJECT.md is "TS/JS symbol-level call-site edges." Cross-file call-site resolution was explicitly deferred in v1.6 (listed in Out of Scope: "Cross-file call-site resolution — needs full type registry, HIGH complexity"). v1.7 should respect this boundary.
+
+**What v1.7 resolves:**
+- **Same-file calls:** During the AST walk in `extractRicherEdges()` (in `ast-parser.ts`), after collecting symbols, do a second pass over call expression nodes. For each call `foo()`, check if `foo` appears in the file's own symbol list. If yes, emit a call-site edge: caller_symbol → callee_symbol. This is purely local (no import lookup needed).
+- **Imported calls:** Using `imported_names` already stored in `file_dependencies`, it is possible to resolve `foo()` where `foo` was imported from a known file. The `importMeta[]` already tracks which names came from which specifier. After building the file's symbol index AND querying `file_dependencies` for its imports, a call to `foo()` can be traced to `target_path` + `foo` → query `symbols WHERE path = target_path AND name = 'foo'`. This is the "imported" case: deterministic but requires a DB lookup per call site.
+
+**Recommendation for v1.7:** Implement same-file and imported-call resolution. Skip ambiguous cases (multiple symbols with same name, dynamic calls, computed property calls). This is achievable within the existing AST walk without a full type registry.
+
+### Building the name→symbol index
+
+Build it once per file during `extractRicherEdges()`. The index is: `Map<string, Symbol>` from the file's own symbol list (already populated in the same AST walk). For imported symbols, query `symbols WHERE path IN (importedFilePaths)` after the AST walk is complete (a single SQL batch query). This avoids streaming or global pre-computation.
+
+The flow is:
+
+```
+extractRicherEdges(filePath, source):
+  1. AST walk → collect regularImports, symbols, importMeta (existing)
+  2. After walk: build localSymbolIndex = Map<name, symbol_id> from symbols[]
+  3. Resolve import paths → importedFilePaths (done already in extractTsJsFileParse via file resolution)
+  4. Query DB: SELECT id, name, path FROM symbols WHERE path IN (importedFilePaths)
+     → build importedSymbolIndex = Map<name, {symbol_id, path}>
+  5. Second AST walk (or continuation of first): collect call_expression nodes
+     → for each call `foo()`:
+       a. localSymbolIndex.has(foo) → emit (callerSymbol.id, localSymbol.id, call_line)
+       b. importedSymbolIndex.has(foo) → emit (callerSymbol.id, importedSymbol.id, call_line)
+       c. else → skip (unresolvable — no error, no noise)
+  6. Return: { edges, symbols, importMeta, callSiteEdges }
+```
+
+The DB query in step 4 is synchronous via `better-sqlite3` (consistent with existing repository pattern).
+
+### Ambiguity handling
+
+- **Same name in multiple imports:** Take the first match by file path alphabetical order (deterministic, not perfect, acceptable for v1.7). Do not fail or skip.
+- **Multiple symbols with same name in same file:** Should not happen for top-level declarations (JS/TS prevents duplicate `function foo`). If it does (function overloads in TS), pick the first by `start_line`.
+- **Dynamic calls `obj[method]()`:** Skip — cannot resolve without type inference. No emission, no logging noise.
+- **Method calls `this.foo()`, `obj.foo()`:** Skip for v1.7 — method-level symbols are out of scope.
+
+### Incremental update on file change
+
+When a file changes (watcher `change` event):
+
+1. Re-extract the file: new symbols, new edges, new call-site edges.
+2. Delete old `symbol_dependencies` where `source_symbol_id IN (SELECT id FROM symbols WHERE path = changedFile)`.
+3. The symbol IDs for the changed file are also replaced (upsertSymbols does DELETE then INSERT, so old IDs are gone).
+4. After re-insertion of symbols, insert new `symbol_dependencies` rows using the new symbol IDs.
+5. Additionally invalidate call-site edges where `target_symbol_id` points to a symbol in the changed file (because the callee may have moved or been renamed): DELETE FROM `symbol_dependencies` WHERE `target_symbol_id IN (SELECT id FROM symbols WHERE path = changedFile)`.
+
+Steps 2 and 5 together scope the invalidation correctly. Any file that called into the changed file will lose its call-site edges to that file's symbols. On the next re-extraction of the calling file (triggered by watcher if the caller file changes, or by on-demand re-scan), the edges will be rebuilt.
+
+**This is intentionally conservative.** Callers of changed symbols do not get re-extracted automatically unless they are themselves modified. This matches the existing behavior of `file_dependencies` (edges are re-emitted only when the source file changes, not when the target file changes).
+
+The `deleteFile()` transaction in `repository.ts` must be extended to also DELETE from `symbol_dependencies` where `source_symbol_id` or `target_symbol_id` is a symbol belonging to the deleted file:
+
+```typescript
+// Extended deleteFile() transaction (repository.ts):
+sqlite.prepare(
+  `DELETE FROM symbol_dependencies
+   WHERE source_symbol_id IN (SELECT id FROM symbols WHERE path = ?)
+      OR target_symbol_id IN (SELECT id FROM symbols WHERE path = ?)`
+).run(filePath, filePath);
+// Then existing DELETEs: file_dependencies, symbols, files
+```
+
+### Symbol IDs and file rename
+
+Symbol IDs are auto-increment integers (`symbols.id`). A file rename in the watcher appears as `unlink` + `add` (chokidar behavior) or as a `change` on the renamed path. In either case:
+
+- **Rename via unlink+add:** `deleteFile(oldPath)` cascades all symbol_dependencies. The new path is treated as a fresh file: new symbols with new IDs, new call-site edges.
+- **Rename via change event:** Same as unlink+add in effect — `upsertSymbols()` does DELETE+INSERT for the new path, new IDs assigned.
+
+Symbol IDs are therefore ephemeral — they are internal join keys valid only for the current scan. No external system (MCP tools) exposes symbol IDs directly. The `find_symbol` tool returns `path + startLine` as the navigation reference, not `id`. This is correct and requires no change.
 
 ---
 
-## Integration Points: How New Work Plugs Into Existing Architecture
+## Question 3: MCP Surface Integration
 
-### 1. Test Infrastructure Integration
+### Where do new call-site tools register?
 
-**How tests connect to existing code — no new production abstractions needed.**
+In `registerTools()` in `src/mcp-server.ts`, following the exact same pattern as `find_symbol` and `get_file_summary`. The registration is mechanical: `server.registerTool("get_callers", { inputSchema: { symbolName, filePath?, ... }, annotations: { readOnlyHint: true } }, handler)`.
 
-The codebase already has a clean, testable architecture. `ServerCoordinator` works without MCP transport (tested in `coordinator.test.ts`). `PriorityQueue` is a pure class (tested in `broker-queue.test.ts`). Repository functions are pure SQL that need only an open DB.
+### Suggested new tools
 
-The established test pattern across the codebase:
-
-```typescript
-// Established pattern (from file-pipeline.test.ts, tool-outputs.test.ts, coordinator.test.ts)
-beforeAll(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'test-prefix-'));
-  openDatabase(path.join(tmpDir, 'test.db'));
-  setProjectRoot(tmpDir);
-  setConfig({ excludePatterns: [], fileWatching: { enabled: false } } as any);
-});
-afterAll(async () => {
-  closeDatabase();
-  await fs.rm(tmpDir, { recursive: true, force: true });
-});
-
-// Mock broker to prevent socket connections (from file-pipeline.test.ts)
-vi.mock('../../src/broker/client.js', () => ({
-  submitJob: vi.fn(), connect: vi.fn(), disconnect: vi.fn(),
-  isConnected: vi.fn(() => false), requestStatus: vi.fn(),
-  resubmitStaleFiles: vi.fn(),
-}));
-```
-
-**New pattern for MCP transport tests** — in-process tool dispatch via `InMemoryTransport`:
+**`get_callers`** — "Who calls this symbol?"
 
 ```typescript
-// tests/integration/mcp-transport.test.ts
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-
-// Wire real McpServer + real ServerCoordinator, bypass stdio entirely
-const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-await server.connect(serverTransport);
-const client = new Client({ name: 'test', version: '1.0.0' }, {});
-await client.connect(clientTransport);
-
-// Call a real tool through the full dispatch path
-const result = await client.callTool({ name: 'list_files', arguments: {} });
-expect(result.isError).toBe(false);
-```
-
-This tests the full `registerTools()` dispatch path without spawning a process. `InMemoryTransport` is available at `@modelcontextprotocol/sdk/inMemory.js` in the installed v1.27.1 SDK. The SDK migration guide notes it is now considered internal/testing-only in v2, but the installed version fully supports it.
-
-**What does NOT need a test:** `logger.ts`, `storage-utils.ts`, `types.ts`, `confidence.ts` — trivial constants/re-exports with no testable logic. `broker/main.ts` — entry point glue whose lifecycle is covered by `broker-lifecycle.test.ts` spawning the actual binary.
-
-**Existing tests NOT requiring changes:**
-- All 15 existing `src/**/*.test.ts` files (260+ tests) remain valid after v1.5 changes.
-- The `server.tool()` → `server.registerTool()` migration is transparent to existing coordinator/repository unit tests — they don't touch the MCP server layer.
-
-### 2. MCP Spec Compliance Integration
-
-**Change is entirely inside `src/mcp-server.ts` — zero other files touched.**
-
-The installed SDK v1.27.1 already provides both `server.tool()` (deprecated) and `server.registerTool()` (current). The migration is mechanical: wrap raw Zod shapes with `z.object()`, move description into the config object, add annotations.
-
-Before (current state):
-```typescript
-server.tool("list_files", "List all files in the project...", {
-  maxItems: z.number().optional().describe("Cap response to N files...")
-}, async (params: { maxItems?: number }) => { ... });
-```
-
-After (spec-compliant):
-```typescript
-server.registerTool("list_files", {
-  description: "List all files in the project...",
-  inputSchema: z.object({
-    maxItems: z.number().optional().describe("Cap response to N files...")
-  }),
+server.registerTool("get_callers", {
+  title: "Get Callers",
+  description: "List all call-site edges pointing to a symbol. Returns callers with their file path, symbol name, and call line. Resolves both same-file and cross-file callers captured during last extraction. Use this after find_symbol to trace who calls a function.",
+  inputSchema: {
+    name: z.string().min(1).describe("Exact symbol name (no wildcards)"),
+    filePath: z.string().optional().describe("Absolute path to disambiguate when multiple files export the same name"),
+    maxItems: z.coerce.number().int().optional(),
+  },
   annotations: { readOnlyHint: true, idempotentHint: true }
-}, async ({ maxItems }) => { ... });
+}, async ({ name, filePath, maxItems }) => { ... });
 ```
 
-**Annotations by tool category:**
+**`get_callees`** — "What does this symbol call?" (secondary tool, can defer to v1.8)
 
-| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
-|------|---------------|------------------|-----------------|
-| list_files, find_important_files, get_file_summary, search, status, detect_cycles, get_cycles_for_file, get_communities | true | false | true |
-| set_file_summary, set_file_importance, scan_all | false | false | true |
-| set_base_directory | false | false | false |
-| exclude_and_remove | false | true | true |
+### Do existing tools need enrichment?
 
-**Logging capability:** Add `logging: {}` to the capabilities object in the `McpServer` constructor. This satisfies spec compliance for the logging capability declaration. The `ctx.mcpReq.log()` per-call API is optional — the project uses file-based logging (`enableDaemonFileLogging`), which is correct for stdio servers. The capability declaration is the compliance item; no per-call logging wiring is needed.
+`get_file_summary` could gain a `callers[]` field per exported symbol. However, this couples the already-complex `get_file_summary` response shape to a new join on `symbol_dependencies`. The cleaner design is to keep call-site queries in a dedicated tool (`get_callers`) and leave `get_file_summary` unchanged. An agent that needs both will call both tools. This avoids making `get_file_summary` slower for the majority of use cases that do not need call-site data.
 
-**Server version:** `serverInfo.version` is currently `"1.0.0"`. Bump to `"1.5.0"` to match the milestone.
-
-**outputSchema:** Do not add `outputSchema` to all 14 tools. The tools return freeform JSON text content that varies by query result. The only candidate is the `status` tool which returns a stable shape. Add `outputSchema` only where it provides genuine agent value — likely just `status`.
-
-### 3. Zero-Config Auto-Registration Integration
-
-**Current state:** `install-mcp-claude.sh` writes directly to `~/.claude.json` using a bash inline Node.js script. The script is correct but requires bash to run (problematic in some WSL2 environments). Manual step after build.
-
-**What to add:** `scripts/register-mcp.ts` compiled to `dist/scripts/register-mcp.js` via the existing esbuild pipeline. It can be run as `node dist/scripts/register-mcp.js` or hooked into `postbuild` in `package.json`.
-
-This script:
-1. Locates `~/.claude.json` (identical logic to the shell script)
-2. Writes the `FileScopeMCP` entry with `node dist/mcp-server.js`
-3. Is idempotent — re-running overwrites the entry, no-ops if already registered
-4. Prints a single status line
-
-This is a TypeScript port of the existing shell script, not a redesign. The shell script can remain as a fallback.
-
-**What NOT to do:** Do not add auto-registration to the MCP server startup path (`initServer()`). Registration is a build/install-time concern, not a runtime concern. Adding it to startup would cause the server to modify its own registration config on every connection.
-
-### 4. Broker Lifecycle Hardening Integration
-
-**Current state:** `broker/main.ts` has SIGTERM/SIGINT handlers that call `server.shutdown()` then remove PID/socket files. `broker/client.ts` has stale socket detection and auto-spawn with a 500ms sleep.
-
-**Gap 1: Crash cleanup.** If the broker process crashes on an uncaught exception, the SIGTERM handler never runs. Socket and PID files persist. The next spawn attempt by `spawnBrokerIfNeeded()` finds the socket, checks the PID, discovers the process is dead, and cleans up before re-spawning. This works but creates a window where the first connection attempt after a crash fails and triggers the 10s reconnect timer instead of immediately re-spawning.
-
-Fix in `src/broker/main.ts` — add cleanup handlers before the PID file is written:
-
-```typescript
-function emergencyCleanup(): void {
-  try { fs.rmSync(SOCK_PATH, { force: true }); } catch {}
-  try { fs.rmSync(PID_PATH, { force: true }); } catch {}
-}
-
-process.on('uncaughtException', (err) => {
-  log(`Uncaught exception: ${err}`);
-  emergencyCleanup();
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason) => {
-  log(`Unhandled rejection: ${reason}`);
-  emergencyCleanup();
-  process.exit(1);
-});
-```
-
-These must be registered after the PID file is written (otherwise cleaning up a PID file that hasn't been written yet is a no-op, which is fine, but logical order matters for clarity).
-
-**Gap 2: Spawn timing race.** `spawnBrokerIfNeeded()` uses a hardcoded `await new Promise(r => setTimeout(r, 500))` after spawning. On a loaded machine (CI, multiple active repos), the broker may take longer than 500ms to bind the socket, causing the first `attemptConnect()` to fail and fall back to the 10s reconnect timer.
-
-Fix in `src/broker/client.ts`:
-
-```typescript
-// Replace the 500ms sleep with a socket-existence poll
-const SPAWN_POLL_INTERVAL_MS = 100;
-const SPAWN_POLL_MAX_ATTEMPTS = 30; // 3 seconds total
-
-for (let i = 0; i < SPAWN_POLL_MAX_ATTEMPTS; i++) {
-  if (existsSync(SOCK_PATH)) break;
-  await new Promise<void>(r => setTimeout(r, SPAWN_POLL_INTERVAL_MS));
-}
-// Continue to attemptConnect() regardless — if socket still absent, connection
-// will fail and the reconnect timer handles retry.
-```
-
-This bounds the connect latency to actual broker startup time rather than a fixed worst-case value.
-
-**Gap 3: Concurrent instance safety** — already handled correctly. Two MCP instances calling `spawnBrokerIfNeeded()` simultaneously will both find the socket absent, both spawn the broker binary. The broker's PID guard causes the second binary to `process.exit(0)` after reading the first's PID file. No fix needed; the design is correct.
-
-**Gap 4: Test coverage for broker lifecycle.** `broker/client.ts` and `broker/main.ts` have zero test coverage. The new `tests/integration/broker-lifecycle.test.ts` should:
-- Spawn the actual broker binary (via `child_process.spawn`)
-- Poll for PID file existence (confirms startup)
-- Send a status request via a real Unix socket connection
-- Kill the broker and verify socket + PID files are removed
-- Re-spawn and verify recovery
-
-This is the only test that must NOT mock `broker/client.ts` — it tests the real spawn/connect path.
+`find_symbol` stays unchanged. Its job is symbol location; call-site is a separate dimension.
 
 ---
 
-## Recommended File Structure After v1.5
+## Question 4: Watcher Lifecycle Extension
+
+### Extending deleteFile() for symbol_dependencies
+
+The v1.6 watcher already hardened `deleteFile()` to a three-DELETE transaction in `src/db/repository.ts`. Extend it to four DELETEs (all in the same `sqlite.transaction()`):
 
 ```
-src/
-├── mcp-server.ts          — MODIFIED: registerTool + annotations + logging cap
-├── coordinator.ts         — MINOR: harden shutdown() PID cleanup on throw
-├── broker/
-│   ├── main.ts            — MODIFIED: add uncaughtException/unhandledRejection handlers
-│   ├── client.ts          — MODIFIED: socket poll replaces hardcoded 500ms sleep
-│   ├── server.ts          — unchanged
-│   ├── worker.ts          — unchanged
-│   ├── queue.ts           — unchanged
-│   ├── config.ts          — unchanged
-│   ├── types.ts           — unchanged
-│   └── stats.ts           — unchanged
-└── [all other src files]  — unchanged
-
-tests/
-├── integration/
-│   ├── file-pipeline.test.ts     — EXISTS (373 lines, no changes)
-│   ├── mcp-transport.test.ts     — NEW: tool contract tests via InMemoryTransport
-│   └── broker-lifecycle.test.ts  — NEW: spawn/connect/shutdown/crash-recovery
-└── unit/
-    ├── broker-queue.test.ts      — EXISTS (416 lines, no changes)
-    ├── parsers.test.ts           — EXISTS (538 lines, no changes)
-    ├── ast-diffing.test.ts       — EXISTS (462 lines, no changes)
-    ├── dependency-graph.test.ts  — EXISTS (287 lines, no changes)
-    ├── importance-scoring.test.ts — EXISTS (325 lines, no changes)
-    └── tool-outputs.test.ts      — EXISTS (447 lines, no changes)
-
-scripts/
-└── register-mcp.ts        — NEW: Node.js Claude Code auto-registration
-
-install-mcp-claude.sh      — KEEP: still useful as bash fallback
+Order of DELETEs in deleteFile():
+1. DELETE FROM symbol_dependencies WHERE source_symbol_id or target_symbol_id IN (SELECT id FROM symbols WHERE path = ?)
+2. DELETE FROM file_dependencies WHERE source_path = ? OR target_path = ?
+3. DELETE FROM symbols WHERE path = ?
+4. DELETE FROM files WHERE path = ?
 ```
+
+Delete from `symbol_dependencies` BEFORE deleting from `symbols` because the subquery `SELECT id FROM symbols WHERE path = ?` must execute while the symbols rows still exist. Alternatively, materialize the IDs first into a temp list within the transaction.
+
+The safest implementation:
+
+```typescript
+const symbolIds = sqlite
+  .prepare('SELECT id FROM symbols WHERE path = ?')
+  .all(filePath)
+  .map((r: { id: number }) => r.id);
+
+if (symbolIds.length > 0) {
+  const placeholders = symbolIds.map(() => '?').join(',');
+  sqlite.prepare(`DELETE FROM symbol_dependencies WHERE source_symbol_id IN (${placeholders}) OR target_symbol_id IN (${placeholders})`).run(...symbolIds, ...symbolIds);
+}
+// then existing DELETEs
+```
+
+For the watcher `change` event (file modified, not deleted): the call-site invalidation described in Question 2 above must run as part of the per-file re-extraction transaction, before re-inserting new symbols and new call-site edges.
 
 ---
 
-## Data Flow Changes in v1.5
+## Question 5: Migration
 
-### MCP Test Data Flow (new)
+### kv_state flag pattern for v1.7
+
+Two independent flags, sequential in boot order:
+
+**Flag 1: `multilang_symbols_bulk_extracted`**
+
+Purpose: backfill Python/Go/Ruby symbols for all existing files on first boot after migration. Runs in `coordinator.init()` after the new migration applies (analogous to `runSymbolsBulkExtractionIfNeeded()` in `src/migrate/bulk-symbol-extract.ts`).
+
+New module: `src/migrate/bulk-multilang-symbol-extract.ts`
+
+Pattern: identical to v1.6 `bulk-symbol-extract.ts` — iterate `getAllFiles()`, filter to `.py`/`.go`/`.rb`, call the new `extractLangFileParse()`, call `setEdgesAndSymbols()`. Per-file errors are logged and skipped. Flag set only after full pass.
+
+**Flag 2: `call_site_edges_bulk_extracted`**
+
+Purpose: backfill `symbol_dependencies` for all existing TS/JS files after the table is created. Cannot run until Flag 1 is set AND the `symbol_dependencies` table migration has applied. These are independent because call-site edges require `symbols.id` values to exist for all files first.
+
+New module: `src/migrate/bulk-call-site-extract.ts`
+
+This is the more expensive pass: for each TS/JS file, re-parse, resolve call sites against the full `symbols` table. Must run after `symbols` is populated for all languages (i.e., after Flag 1 completes for Python/Go/Ruby).
+
+**Boot order:**
+```
+openDatabase()  [applies migration for symbol_dependencies table]
+runMultilangSymbolsBulkExtractionIfNeeded()   [Flag 1]
+runSymbolsBulkExtractionIfNeeded()            [v1.6 flag — idempotent no-op]
+runCallSiteEdgesBulkExtractionIfNeeded()      [Flag 2 — depends on Flag 1 complete]
+buildFileTree()
+```
+
+### Are the two flags sequential or independent?
+
+Sequential. The call-site backfill needs symbol IDs for all files to do cross-file resolution. Running it before Python/Go/Ruby symbols are populated means call-site edges from TS/JS files that call into Python/Go/Ruby files would be incomplete. The flag gate enforces the ordering: Flag 2's check reads `getKvState('multilang_symbols_bulk_extracted')` and aborts (with a log warning) if Flag 1 is not set.
+
+---
+
+## Question 6: Build Order
+
+### Dependency graph across capabilities
 
 ```
-vitest runner
+[A] Schema migration — ADD symbol_dependencies table (migration file, no code deps)
     |
-    v
-InMemoryTransport.createLinkedPair()
-    |── (serverTransport) ────────────── McpServer.connect()
-    |── (clientTransport)                     |
-    |                                   registerTools(server, coordinator)
-    v                                         |
-Client.connect(clientTransport)         coordinator.init(tmpDir)
-    |                                         |
-    v                                   SQLite (tmp DB pre-populated)
-client.callTool({ name, arguments })
-    |── JSON-RPC over in-memory ──────▶ tool handler
-    |◀── tool response ───────────────────────|
-    v
-expect(result.content[0].text).toMatch(...)
+    |── [B] Multi-lang symbol extraction (Python AST, Go regex, Ruby TBD)
+    |       |── Depends on: nothing (additive to existing extractors)
+    |       |── Produces: Symbol[] for new languages in coordinator pass 2
+    |       └── Unlocks: [D] Call-site backfill pass (needs Symbol rows populated)
+    |
+    |── [C] Symbol-level call-site edges for TS/JS
+    |       |── Depends on: [A] schema
+    |       |── Depends on: Symbol IDs in DB (TS/JS symbols already exist from v1.6)
+    |       |── Produces: symbol_dependencies rows
+    |       └── Requires: extended deleteFile() to cascade symbol_dependencies
+    |
+    |── [D] Migration: bulk backfill passes (multilang symbols + call-site edges)
+    |       |── Depends on: [B] and [C] extractors exist
+    |       └── Runs on first boot, flag-gated
+    |
+    └── [E] MCP tool surface (get_callers + optional get_callees)
+            |── Depends on: [A] schema (to query symbol_dependencies)
+            |── Depends on: [C] for data to exist
+            └── Additive to registerTools() — no existing tools modified
 ```
 
-No process spawn, no stdio, no timing dependencies. The full tool dispatch path is exercised including Zod input validation, coordinator delegation, and repository reads.
+**Recommended phase order:**
 
-### Broker Lifecycle Data Flow (hardened)
+**Phase 36: Schema + Multi-Lang Symbols**
+- Add `symbol_dependencies` table migration
+- Python symbol extraction (AST walk extension in `language-config.ts`)
+- Go symbol extraction (regex in `language-config.ts`)
+- `extractLangFileParse()` exported function in `language-config.ts`
+- Coordinator dispatch: three-way if/else (TS/JS | Python+Go+Ruby | other)
+- `setEdgesAndSymbols()` called for Python/Go
+- Bulk backfill pass module + flag
+
+Rationale: symbols for all languages must be in the DB before call-site edges can reference their IDs. This phase can ship and be tested independently — `find_symbol` immediately works for Python and Go files.
+
+**Phase 37: Call-Site Edges**
+- Extend `extractRicherEdges()` in `ast-parser.ts` to return `callSiteEdges`
+- Add `getCallSiteEdges()` repository function + `setCallSiteEdges()` repository function
+- Extend `deleteFile()` transaction to cascade `symbol_dependencies`
+- Extend coordinator's per-file write path for call-site edges
+- Bulk backfill pass for call-site edges (Flag 2)
+
+**Phase 38: MCP Surface**
+- `get_callers` tool registration in `mcp-server.ts`
+- Repository query: `getCallers(symbolName, filePath?, limit)` — join `symbol_dependencies` + `symbols`
+- Tests: repository unit test, MCP transport integration test via InMemoryTransport
+
+Rationale: Tool registration is pure I/O surface — keep it last so the data contract is stable before surfacing to agents. This also allows Phase 37's data model to be validated before the MCP shape is locked.
+
+---
+
+## Modified Components
+
+| Component | File | What Changes |
+|-----------|------|-------------|
+| `schema.ts` | `src/db/schema.ts` | ADD: `symbol_dependencies` table definition |
+| `language-config.ts` | `src/language-config.ts` | ADD: `extractLangFileParse()` export; EXTEND: `extractPythonEdges()`, `extractGoEdges()` to also return `Symbol[]`; MAYBE: `extractRubyEdges()` if tree-sitter-ruby is available |
+| `ast-parser.ts` | `src/change-detector/ast-parser.ts` | EXTEND: `extractRicherEdges()` return type gains `callSiteEdges: CallSiteEdge[]`; ADD: call-expression visitor logic |
+| `coordinator.ts` | `src/coordinator.ts` | MODIFY: pass-2 dispatch from two-way to three-way if/else; call new path for Python/Go/Ruby |
+| `repository.ts` | `src/db/repository.ts` | EXTEND: `deleteFile()` transaction adds symbol_dependencies DELETE; ADD: `setCallSiteEdges()`, `getCallers()` |
+| `mcp-server.ts` | `src/mcp-server.ts` | ADD: `get_callers` tool registration in `registerTools()` |
+
+## New Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Symbol-deps migration | `drizzle/XXXX_symbol_dependencies.sql` | CREATE TABLE symbol_dependencies |
+| Multi-lang bulk extract | `src/migrate/bulk-multilang-symbol-extract.ts` | Flag-gated backfill for Python/Go/Ruby symbols |
+| Call-site bulk extract | `src/migrate/bulk-call-site-extract.ts` | Flag-gated backfill for TS/JS call-site edges |
+| Call-site types | `src/db/call-site-types.ts` (optional) | `CallSiteEdge` interface if it grows beyond inline use |
+
+---
+
+## Data Flow Changes in v1.7
+
+### Scan pass 2 (coordinator.ts) — extended
 
 ```
-MCP instance start
-    |
-    v coordinator.init() → brokerConnect() → spawnBrokerIfNeeded()
-    |
-    ├── existsSync(SOCK_PATH) + PID alive? → skip spawn
-    ├── stale files? → rmSync both → spawn dist/broker/main.js (detached, unref'd)
-    |         |
-    |         v  poll existsSync(SOCK_PATH) × 30 × 100ms (up to 3s)
-    |         v  (replaces hardcoded 500ms sleep)
-    └── not running? → spawn → poll → attemptConnect()
-              |
-              v net.createConnection(SOCK_PATH)
-              v on('connect') → resubmitStaleFiles()
+For each file:
+    ext is .ts/.tsx/.js/.jsx?
+        YES → extractTsJsFileParse()     [returns edges + symbols + importMeta + callSiteEdges (new)]
+              setEdgesAndSymbols()        [unchanged]
+              setCallSiteEdges()          [NEW — writes symbol_dependencies rows]
 
-Broker clean shutdown (SIGTERM/SIGINT):
-    worker.stop() → await currentJobPromise → destroy connections → server.close()
-    → rmSync(SOCK_PATH) → rmSync(PID_PATH) → process.exit(0)
+    ext is .py/.go/.rb?
+        YES → extractLangFileParse()     [NEW — returns edges + symbols]
+              setEdgesAndSymbols()        [existing — symbols column added for these langs]
 
-Broker crash (uncaughtException/unhandledRejection):  [NEW v1.5]
-    log(err) → rmSync(SOCK_PATH, force) → rmSync(PID_PATH, force) → process.exit(1)
-    [next client connect attempt detects no socket → immediately respawns]
+    else → extractEdges()               [unchanged]
+           setEdges()                   [unchanged]
+```
+
+### Call-site resolution in extractRicherEdges()
+
+```
+extractRicherEdges(filePath, source):
+  [existing AST walk: regularImports, reExportSources, inheritsFrom, symbols, importMeta]
+  
+  After walk:
+    localIndex = Map<name, symbol_id> from symbols[]
+    importedFilePaths = resolve(regularImports) [already done by caller]
+    importedIndex = getSymbolsByPaths(importedFilePaths)  [synchronous DB query]
+    
+  Call-expression pass (new):
+    For each call_expression node in AST:
+      callerSymbol = find enclosing symbol from localIndex by line range
+      calleeName = extract function name from call_expression
+      if calleeName in localIndex:
+        emit CallSiteEdge(caller.id, local.id, call_line, 'calls', 1.0)
+      elif calleeName in importedIndex:
+        emit CallSiteEdge(caller.id, imported.id, call_line, 'calls', 1.0)
+      else: skip (dynamic, method, or external)
+  
+  Return: { regularImports, reExportSources, inheritsFrom, symbols, importMeta, callSiteEdges }
+```
+
+### Watcher unlink (deleteFile()) — extended transaction
+
+```
+BEGIN TRANSACTION
+  1. Materialize symbol IDs: SELECT id FROM symbols WHERE path = ?
+  2. DELETE FROM symbol_dependencies WHERE source_symbol_id IN (...) OR target_symbol_id IN (...)
+  3. DELETE FROM file_dependencies WHERE source_path = ? OR target_path = ?
+  4. DELETE FROM symbols WHERE path = ?
+  5. DELETE FROM files WHERE path = ?
+END TRANSACTION
+```
+
+### Boot migration sequence
+
+```
+openDatabase()
+  → drizzle migrate() applies pending SQL files
+  → symbol_dependencies table now exists
+
+runMultilangSymbolsBulkExtractionIfNeeded()
+  → kv_state['multilang_symbols_bulk_extracted'] set?
+    NO → iterate .py/.go/.rb files → extractLangFileParse() → setEdgesAndSymbols()
+    YES → skip
+
+runCallSiteEdgesBulkExtractionIfNeeded()
+  → kv_state['multilang_symbols_bulk_extracted'] NOT set? → abort (log warning)
+  → kv_state['call_site_edges_bulk_extracted'] set? → skip
+  → iterate .ts/.tsx/.js/.jsx files → re-parse + resolve call sites → setCallSiteEdges()
+  → set flag
+
+buildFileTree()
 ```
 
 ---
 
 ## Architectural Patterns in Use
 
-### Pattern 1: Coordinator as Pure Orchestrator (existing, enables testing)
+### Pattern 1: Single-Pass AST Walk (established v1.6)
 
-`ServerCoordinator` can be instantiated and `init(path)` called without any MCP transport. The MCP transport layer (`registerTools`) is a thin wrapper that delegates to coordinator. This means MCP transport tests can use `InMemoryTransport` to test actual tool dispatch in-process. The test for this pattern already exists in `coordinator.test.ts`.
+**What:** One `parser.parse()` call emits all data products (edges, symbols, importMeta). No re-parsing.
+**Extension for v1.7:** The call-expression pass is a second loop over the same tree (already in memory), not a second `parser.parse()` call. This preserves the PERF constraint.
+**Integration point:** `extractRicherEdges()` in `src/change-detector/ast-parser.ts`.
 
-### Pattern 2: Repository as DB Boundary (existing, enables testing)
+### Pattern 2: Atomic Per-File Write (established v1.6)
 
-All SQL goes through `src/db/repository.ts`. Tests open a real SQLite DB in `/tmp`, call repository functions directly, and verify state. MCP transport tests pre-populate the DB via repository functions and verify tool responses read from it correctly. Already established in `tool-outputs.test.ts` and `file-pipeline.test.ts`.
+**What:** `setEdgesAndSymbols()` wraps all inserts in `sqlite.transaction()`. A crash leaves the file in its prior state.
+**Extension for v1.7:** `setCallSiteEdges()` must participate in the same transaction or be called as a separate transaction immediately after. Separate transaction is acceptable because a partial call-site write is recoverable (edges are idempotent on re-extraction). Combining into one transaction is cleaner but requires inlining into the same `sqlite.transaction()` closure.
+**Recommendation:** Extend `setEdgesAndSymbols()` to accept an optional `callSiteEdges?` parameter and include the symbol_dependencies DELETE+INSERT in the same transaction. One closure, one transaction.
 
-### Pattern 3: Broker Client as Module-Level Singleton (existing, requires mock)
+### Pattern 3: Repository as DB Boundary (established v1.0)
 
-`broker/client.ts` uses module-level state (`socket`, `reconnectTimer`, `repoPath`). Any test that exercises code calling broker functions must `vi.mock('../../src/broker/client.js', ...)`. The broker-lifecycle integration test is the only test that must use the real module — it tests actual spawn/connect behavior.
+**What:** All SQL in `src/db/repository.ts`. Callers never write raw SQL.
+**Extension for v1.7:** New functions `setCallSiteEdges()`, `getCallers()`, `getCallees()` go in `repository.ts`. The `symbol_dependencies` table is never queried outside this module.
 
-### Pattern 4: PID Guard as Idempotent Singleton Enforcer (existing, correct)
+### Pattern 4: kv_state Flag for One-Shot Migration Gates (established v1.6)
 
-The broker uses `process.kill(pid, 0)` to detect if already running, then `process.exit(0)` on conflict. Concurrent spawn attempts are safe — the second process exits cleanly. No change needed. The lifecycle test must verify this: spawning twice yields one running broker and one harmless exit.
+**What:** `getKvState(FLAG_KEY)` check at boot; if null, run the pass, set the flag.
+**Extension for v1.7:** Two new flags following the identical pattern. Sequential dependency enforced by checking Flag 1 inside Flag 2's guard.
 
 ---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Testing MCP Tools via Subprocess Spawn
+### Anti-Pattern 1: Full Cross-File Call Resolution
 
-**What people do:** Spawn `dist/mcp-server.js` as a subprocess and send JSON-RPC messages via stdin/stdout to test tool outputs.
+**What people do:** Build a project-wide name → symbol map and resolve all call sites globally.
+**Why it's wrong:** Requires a full type registry (TypeScript's type system) to handle overloads, generics, and interface dispatch. This is months of work. PROJECT.md explicitly defers this.
+**Do this instead:** Resolve only (a) same-file calls and (b) calls to named imports from known files. Skip method calls, dynamic calls, and calls to symbols not resolvable via `imported_names`.
 
-**Why it's wrong:** Requires a full build before tests run. Slow (process spawn overhead). Fragile (timing-dependent). `InMemoryTransport` provides the same coverage at 10x speed in-process.
+### Anti-Pattern 2: A Separate extractSymbols() Call After extractEdges()
 
-**Do this instead:** Use `InMemoryTransport.createLinkedPair()` for MCP tool contract tests. Reserve process spawning for the broker lifecycle integration test where the actual detached-spawn behavior is what's being verified.
+**What people do:** Add a separate extraction phase — run `extractEdges()` for deps, then separately run `extractSymbols()` for each file.
+**Why it's wrong:** Double-parse of every file. v1.6 PERF budget is already tight (+13.75% scan time). Double-parsing would double the AST overhead.
+**Do this instead:** Extend the existing extractor functions to emit symbols alongside edges in one pass, exactly as v1.6 did for TS/JS.
 
-### Anti-Pattern 2: Mocking Repository Functions in MCP Tests
+### Anti-Pattern 3: Symbol IDs as Stable External References
 
-**What people do:** Mock `getFile`, `getAllFiles`, etc. to return fake data.
+**What people do:** Return `symbol.id` in MCP tool responses and use it for subsequent queries.
+**Why it's wrong:** Symbol IDs are reset on every file re-extraction (DELETE+INSERT pattern in `upsertSymbols()`). An ID from one tool call may not exist after the watcher fires.
+**Do this instead:** Use `(path, name, startLine)` as the stable reference. The MCP tools expose these three fields. The `get_callers` tool accepts `name` + optional `filePath`, not `symbol.id`.
 
-**Why it's wrong:** Tests the mock, not the code. Repository functions are pure SQL — a real SQLite DB in `/tmp` is fast (~1ms per operation via better-sqlite3), accurate, and confirms actual query behavior.
+### Anti-Pattern 4: Storing Ruby Symbols via Regex Before Validating tree-sitter-ruby
 
-**Do this instead:** Pre-populate a real tmp SQLite DB and let the tool handlers query it naturally. Already established across 5+ test files.
+**What people do:** Implement regex-based Ruby symbol extraction (function/class name capture) to ship Ruby symbols in the same phase as Python.
+**Why it's wrong:** Ruby's scoping rules (nested classes, modules, reopened classes) make regex-based symbol extraction unreliable. Emitting wrong symbols damages `find_symbol` query quality.
+**Do this instead:** Emit no symbols for Ruby in v1.7 unless `tree-sitter-ruby` is available and validated. The `extractGoEdges()` path can be extended to `{ edges, symbols: [] }` for Ruby as a safe default. Decouple Ruby from the v1.7 delivery.
 
-### Anti-Pattern 3: Adding Retry Logic to Broker Spawn
+### Anti-Pattern 5: Calling getSymbolsByPaths() N Times in the Call-Site Pass
 
-**What people do:** Add retry loops with backoff around `spawnBrokerIfNeeded()` on connection failure.
-
-**Why it's wrong:** The reconnect timer (10s interval in `startReconnectTimer()`) already handles transient failures. Adding retry at the spawn level creates two overlapping recovery mechanisms. The broker's PID guard means double-spawn is harmless but wasteful.
-
-**Do this instead:** Keep the existing reconnect timer. Replace the 500ms sleep with a socket poll. The system self-heals without retry complexity.
-
-### Anti-Pattern 4: Adding outputSchema to All Tools
-
-**What people do:** Add Zod `outputSchema` to every `registerTool()` call as part of the spec compliance migration.
-
-**Why it's wrong:** The tools return freeform JSON text content that varies by query result. Defining schemas for all 14 tools adds significant maintenance overhead for minimal agent benefit. Most agents treat tool output as text anyway.
-
-**Do this instead:** Add `outputSchema` only to `status` (the only tool with a reliably stable response shape). Leave the other 13 tools with just `inputSchema` + `annotations`.
-
-### Anti-Pattern 5: Registering MCP Server at Runtime
-
-**What people do:** Have `initServer()` call the registration script to ensure the server is always registered with Claude Code.
-
-**Why it's wrong:** The MCP server is already running — it was started by Claude Code using the registration entry. Modifying `~/.claude.json` from inside a running MCP process creates a race condition and is conceptually wrong (the server modifying the config that launched it).
-
-**Do this instead:** Keep registration as a build/install-time step. `scripts/register-mcp.ts` runs once after `npm run build`.
-
----
-
-## Integration Ordering: Build Sequence for v1.5
-
-Based on dependencies between the four hardening areas, the correct build order is:
-
-**1. Broker lifecycle hardening** — foundational; eliminates the biggest reliability gap first. Self-contained to `broker/main.ts` and `broker/client.ts`. No dependencies on other v1.5 work.
-
-**2. MCP spec compliance** — self-contained to `src/mcp-server.ts`. No dependencies on testing infrastructure. Can proceed in parallel with broker hardening.
-
-**3. Test infrastructure** — depends on the hardened broker (broker-lifecycle.test.ts is only meaningful after the crash cleanup handlers exist) and spec-compliant MCP server (mcp-transport.test.ts verifies the `registerTool` API, not the deprecated `server.tool` API). Writing tests against the old API would mean rewriting them immediately after the migration.
-
-**4. Zero-config auto-registration** — depends on nothing except the build pipeline being stable. Implement last when everything else is confirmed working and the binary being registered is hardened.
-
-This ordering avoids writing tests for code that is about to change and avoids writing the registration script before the binary it registers is fully hardened.
+**What people do:** For each call expression, query the DB to look up the callee symbol.
+**Why it's wrong:** A file with 500 call expressions triggers 500 DB queries per file during bulk extraction.
+**Do this instead:** Build the `importedSymbolIndex` once per file (one batch query for all import paths), then resolve all call expressions against the in-memory map. One DB query per file, not one per call site.
 
 ---
 
 ## Scaling Considerations
 
-This is a local-only developer tool; traditional web scaling does not apply. The relevant dimensions are:
+This is a local developer tool. The relevant scaling dimension is per-repo file count and symbol density.
 
-| Concern | Current State | v1.5 Impact |
+| Concern | Current State | v1.7 Impact |
 |---------|---------------|-------------|
-| Test suite execution time | ~260 tests, fast (SQLite in /tmp) | New tests add ~50-100 more; should stay under 15s total |
-| Broker job throughput | Serial by design (single GPU) | Unchanged; lifecycle hardening does not affect throughput |
-| Concurrent MCP instances | Multiple per repo are expected; WAL mode handles it | `instance.pid` is informational only; no enforcement needed |
-| MCP response latency | Synchronous better-sqlite3 reads ~1ms | `registerTool` migration has zero performance impact |
-| Socket poll overhead | 500ms sleep → 100ms poll | Strictly better; reduces connect latency on fast machines |
+| Scan wall time | Self-scan 2085ms (+13.75% over v1.5 baseline) | Call-site extraction adds a second AST pass per TS/JS file. Estimate +10-20% additional for call-site batch. Must stay under 20% total regression. |
+| DB size | Symbols table: ~15K rows for a medium TS codebase | symbol_dependencies can be large (functions call many things). Expect 3-10x more rows than `symbols`. Index on both source and target is required. |
+| Bulk backfill time | v1.6 bulk was fast (async file reads, sequential SQLite writes) | Call-site bulk must re-read and re-parse all TS/JS files. On large repos (500+ TS files), this may take 30-60s on first boot. Acceptable because it is one-time. |
+| Query latency | getDependentsWithImports: ~1ms (raw SQLite) | getCallers: JOIN across symbol_dependencies + symbols + files. Expect 1-5ms with proper indexes. Fine for interactive tool calls. |
 
 ---
 
 ## Sources
 
-- MCP TypeScript SDK v1.27.1 documentation via Context7 (`/modelcontextprotocol/typescript-sdk`): `registerTool`, `annotations` (readOnlyHint, destructiveHint, idempotentHint), `logging` capability, `InMemoryTransport`, migration guide from v1 to v2 API — HIGH confidence
-- Direct codebase inspection (all claims verified against installed source):
-  - `src/mcp-server.ts` (615 lines) — StdioTransport, McpServer init, registerTools, 14 tool definitions
-  - `src/coordinator.ts` — AsyncMutex, init(), initServer(), shutdown(), broker connect
-  - `src/broker/main.ts` — PID guard, SIGTERM/SIGINT handlers, startup sequence
-  - `src/broker/client.ts` — spawnBrokerIfNeeded(), attemptConnect(), reconnect timer
-  - `src/broker/queue.ts` + `src/broker/types.ts` — PriorityQueue, QueueJob, dedupKey
-  - `src/db/schema.ts` + `src/db/repository.ts` — SQLite schema, all repository functions
-  - `tests/integration/file-pipeline.test.ts` + `tests/unit/broker-queue.test.ts` — established test patterns
-  - `package.json` — SDK v1.27.1 confirmed, vitest confirmed
-  - Node.js SDK dist file inspection: `registerTool`, `tool`, `registerPrompt`, `InMemoryTransport` all present
+All claims based on direct inspection of:
+- `src/language-config.ts` — registry, `extractTsJsFileParse()`, `extractEdges()`, all extractor functions
+- `src/change-detector/ast-parser.ts` — `extractRicherEdges()`, `RicherEdgeData`, `ImportMeta`, `extractBareTopLevelSymbol()`
+- `src/db/schema.ts` — `symbols`, `file_dependencies`, `kv_state` table definitions
+- `src/db/repository.ts` — `deleteFile()`, `setEdgesAndSymbols()`, `upsertSymbols()`, `findSymbols()`, `getKvState()`
+- `src/db/symbol-types.ts` — `Symbol` interface, `SymbolKind`
+- `src/coordinator.ts` (lines 740-788) — pass-2 dispatch, three-variable extraction pattern
+- `src/mcp-server.ts` — `registerTools()`, `find_symbol`, `get_file_summary` implementations
+- `src/migrate/bulk-symbol-extract.ts` — v1.6 flag-gated bulk extract pattern
+- `.planning/PROJECT.md` — Out of Scope constraints, v1.7 goals, Key Decisions table
+- `.planning/milestones/v1.6-research-archive/ARCHITECTURE.md` — v1.5/v1.6 context
 
 ---
 
-*Architecture research for: FileScopeMCP v1.5 Production-Grade MCP Intelligence Layer*
-*Researched: 2026-04-17*
+*Architecture research for: FileScopeMCP v1.7 Multi-Lang Symbols + Call-Site Edges*
+*Researched: 2026-04-23*

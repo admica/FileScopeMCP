@@ -1,220 +1,362 @@
 # Feature Research
 
-**Domain:** Production-grade MCP server hardening (FileScopeMCP v1.5)
-**Researched:** 2026-04-17
-**Confidence:** HIGH (MCP SDK via Context7 + Claude Code docs via WebFetch + MCP spec via WebSearch + live codebase inspection)
+**Domain:** Symbol-level code intelligence for multi-language MCP server (FileScopeMCP v1.7)
+**Researched:** 2026-04-23
+**Confidence:** HIGH (tree-sitter grammar docs, LSP 3.17 spec, stack-graphs blog, code-graph-mcp inspection, Serena/Roam-code comparison, verified against project constraints)
 
 ---
 
-## Context: What "Production-Grade" Means for This Domain
+## Context: What This Milestone Adds
 
-FileScopeMCP is a stdio-transport MCP server used as a per-repo daemon by LLM agents (primarily Claude Code). "Production-grade" means: agents never need to know it exists, it never corrupts state on restart, it fails loudly with actionable messages, and its test suite catches regressions before they reach agents.
+FileScopeMCP v1.6 ships TS/JS symbol extraction (`find_symbol`, enriched `get_file_summary`) and file-granular dependency edges. v1.7 adds two distinct capabilities:
 
-The four categories from the milestone scope map to discrete feature groups:
+1. **Multi-language symbol extraction** — Python/Go/Ruby parallel to v1.6's TS/JS symbols (same `symbols` table, same `find_symbol` tool, same schema)
+2. **TS/JS call-site edges** — upgrade from file-granular to symbol-granular: which symbol calls which symbol, stored in a new `symbol_dependencies` table, with a new `find_callers` MCP tool
 
-1. **Comprehensive testing** — MCP transport/protocol layer coverage
-2. **MCP spec compliance** — resources, prompts, notifications, tool schema hardening
-3. **Zero-config agent integration** — .mcp.json, registration improvements
-4. **Graceful lifecycle management** — broker hardening, crash recovery, shutdown correctness
+These are independent features that share only the database and the existing `symbols` table as a prerequisite. Neither needs to ship together. Build order matters because call-site edges depend on the `symbols` table being populated for TS/JS.
 
-**Current state summary from codebase inspection:**
-- 15 tool registrations using the `server.tool()` v1 API pattern (no `ctx` parameter access)
-- Only `tools: { listChanged: true }` declared in capabilities — never fires
-- No resources, no prompts, no progress notifications
-- `install-mcp-claude.sh` manually edits `~/.claude.json`; no `.mcp.json` in repo root
-- `mcp-server.test.ts` (734 lines) tests DB functions only — zero transport-level protocol tests
-- Broker lifecycle (PID guard, socket cleanup, SIGTERM) is well-implemented but untested
+---
+
+## Question 1: Multi-Language Symbol Kinds
+
+### How LSP tools categorize symbols
+
+The LSP 3.17 spec defines 26 integer `SymbolKind` values. The ones used in practice for code (not primitives like String/Number/Boolean/Null) are:
+
+| SymbolKind | Value | Used for |
+|------------|-------|----------|
+| `Class` | 5 | class definitions |
+| `Method` | 6 | instance/class/static methods inside a class |
+| `Property` | 7 | class fields, Python class-level vars |
+| `Field` | 8 | struct fields (Go), Ruby instance vars |
+| `Constructor` | 9 | `__init__` in Python, `initialize` in Ruby |
+| `Enum` | 10 | enum declarations |
+| `Interface` | 11 | Go interfaces, TS interfaces |
+| `Function` | 12 | top-level functions |
+| `Variable` | 13 | module-level variables |
+| `Constant` | 14 | Go `const`, Ruby `CONST`, Python module-level literals |
+| `Struct` | 23 | Go structs |
+| `Module` | 2 | Ruby modules, Python packages |
+| `TypeParameter` | 26 | Go generics |
+
+**Key finding:** LSP does NOT distinguish `async def` from `def`, `@classmethod` from instance method, or `@staticmethod` from instance method. All are reported as `Function` or `Method` based purely on whether they're top-level or inside a class. Tools that want this distinction parse decorators themselves.
+
+### Per-language symbol kinds (table stakes)
+
+**Python (tree-sitter grammar: `tree-sitter-python`):**
+
+| Extracted kind | AST node | Notes |
+|----------------|----------|-------|
+| `function` | `function_definition` at module level | top-level `def` and `async def` — same kind; async is metadata |
+| `class` | `class_definition` | |
+| `method` | `function_definition` inside `class_definition` | includes `__init__`, classmethods, staticmethods |
+| `constant` | `assignment` where lhs is ALL_CAPS identifier at module level | convention-based, not enforced |
+
+**What to skip for Python (justified):**
+- `decorator` — NOT its own symbol kind. Decorators are attributes of the function/class they decorate. Pyright, Pylance, and ruby-lsp all treat decorators as metadata on the decorated symbol, not standalone definitions. Decorator _callees_ are call-site edges, not separate symbol kinds.
+- `async def` vs `def` distinction — not a separate kind; same `function` kind. Agent queries (`find_symbol name:fetch_data`) don't need this split.
+- `@classmethod` / `@staticmethod` — same `method` kind. Decorator annotation stored in future metadata, not in `kind` column.
+- `__all__` parsing — table-stakes for exportedness BUT adds parser complexity. `__all__` is an assignment to a list literal; extracting its members requires evaluating a value node. Defer: treat symbols starting with `_` as non-exported, all others as exported (convention matches 90% of Python code).
+- Nested functions / closures — HIGH noise, LOW value. Not exported, rarely queried.
+- Property getters/setters (`@property`) — same `method` kind; property-ness is decorator metadata, not a kind.
+- Type aliases (`MyType = TypeVar(...)`, `MyType: TypeAlias = ...`) — MEDIUM complexity to detect reliably via AST. Defer to v1.8.
+
+**Exportedness for Python:** Symbol is `isExport = true` if it is defined at module level AND its name does not start with `_`. This matches Python convention (no `__all__` parsing needed for MVP). HIGH confidence this covers 90%+ of real-world use.
+
+---
+
+**Go (tree-sitter grammar: `tree-sitter-go` — but PROJECT.md D-06 decision locks Go to regex):**
+
+| Extracted kind | Regex target | Notes |
+|----------------|-------------|-------|
+| `function` | `^func [A-Z]` / `^func [a-z]` at top level | top-level functions, exported if uppercase |
+| `method` | `^func \([^)]+\)` receiver-style | method on any type |
+| `struct` | `type Foo struct` | |
+| `interface` | `type Foo interface` | |
+| `type` | `type Foo =` / `type Foo SomeOtherType` | type aliases and definitions |
+| `constant` | `const Foo = ...` / `const ( Foo = ... )` | const blocks need special handling |
+
+**What to skip for Go:**
+- Generic type parameters (`[T any]`) — parse complexity with regex. Add `typeParam` kind only if tree-sitter-go lands a stable npm package (D-06 defers this).
+- Unexported identifiers — include in symbols table with `isExport = false` (agents may query them in context of same-file callers). Uppercase = exported in Go, enforced by the language, not convention.
+- Package-level `var` declarations — LOW query value. Variables are not stable API surface. Skip.
+
+**Exportedness for Go:** Go enforces it lexically — uppercase first letter = exported. This is deterministic and requires no convention guessing.
+
+---
+
+**Ruby (tree-sitter grammar: `tree-sitter-ruby`):**
+
+| Extracted kind | AST node | Notes |
+|----------------|----------|-------|
+| `class` | `class` node | |
+| `module` | `module` node | |
+| `method` | `method` / `singleton_method` node | `def` and `def self.` |
+| `constant` | `assignment` where lhs is `constant` node (all-caps or CamelCase) | Ruby constants are uppercase |
+
+**What to skip for Ruby:**
+- `attr_accessor` / `attr_reader` / `attr_writer` — these are **synthesized methods**, not AST-level definitions. Sorbet and ruby-lsp both handle `attr_accessor` by heuristic (require literal symbol argument at syntactic top-level of class). For v1.7: do NOT extract `attr_accessor` as a symbol kind. The synthesized getter/setter methods are not queryable by name in the AST. This is table stakes to GET RIGHT (avoid incorrect data) not to implement fully.
+- `method_missing` / `define_method` / `const_set` — dynamic Ruby. No static tool resolves these correctly. Skip.
+- Visibility modifiers (`private`, `protected`, `public`) — Ruby has runtime-defined visibility, not lexical. Ruby lacks a true "exported" concept analogous to Python `_prefix` or Go uppercase. Convention: all `class` and `module` definitions are exported; `method` definitions are exported by default.
+- Eigenclass / singleton methods on non-self — skip. `def obj.method` patterns are rare and require flow tracking.
+
+**Exportedness for Ruby:** All class/module/constant definitions are `isExport = true`. All methods are `isExport = true` by default (Ruby has no lexical privacy at the file level). This is a deliberate simplification — Ruby's `private` is runtime enforcement, not static visibility.
+
+---
+
+### Symbol kinds comparative summary
+
+| Kind | Python | Go | Ruby | v1.6 TS/JS |
+|------|--------|-----|------|-----------|
+| `function` | top-level `def` | top-level `func` | — | top-level `function`, arrow const |
+| `class` | `class` | — | `class` | `class` |
+| `method` | `def` inside class | `func (T)` receiver | `def`, `def self.` | class method |
+| `struct` | — | `type T struct` | — | — |
+| `interface` | — | `type T interface` | — | `interface` |
+| `module` | — | — | `module` | — |
+| `constant` | ALL_CAPS module-level | `const` | ALLCAPS / CamelCase | `const` export |
+| `type` | — | `type T = ...` | — | `type` alias |
+| `enum` | — | — | — | `enum` |
+
+---
+
+## Question 2: Call-Site Edges — What "Who Calls foo" Means in Practice
+
+### Scope taxonomy and what to implement
+
+| Scope | What it is | Implementable at v1.7? | Accuracy |
+|-------|-----------|------------------------|---------|
+| Same-file, direct call | `foo()` where `foo` is defined in same file | YES | Near-100% |
+| Cross-file, imported callee | `import {foo} from './bar'; foo()` | YES | HIGH (~90%) |
+| Method call on known type | `obj.method()` where obj type is deterministic | PARTIAL — skip for v1.7 | N/A |
+| Method call on unknown receiver | `unknown.method()` | NO | Requires type inference |
+| Dynamic dispatch | `interface.method()`, callbacks, `apply`/`call` | NO | Requires runtime or type inference |
+| Higher-order functions | `arr.map(fn)` where fn is a ref | PARTIAL — `fn` ref is extractable | MEDIUM |
+
+**The "good enough" accuracy level for an LLM agent asking "who calls foo":**
+
+Code intelligence tools like Sourcegraph (using SCIP/LSIF), GitHub stack-graphs, and roam-code all converge on the same design choice: **precise over approximate for static cases, skip dynamic cases**. An LLM agent asking "who calls `parseResponse`" needs correct positives (true callers it can then read), and can tolerate false negatives (missed dynamic dispatch calls), but is damaged by false positives (reported callers that don't actually call the target).
+
+The evidence: stack-graphs (archived Sept 2025 after shipping TS support) use a conservative path-stitching algorithm that only resolves statically visible references. code-graph-mcp and roam-code both use AST pattern matching (not type inference) for caller/callee detection, achieving "fast (<3s)" with `find_callers`. The consensus: **70-85% recall on non-trivial TS/JS code is acceptable and standard for static-analysis-only tools**.
+
+### Recommended v1.7 call-site resolution scope
+
+**Build:** Direct-call `CallExpression` tracking with import resolution for TS/JS.
+
+Specifically:
+1. During the single-pass AST walk (alongside edge extraction), capture `CallExpression` nodes
+2. For each call: extract the callee name (`foo`, `bar.baz`, `SomeClass.method`)
+3. Match against the local `symbols` table: if a symbol with that name exists in the current file → direct edge
+4. If not found locally, look up `imported_names` from `file_dependencies` for the current file → if the name appears in an import that resolves to a file we have symbols for → cross-file edge
+
+**Skip for v1.7:**
+- `obj.method()` where obj is not imported directly (receiver type unknown) — no type inference
+- Dynamic dispatch — `arr[0]()`, computed property calls, Proxy
+- Calls inside template literals or string-based `eval`-equivalents
+
+This gives ~80% recall on typical application TS/JS code. The remaining 20% is dynamic/method calls that no static tool resolves correctly without a full type system.
+
+**Storage:** New `symbol_dependencies` table:
+
+```sql
+symbol_id        TEXT  -- caller (references symbols.id)
+target_symbol_id TEXT  -- callee (references symbols.id, nullable for unresolved)
+target_name      TEXT  -- callee name string (always present, for unresolved cases)
+target_file      TEXT  -- resolved file path (nullable)
+edge_type        TEXT  -- 'calls' (v1.7 scope)
+confidence       REAL  -- 1.0 for same-file resolved, 0.8 for cross-file resolved, 0.5 for unresolved
+```
+
+Unresolved calls (target symbol not in DB) are stored with `target_symbol_id = NULL` and `confidence = 0.5`. This lets `find_callers` return high-confidence edges while flagging the resolution gap.
+
+---
+
+## Question 3: MCP Tool Surface
+
+### What queries matter for an LLM agent doing refactoring
+
+Evidence from roam-code, code-graph-mcp, Serena, and code intelligence MCP (JetBrains) converges on five query types that generate agent value in refactoring workflows:
+
+1. **"Who calls this symbol?"** — blast radius before editing
+2. **"What does this symbol call?"** — understanding implementation dependencies  
+3. **"Where is this symbol defined?"** — already covered by `find_symbol`
+4. **"What is the blast radius of changing this file?"** — already covered by `get_file_summary.dependents[]`
+5. **"What calls are now dead after this delete?"** — requires tombstones (deferred to v1.8)
+
+The only NEW tool needed for v1.7 is `find_callers`. `find_callees` is a secondary differentiator.
+
+### Proposed v1.7 MCP tools
+
+**`find_callers(name, kind?, file?, maxItems?)`** — TABLE STAKES
+
+Input:
+```json
+{ "name": "parseResponse", "kind": "function", "file": "src/api.ts", "maxItems": 50 }
+```
+
+Output:
+```json
+{
+  "items": [
+    {
+      "callerSymbol": "fetchData",
+      "callerKind": "function",
+      "callerFile": "src/client.ts",
+      "callerLine": 42,
+      "confidence": 1.0
+    },
+    {
+      "callerSymbol": "retryFetch",
+      "callerKind": "function", 
+      "callerFile": "src/client.ts",
+      "callerLine": 87,
+      "confidence": 0.8
+    }
+  ],
+  "total": 2,
+  "unresolvedCount": 3
+}
+```
+
+`unresolvedCount` reports how many call sites were found that reference the name but could not be resolved to a known symbol (dynamic/method calls). This gives the agent an honest signal: "2 confirmed callers, 3 unresolved references".
+
+**Why `name` not `symbol_id`:** Agent workflows start from a name the agent is looking at in a file, not a pre-known DB id. Allow optional `file` to disambiguate when same name exists in multiple files.
+
+---
+
+**`find_callees(name, kind?, file?, maxItems?)`** — DIFFERENTIATOR (not table stakes)
+
+Same shape as `find_callers` but returns what the target symbol calls. Useful for "what would break inside this function if I change library X". Lower priority than `find_callers` because agents can read the function body directly for small functions.
+
+---
+
+**What NOT to add for v1.7:**
+
+| Tool | Why Skip |
+|------|---------|
+| `get_call_graph(scope)` | Multi-hop graph traversal. Agents get confused by large graph dumps. One-hop callers + one-hop callees is sufficient for refactoring context. |
+| `list_uses(symbol)` | Conflates call-site edges with import references. `find_callers` (call-site) + existing `get_file_summary.dependents[]` (import-site) covers both with clearer semantics. |
+| `trace_call_path(from, to)` | Requires transitive BFS over symbol graph. HIGH complexity, agents can do this iteratively with `find_callers`. |
+| `find_unused_symbols` | Requires complete call graph across all files before any symbol is declared unused. FALSE NEGATIVE RATE too high without full resolution. |
 
 ---
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These)
-
-Features LLM agents and developers assume exist. Missing these = trust in the server breaks.
+### Table Stakes (Must Ship in v1.7)
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| MCP transport tests (end-to-end tool invocation via protocol) | Agents call tools through the JSON-RPC layer; unit-only DB tests leave the full protocol path untested and invisible to CI | MEDIUM | Use `InMemoryTransport` to connect a real `McpServer` + `McpClient` in vitest, invoke `client.callTool()`, assert on response shape. In SDK v1.27.1 (installed), still importable from `@modelcontextprotocol/sdk/inMemory.js`. |
-| Tool schema compliance via `registerTool()` with `z.object()` | MCP SDK v2 requires `inputSchema` to be a `z.object()` not a raw shape; the v1 `server.tool(name, rawShape, handler)` is deprecated and blocks access to the `ctx` object | LOW | All 15 `server.tool()` calls must migrate to `server.registerTool()` with `inputSchema: z.object({...})`. Mechanical change. |
-| Tool annotations (`readOnlyHint: true` on query tools) | MCP 2025-11-25 spec added tool annotations; `readOnlyHint: true` prevents agents from treating read-only tools as state-mutating | LOW | Apply to all 13 read-only tools (list_files, find_important_files, get_file_summary, status, detect_cycles, get_cycles_for_file, get_communities, search). Zero code beyond the annotation object. |
-| `.mcp.json` project-scoped config in repo root | Claude Code auto-discovers `.mcp.json` in project root — no `claude mcp add` or manual `~/.claude.json` editing required. Contributors get zero-config setup on clone. | LOW | Create `.mcp.json` with `--base-dir=${workspaceFolder}` so the server self-targets the current project. Commit to git. |
-| `notifications/tools/list_changed` fires after init | Server declares `tools: { listChanged: true }` but never sends the notification. Clients that connect before init completes see an empty tool list until they explicitly re-query. | LOW | One call to `server.sendToolListChanged()` inside coordinator's init completion callback. Lets Claude Code refresh its tool list automatically. |
-| Broker lifecycle tests (PID guard, socket cleanup, SIGTERM) | The broker's crash-safety logic is well-coded but entirely untested. Any refactor can silently break PID deduplication or leave zombie sockets. | MEDIUM | Test `checkPidGuard()` with: no PID file, stale PID file (dead PID), live PID file (running). Test broker start + SIGTERM + verify socket/PID file removed. |
-| Structured error responses with parseable error indicator | LLM agents need machine-readable error reasons, not just `isError: true` with free text. The current `createMcpResponse(text, true)` pattern produces opaque blobs. | MEDIUM | Standardize all error paths to return `{ ok: false, error: "CODE", message: "..." }` JSON object instead of raw strings. Agents can branch on `ok`. |
+| Python symbol extraction (`function`, `class`, `method`, `constant`) | `find_symbol` already works for TS/JS; agents using Python repos get nothing without this | MEDIUM | Single-pass tree-sitter AST walk alongside existing edge extraction. Grammar: `tree-sitter-python` (already used in v1.4 for edge extraction). Reuses extractor pattern from TS/JS. |
+| Go symbol extraction (`function`, `method`, `struct`, `interface`, `type`, `constant`) | Same pattern as Python — Go repos excluded from symbol tools | LOW-MEDIUM | Regex-based per D-06 decision (no stable `tree-sitter-go` npm grammar). Regex for Go is deterministic: uppercase = exported. |
+| Ruby symbol extraction (`class`, `module`, `method`, `constant`) | Same pattern | MEDIUM | tree-sitter-ruby grammar exists. `attr_accessor` explicitly excluded. |
+| `isExport` flag per language using language-appropriate convention | LLM agents depend on `exportedOnly=true` default in `find_symbol` — wrong exportedness = wrong results | LOW | Python: no `_` prefix. Go: uppercase first char. Ruby: all classes/modules/constants = exported; methods = exported. |
+| TS/JS call-site edges in `symbol_dependencies` table | Core new data; everything else depends on it | HIGH | New table, new AST extraction pass for `CallExpression` nodes, import resolution lookup. |
+| `find_callers(name, kind?, file?, maxItems?)` MCP tool | Primary agent query for refactoring blast radius | MEDIUM | Depends on `symbol_dependencies` table. Simple SELECT with JOIN on `symbols`. |
 
-### Differentiators (Competitive Advantage)
-
-Features beyond what most MCP servers provide. These increase agent trust and discoverability.
+### Differentiators (High Value, Not Blockers)
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| MCP Prompts for common agent workflows | Expose curated prompt templates (`get-onboarding-context`, `find-entry-points`, `explain-community`) via `server.registerPrompt()`. Claude Code shows these in slash command discovery. Turns raw tools into a guided interface. | MEDIUM | Uses `server.registerPrompt()` API (v2). Each prompt composes 2–3 tool calls into a pre-built message sequence. Most MCP servers expose only raw tools. |
-| Progress notifications for `scan_all` | `scan_all` runs for seconds on large repos. Without `notifications/progress`, the agent's context stalls with no feedback. With progress, agents can show real state. | MEDIUM | Requires `registerTool` migration first (to get `ctx` access). Add progress callback to coordinator scan loop that calls `ctx.mcpReq.notify()` when a progressToken is provided. |
-| MCP Resources for file summaries with push | Expose file metadata as MCP resources (`filescope://summary/<path>`) so clients can subscribe and receive `notifications/resources/updated` when the watcher detects changes. True push intelligence. | HIGH | Requires `server.registerResource()` + `ResourceTemplate` + wiring `sendResourceUpdated()` into the change handler. Most MCP servers do not implement resources. High complexity — own phase or milestone. |
-| Conformance test via `@modelcontextprotocol/conformance` | Running the official MCP conformance suite proves spec compliance end-to-end beyond unit tests. `npx @modelcontextprotocol/conformance server --scenario server-initialize` | MEDIUM | Conformance runner targets HTTP transport. Requires a thin HTTP shim wrapper around the existing stdio server, or running the conformance tests against a local test server instance. |
-| Health endpoint: stable `ok` flag in `status` tool | `status` tool already returns rich JSON. The differentiator is a guaranteed `ok: boolean` at top level that orchestrators can parse without text extraction. Schema stabilization. | LOW | Add `ok: true` to happy-path `status` response and `ok: false` to error paths. Document the schema. |
+| `find_callees(name, kind?, file?, maxItems?)` MCP tool | Completes the bidirectional call graph surface — agent can ask "what does this function depend on at symbol level" | LOW | `symbol_dependencies` table already has caller→callee direction; this is a reversed query |
+| `unresolvedCount` in `find_callers` response | Honest signal: "2 confirmed callers, 3 unresolved references you should investigate manually" — prevents false confidence | LOW | COUNT of `symbol_dependencies` rows where `target_name = ?` AND `target_symbol_id IS NULL` |
+| Cross-file call resolution via import table | Upgrades from same-file-only to multi-file call graph; dramatically increases recall for modular TS/JS | MEDIUM | Requires joining `file_dependencies.imported_names` with `symbols` table for the callee file |
+| Python `async def` metadata annotation | `async def` functions have different call semantics (must be awaited); useful annotation even if same `function` kind | LOW | Add `isAsync: bool` column to `symbols` table, populated from `async_function_definition` node vs `function_definition` |
+| Go `const` block extraction | Go `const ( A = 1; B = 2 )` blocks need group-aware regex — single `const` is easy, blocks need multi-line parsing | MEDIUM | Affects correctness of Go constant symbols; wrong = missing constants from `find_symbol` |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+### Anti-Features (Explicitly Excluded)
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Sampling (server requests LLM completion from client) | "MCP supports it, add it for spec completeness" | FileScopeMCP has its own LLM via the broker. Using client sampling creates a dependency on whatever model the agent runs — different quality, different cost, breaks local-first design. | Keep broker as the sole LLM interface. |
-| Elicitation (server prompts user for input mid-tool) | "Interactive config flows" | FileScopeMCP is a background daemon. No interactive user session exists. Elicitation would silently block in daemon mode. | Config via file (broker.json), CLI flags, or MCP tool parameters. |
-| HTTP/SSE transport alongside stdio | "More clients could connect" | One instance per project, one agent session at a time. HTTP adds port conflict risk, auth concerns, and concurrency complexity. PROJECT.md: "no dual-mode fallbacks." | stdio is correct for this use case. |
-| Full MCP 2025-11-25 async Tasks spec | Latest spec has infrastructure for async long-running tasks | Significant complexity for a feature that progress notifications already cover. `scan_all` rarely exceeds 10s. | Progress notifications + 5s shutdown timeout. |
-| OAuth / capability authorization | Enterprise MCP spec mandates OAuth 2.1 | FileScopeMCP is localhost-only. No network exposure, no shared secrets. Auth adds friction with zero security gain. Explicitly out of scope in PROJECT.md. | N/A — trusted localhost process only. |
-| Retry logic for LLM/broker failures inside tools | "Handle transient broker unavailability transparently" | Project memory: "rare model failures self-heal, don't add retry complexity." Retries hide bugs, inflate response times, and make tests non-deterministic. | Let broker timeout propagate as error. Agents retry at their discretion. |
-| Per-tool token budget in config file | "Different tools should have different default token limits" | Over-engineered. Single global `maxResponseTokens` covers 95% of use cases. Per-tool config adds schema complexity for negligible benefit. | Callers override per-call via `maxTokens` parameter (already present on list_files). |
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| `decorator` as a symbol `kind` in Python | Decorators are attributes of the symbol they decorate, not definitions. Pyright, Pylance, and LSP 3.17 all model this correctly — decorator calls are call-site edges FROM the function TO the decorator. Treating decorators as symbol kinds adds noise with zero query value. | Store decorator names as metadata on the function/class symbol (future). For now, ignore. |
+| `attr_accessor` / `attr_reader` / `attr_writer` as Ruby symbols | These synthesize methods dynamically. No tree-sitter grammar materializes the synthesized methods as AST nodes. Extracting them requires evaluating symbol literal arguments — Sorbet does this via heuristic and explicitly documents its fragility. False data is worse than missing data. | Skip. If an agent queries `find_symbol(name: "email")` in a Ruby file with `attr_accessor :email`, it gets no result — which is correct signal to look at the class definition. |
+| Method calls on unknown receivers in call-site edges | `obj.method()` where `obj` type is not statically determinable requires full type inference. No static-analysis-only tool achieves reliable resolution here. Code-graph-mcp, stack-graphs, and roam-code all skip these with "pattern-based" accuracy. Attempting it produces false positives that mislead refactoring agents. | Store as `target_symbol_id = NULL, confidence = 0.5`. Report in `unresolvedCount`. |
+| Cross-file call resolution for Python/Go/Ruby in v1.7 | Python/Go/Ruby get symbol extraction in v1.7, but their `symbol_dependencies` edges are v1.8 work. Reason: the TS/JS call-site implementation needs to ship and stabilize first; adding 3 more languages simultaneously doubles the blast radius of a new system. | Scope to TS/JS call-site edges in v1.7. Python/Go/Ruby get call-site edges in v1.8. |
+| `get_call_graph(scope)` multi-hop tool | Agents fed large graph dumps hallucinate structure that isn't there. One-hop `find_callers` + one-hop `find_callees` is sufficient. Agents can chain calls iteratively for deeper traversal. | `find_callers` + `find_callees` composable by the agent. |
+| `find_unused_symbols` dead-code detection | Requires a complete call graph (all files resolved) before any symbol can be declared dead. TS/JS dynamic imports, reflection, and serialization all create false "unused" signals. The false positive rate in real codebases is high enough to erode agent trust. | Agents use `find_callers` and judge from zero-result response. |
+| `trace_call_path(from, to)` transitive traversal | O(N*M) graph traversal with cycle detection, result size unbounded. Complexity exceeds value for v1.7. Agents do this iteratively with `find_callers`. | Compose `find_callers` calls at agent level. |
+| Fuzzy/regex symbol name matching in `find_callers` | `find_symbol` already handles prefix-GLOB. `find_callers` takes a name from `find_symbol` results, so it's always an exact known name at query time. Adding fuzzy matching adds ambiguity — "which `parse` did you mean?" — that the agent must resolve anyway. | Agents call `find_symbol(name: "parse*")` first, then `find_callers(name: "parseResponse", file: "src/api.ts")`. |
+| Symbol importance scoring per symbol | File-level importance is already approximate. Per-symbol scoring requires per-symbol call-count aggregation that is expensive and noise-heavy. | File importance already propagates to symbols through their parent file. |
+| Go tree-sitter grammar (upgrade from regex) | `tree-sitter-go` has no stable npm package (D-06 decision). Forcing tree-sitter here breaks the established regex approach that correctly handles Go imports. | Keep Go on regex for v1.7. Revisit when stable npm grammar ships. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Tool Schema Compliance (registerTool migration)
-    └──required-by──> Progress Notifications (ctx access required)
-    └──required-by──> Tool Annotations (part of registerTool config object)
-    └──required-by──> notifications/tools/list_changed (sendToolListChanged API)
-    └──blocks──>      nothing (backward-compatible migration)
+v1.6 symbols table (TS/JS symbols, find_symbol tool)
+    └──required-by──> TS/JS call-site edges (need symbol IDs to reference)
+    └──required-by──> find_callers MCP tool
+    └──independent-from──> Python symbol extraction
+    └──independent-from──> Go symbol extraction
+    └──independent-from──> Ruby symbol extraction
 
-MCP Transport Tests
-    └──requires──> InMemoryTransport (from @modelcontextprotocol/sdk/inMemory.js)
-    └──requires──> McpClient import (from @modelcontextprotocol/sdk/client/index.js)
-    └──enhances──> all existing unit tests (transport layer now covered)
+Python symbol extraction
+    └──uses──> tree-sitter-python grammar (already in use for edge extraction v1.4)
+    └──populates──> symbols table (same schema as v1.6 TS/JS)
+    └──enables-future──> Python call-site edges (v1.8)
+    └──independent-from──> Go/Ruby extraction (can ship in same phase or split)
 
-.mcp.json project-scoped config
-    └──independent──> (pure config file, no code dependency)
-    └──replaces──>    install-mcp-claude.sh as primary onboarding path
+Go symbol extraction
+    └──uses──> regex parser (D-06 decision maintained)
+    └──populates──> symbols table
+    └──independent-from──> Python/Ruby extraction
 
-MCP Prompts
-    └──requires──> Tool Schema Compliance (registerTool first for consistency)
-    └──enhances──> existing tool results (wraps them into message sequences)
+Ruby symbol extraction
+    └──uses──> tree-sitter-ruby grammar (already in use for edge extraction v1.4)
+    └──populates──> symbols table
+    └──independent-from──> Python/Go extraction
 
-Progress Notifications for scan_all
-    └──requires──> Tool Schema Compliance (ctx parameter only available in registerTool)
-    └──requires──> coordinator scan loop accepts progress callback
+TS/JS call-site edges (symbol_dependencies table)
+    └──requires──> symbols table populated for TS/JS (v1.6 done)
+    └──requires──> file_dependencies.imported_names (v1.6 done)
+    └──requires──> new symbol_dependencies table schema
+    └──enables──> find_callers MCP tool
+    └──enables-future──> find_callees MCP tool (same table, reversed query)
+    └──enables-future──> Python/Go/Ruby call-site edges (v1.8)
 
-MCP Resources with push notifications
-    └──requires──> Tool Schema Compliance (must use registerTool v2 API pattern)
-    └──requires──> watcher change events (already present in coordinator)
-    └──requires──> ResourceTemplate for dynamic per-file URIs
-    └──conflicts-with──> "query-based not push-based" design note in PROJECT.md
-                         (resolve explicitly before implementing)
+find_callers MCP tool
+    └──requires──> symbol_dependencies table populated
+    └──requires──> symbols table (for JOIN on symbol name → id)
+    └──enhances──> existing get_file_summary (complements dependents[] at symbol level)
 
-Broker Lifecycle Tests
-    └──tests──> existing broker/main.ts PID guard and shutdown logic (no new code)
-    └──requires──> vitest + tmp directory helpers (already present)
-    └──requires──> process signal mocking strategy
+find_callees MCP tool
+    └──requires──> symbol_dependencies table (same table as find_callers)
+    └──same-phase-as──> find_callers (trivial to add when table exists)
 ```
 
 ### Dependency Notes
 
-- **Tool schema compliance must precede notifications and progress:** The v2 `registerTool()` API is the only way to access `ctx.mcpReq` for sending notifications/progress. Current `server.tool()` v1 calls have no `ctx` parameter.
-- **Resources require explicit design decision:** PROJECT.md states "real-time streaming of changes to MCP clients — query-based, not push-based" is out of scope. Resources with `sendResourceUpdated()` are push-based. This conflict must be resolved before building resources.
-- **.mcp.json is independent:** Can ship in any phase, zero risk, zero code dependency on other features.
-
----
-
-## Category Analysis
-
-### Category 1: Comprehensive Testing of MCP Transport/Tools
-
-**Current state:** 512 tests across unit and integration test files. Zero tests exercise the MCP protocol stack end-to-end. No test sends a JSON-RPC `tools/call` message and validates the response shape through the full MCP protocol layer.
-
-**What's missing:**
-- `McpServer` + `McpClient` connected via `InMemoryTransport` in vitest, with `client.callTool()` calls asserting on structured responses
-- Broker IPC tests: verify the NDJSON socket protocol handles `submit`/`status`/`result` message flow
-- Config subsystem: `loadBrokerConfig()` default resolution, `~/.filescope/` directory creation on first run
-- Watcher: debounce behavior, exclusion pattern matching, restart backoff reset
-
-**Implementation note on InMemoryTransport:** At SDK v1.27.1 (installed), `InMemoryTransport` is importable from `@modelcontextprotocol/sdk/inMemory.js` using the v1 path. The SDK v2 migration moves it to `@modelcontextprotocol/core` (internal, testing only). The upgrade path is documented and non-breaking.
-
-**Complexity:** MEDIUM overall. Each test category is LOW individually, but wiring the full `McpClient`/`McpServer` pair requires understanding the SDK client API.
-
-**Priority: P1 — this is the largest gap between "has unit tests" and "production-grade."**
-
-### Category 2: MCP Spec Compliance
-
-**Current state:** `tools: { listChanged: true }` declared but notification never fires. Tool schemas use the v1 raw shape API. No resources, no prompts, no progress notifications. No tool annotations.
-
-**Table stakes (ship in v1.5):**
-- Migrate all 15 `server.tool()` calls to `server.registerTool()` with `inputSchema: z.object({...})` (required for SDK v2 compatibility and `ctx` access)
-- Add `readOnlyHint: true` annotation to all read-only tools
-- Wire `server.sendToolListChanged()` to coordinator init event
-
-**Differentiators (v1.5 if time permits, otherwise v1.5.x):**
-- MCP Prompts for common agent queries
-- Progress notifications for `scan_all`
-
-**Deferred (own milestone or spike):**
-- MCP Resources with `notifications/resources/updated` — HIGH complexity, conflicts with stated "query-based not push-based" design
-- Sampling and elicitation — anti-features for this server's design
-
-**Complexity:** LOW–MEDIUM for table stakes. HIGH for resources.
-
-### Category 3: Zero-Config Agent Integration
-
-**Current state:** `install-mcp-claude.sh` manually edits `~/.claude.json`. Multiple platform-specific `mcp.json.*` variant files exist. No `.mcp.json` in repo root. The existing `run.sh` passes an empty `--base-dir=""` argument (broken for non-specific paths).
-
-**What ".mcp.json zero-config" means in practice:**
-1. User clones FileScopeMCP
-2. `npm run build`
-3. Claude Code auto-discovers `.mcp.json` at project root
-4. `FileScopeMCP` appears in the tool list — pointed at the project being analyzed (via `${workspaceFolder}`)
-5. No manual `claude mcp add` command, no editing JSON files
-
-**Implementation:**
-- `.mcp.json` in repo root: `{ "mcpServers": { "FileScopeMCP": { "command": "node", "args": ["<dist>/mcp-server.js", "--base-dir=${workspaceFolder}"] } } }` — committed to git
-- `install-mcp-claude.sh` updated to use `claude mcp add` CLI instead of direct JSON editing (for user-scoped registration when project-scope is not appropriate)
-
-**Complexity: LOW. Pure config, no code.**
-
-### Category 4: Graceful Lifecycle Management
-
-**Current state:**
-- MCP server: SIGTERM/SIGINT handlers with 5s forced-exit fallback (`gracefulShutdown()` in mcp-server.ts)
-- Broker: PID guard, stale socket cleanup, SIGTERM drain with current-job completion await
-- Both appear well-implemented in code
-
-**Gap:** The implementation correctness is asserted only by code review, not by tests. Any refactor can silently break PID deduplication or leave zombie sockets.
-
-**What needs tests:**
-- `checkPidGuard()`: (a) no PID file → start normally, (b) stale PID file with dead PID → remove files and start, (c) live PID file with running process → exit 0 without starting
-- Broker start + SIGTERM → socket file removed, PID file removed, exit code 0
-- MCP server stdin close → coordinator.shutdown() called within 5s
-- Force-exit fallback: coordinator.shutdown() hangs → process exits with code 1 within timeout
-
-**Implementation strategy:** Tests for signal handling require either `vi.spyOn(process, 'on')` for unit-level mocking, or spawning the broker as a child process in integration tests and sending real signals. The child process approach is more reliable for testing actual file cleanup.
-
-**Complexity: MEDIUM.** Signal mocking in Node.js tests has subtleties. Child process spawning in vitest requires `forked` mode or `globalSetup`.
+- **Multi-lang extraction is independent from call-site edges.** Either can ship first. Recommended order: multi-lang symbols first (lower risk, reuses v1.4 extractors), then call-site edges (new system, higher risk, warrants isolated phase).
+- **Call-site edges require v1.6 symbols to be complete for TS/JS.** Already true — v1.6 is shipped.
+- **`find_callers` and `find_callees` share the same table.** Implement both in the same phase for free — `find_callees` is a reversed SELECT, not additional infrastructure.
+- **Python/Go/Ruby call-site edges are v1.8, not v1.7.** The `symbol_dependencies` schema and `find_callers` tool are defined in v1.7 with TS/JS data, which sets the stable contract for v1.8 to extend.
 
 ---
 
 ## MVP Definition
 
-### Ship in v1.5 (This Milestone)
+### Ship in v1.7 (This Milestone)
 
-These are the table stakes and low-complexity differentiators that define "production-grade."
+- [ ] **Python symbol extraction** (`function`, `class`, `method`, `constant` kinds; `isExport` via `_` prefix convention; single-pass AST walk reusing tree-sitter-python grammar already loaded for edge extraction) — required for Python repos to benefit from `find_symbol`
+- [ ] **Go symbol extraction** (`function`, `method`, `struct`, `interface`, `type`, `constant` kinds; regex-based per D-06; `isExport` via uppercase convention) — required for Go repos
+- [ ] **Ruby symbol extraction** (`class`, `module`, `method`, `constant` kinds; tree-sitter-ruby grammar; no `attr_accessor` synthesis; all class/module/constants exported) — required for Ruby repos
+- [ ] **`symbol_dependencies` table** (new schema: caller `symbol_id`, `target_symbol_id` nullable, `target_name`, `target_file`, `edge_type = 'calls'`, `confidence`) — required for all call-site tools
+- [ ] **TS/JS call-site edge extraction** (AST walk captures `CallExpression` nodes; matches against `symbols` table for same-file; joins `imported_names` from `file_dependencies` for cross-file; populates `symbol_dependencies`) — core new data
+- [ ] **`find_callers` MCP tool** (`name`, optional `kind`, `file`, `maxItems`; returns `{items[], total, unresolvedCount}` envelope; `confidence` per item) — primary agent query
+- [ ] **`find_callees` MCP tool** (same infrastructure, reversed query; ships with `find_callers`) — completes bidirectional surface
 
-- [ ] **Tool schema compliance** — Migrate all 15 `server.tool()` calls to `registerTool()` with `z.object()` input schemas. Required for SDK v2 compatibility and for accessing `ctx`.
-- [ ] **Tool annotations** — Add `readOnlyHint: true` to all 13 read-only tools. `destructiveHint: true` to state-mutating tools (set_file_summary, set_file_importance, scan_all, exclude_and_remove, set_base_directory).
-- [ ] **`notifications/tools/list_changed`** — Fire `server.sendToolListChanged()` when coordinator completes init. One line of code.
-- [ ] **MCP transport tests** — vitest suite: connect `McpServer` + `McpClient` via `InMemoryTransport`, invoke each tool category (query, mutation, status), assert on response structure. This closes the biggest test coverage gap.
-- [ ] **Broker lifecycle tests** — PID guard deduplication + SIGTERM cleanup verified under tests.
-- [ ] **`.mcp.json` project-scoped config** — Commit working `.mcp.json` to repo root for auto-discovery.
-- [ ] **Structured error codes** — Standardize all error response paths to `{ ok: false, error: "ERROR_CODE", message: "..." }`.
+### Add After Core Is Stable (v1.7.x or v1.8)
 
-### Add After Core Is Stable (v1.5.x)
+- [ ] **Python `isAsync` metadata** — `async_function_definition` vs `function_definition` node type distinction; add column to `symbols` table when there's an agent use case surfaced from v1.7 dogfooding
+- [ ] **Python/Go/Ruby call-site edges** — populate `symbol_dependencies` for non-TS/JS languages; same schema, same tools (`find_callers` already queries across all languages)
+- [ ] **Go `const` block extraction** — multi-line regex for `const ( ... )` groups; lower priority than single-line `const`
 
-- [ ] **MCP Prompts** — `get-onboarding-context` and `find-entry-points` prompts. Adds discoverability but not critical for agent correctness.
-- [ ] **Progress notifications for `scan_all`** — Coordinator progress callback → `notifications/progress`. Requires registerTool migration to complete first.
-- [ ] **Conformance test runner** — Run `@modelcontextprotocol/conformance` against server in CI. Requires resolving the HTTP shim question.
+### Defer to v1.9+
 
-### Defer to v1.6+
-
-- [ ] **MCP Resources with push notifications** — `filescope://summary/<path>` + `notifications/resources/updated`. HIGH complexity, conflicts with "query-based" design constraint. Needs explicit design spike.
-- [ ] **Output schema validation** — Add `outputSchema: z.object({...})` to structured JSON tools for client-side validation. Low complexity but requires schema design work for each tool's output shape.
+- [ ] **Decorator metadata** on Python/Ruby symbols — store decorator names as JSON column on `symbols`; no separate kind
+- [ ] **Python `__all__` for precise exportedness** — requires evaluating list literal AST node; adds correctness for explicit-export modules
+- [ ] **Ruby visibility modifiers** (`private`/`protected` tracking) — runtime Ruby semantics; requires dataflow, not static analysis
 
 ---
 
@@ -222,69 +364,127 @@ These are the table stakes and low-complexity differentiators that define "produ
 
 | Feature | Agent Value | Implementation Cost | Priority |
 |---------|-------------|---------------------|----------|
-| MCP transport tests (InMemoryTransport) | HIGH | MEDIUM | P1 |
-| Tool schema compliance (registerTool + z.object) | HIGH | LOW | P1 |
-| Tool annotations (readOnlyHint) | HIGH | LOW | P1 |
-| .mcp.json zero-config registration | HIGH | LOW | P1 |
-| Broker lifecycle tests | HIGH | MEDIUM | P1 |
-| notifications/tools/list_changed | MEDIUM | LOW | P1 |
-| Structured error codes | MEDIUM | MEDIUM | P1 |
-| MCP Prompts (guided workflows) | MEDIUM | MEDIUM | P2 |
-| Progress notifications for scan_all | MEDIUM | MEDIUM | P2 |
-| Conformance test runner | LOW | HIGH | P3 |
-| MCP Resources + push notifications | HIGH | HIGH | P3 |
-| Output schema per-tool | LOW | MEDIUM | P3 |
+| Python symbol extraction | HIGH | MEDIUM | P1 |
+| Go symbol extraction | HIGH | LOW-MEDIUM | P1 |
+| Ruby symbol extraction | HIGH | MEDIUM | P1 |
+| `symbol_dependencies` table schema | HIGH (enables all call-site tools) | LOW | P1 |
+| TS/JS call-site edge extraction | HIGH | HIGH | P1 |
+| `find_callers` MCP tool | HIGH | MEDIUM | P1 |
+| `find_callees` MCP tool | MEDIUM | LOW (free once find_callers exists) | P1 |
+| `unresolvedCount` in find_callers response | MEDIUM (honest signal) | LOW | P1 |
+| Cross-file call resolution via imported_names | HIGH | MEDIUM | P1 |
+| Python `isAsync` metadata column | LOW | LOW | P3 |
+| Go `const` block extraction | MEDIUM | MEDIUM | P2 |
+| Python/Go/Ruby call-site edges | HIGH | HIGH | P2 (v1.8) |
+| Python `__all__` exportedness | MEDIUM | MEDIUM | P3 |
+| Ruby visibility modifier tracking | LOW | HIGH | P3 |
 
 **Priority key:**
-- P1: Must have for v1.5 milestone to be "production-grade"
-- P2: Natural extension of P1 work; add within the milestone if scope permits
-- P3: Deferred — own milestone or spike required
+- P1: Ships in v1.7 milestone — core of the milestone
+- P2: Ship when call-site edges are stable (v1.7.x or v1.8)
+- P3: Own milestone, deferred until adoption signal
 
 ---
 
-## Existing Features: Do Not Re-Implement
+## Competitor Feature Analysis
 
-The following are already present and well-implemented in the codebase. v1.5 work is testing and hardening, not rebuilding:
+| Feature | Sourcegraph (SCIP/LSIF) | code-graph-mcp | stack-graphs | Our Approach (v1.7) |
+|---------|------------------------|----------------|--------------|---------------------|
+| Find callers | Precise (full type inference + SCIP index) | Pattern-based AST; "universal" claimed | Static name resolution; method calls skipped | AST + import resolution; method calls skipped |
+| Method call resolution | YES (requires SCIP indexer per language) | Partial/approximate | Skipped for complex cases | Skipped in v1.7 |
+| Dynamic dispatch | NO (static only) | NO | NO | NO |
+| Multi-language | 20+ languages with indexers | 25+ languages (ast-grep) | TS, Python (experimental) | TS/JS (call-site) + Python/Go/Ruby (symbols) |
+| Exportedness | Per-language conventions + type info | Not reported | Not reported | Per-language conventions |
+| `unresolvedCount` | Not exposed | Not exposed | Not applicable | YES — honest signal |
+| MCP interface | YES (Amp API) | YES (9 tools) | NO | YES (integrated in existing 15-tool surface) |
+| Same-repo only | NO (cross-repo) | YES | YES | YES |
+| Requires separate indexer/daemon | YES (Sourcegraph instance) | NO (per-request) | YES (compile step) | NO (incremental, file-watcher driven) |
 
-- PID guard + stale socket cleanup on broker startup (`broker/main.ts`)
-- SIGTERM/SIGINT handlers for both broker and MCP server
-- Coordinator 5-second forced-exit fallback on shutdown
-- File watcher with debouncing and restart backoff
-- Broker priority queue with job dedup
-- Auto-init to CWD on MCP server start
-- `tools: { listChanged: true }` capability declaration
-- Unix socket NDJSON IPC protocol in broker/server.ts
+**Our key differentiation:** Incremental, file-watcher-driven updates mean call-site edges are always fresh after a file save, without a separate indexing step. Sourcegraph and stack-graphs require explicit reindex runs. This matters for LLM agent workflows that edit files and immediately ask "did this change break any callers?"
 
 ---
 
-## Dependency on Existing Components
+## Expected Input/Output Examples for Agent Use Cases
 
-| Existing Component | How v1.5 Changes It |
-|-------------------|---------------------|
-| `src/mcp-server.ts` | Migrate `server.tool()` to `server.registerTool()`; add tool annotations; wire `sendToolListChanged()`; standardize error response format |
-| `src/broker/main.ts` | No code changes — add tests exercising `checkPidGuard()` and shutdown sequence |
-| `src/broker/server.ts` | No code changes — add integration tests for socket IPC message handling |
-| `src/coordinator.ts` | Add progress callback parameter to scan methods (for progress notifications in P2) |
-| `tests/unit/` | New file: `mcp-transport.test.ts` for InMemoryTransport protocol tests |
-| `tests/unit/` | New file: `broker-lifecycle.test.ts` for PID guard and shutdown tests |
-| `.mcp.json` (new) | New file at repo root — project-scoped Claude Code registration |
+### Use case 1: "Is it safe to rename `parseResponse` to `deserializeResponse`?"
+
+```
+Agent: find_symbol("parseResponse", exportedOnly=false)
+→ { items: [{name: "parseResponse", kind: "function", file: "src/api.ts", line: 47, isExport: true}], total: 1 }
+
+Agent: find_callers("parseResponse", file="src/api.ts")
+→ { items: [
+     {callerSymbol: "fetchData", callerKind: "function", callerFile: "src/client.ts", callerLine: 42, confidence: 1.0},
+     {callerSymbol: "retryFetch", callerKind: "function", callerFile: "src/client.ts", callerLine: 87, confidence: 0.8}
+   ], total: 2, unresolvedCount: 0 }
+
+Agent concludes: 2 callers in src/client.ts. Read those lines, rename all 3 occurrences.
+```
+
+### Use case 2: "What does `buildRequest` depend on at symbol level?"
+
+```
+Agent: find_callees("buildRequest", file="src/api.ts")
+→ { items: [
+     {calleeSymbol: "serializeBody", calleeKind: "function", calleeFile: "src/api.ts", confidence: 1.0},
+     {calleeSymbol: "addHeaders", calleeKind: "function", calleeFile: "src/headers.ts", confidence: 1.0},
+     {calleeName: "config.timeout", calleeFile: null, confidence: 0.5}  // unresolved method on config object
+   ], total: 2, unresolvedCount: 1 }
+
+Agent concludes: buildRequest calls 2 known symbols + 1 unresolved property access.
+```
+
+### Use case 3: "What Python classes are exported from src/models.py?"
+
+```
+Agent: find_symbol("*", kind="class", file="src/models.py", exportedOnly=true)
+→ { items: [
+     {name: "UserModel", kind: "class", file: "src/models.py", line: 12, isExport: true},
+     {name: "ProductModel", kind: "class", file: "src/models.py", line: 45, isExport: true}
+   ], total: 2 }
+  (PrivateModel at line 78 excluded — starts with _)
+```
+
+---
+
+## Build Order Recommendation
+
+**Phase A: Multi-language symbol extraction (Python + Go + Ruby)**
+- Lower risk: reuses existing tree-sitter grammar infrastructure from v1.4
+- Directly extends `find_symbol` to cover all 4 target languages
+- No new table schemas needed (uses existing `symbols` table)
+- Can ship independently; no dependency on call-site edges
+- Recommended: implement Python + Go + Ruby together in one phase since the pattern is uniform
+
+**Phase B: TS/JS call-site edges + `symbol_dependencies` table**
+- Higher risk: new table, new extraction logic, new import resolution join
+- Depends on `symbols` table being populated for TS/JS (done in v1.6)
+- Isolated from multi-lang symbols — if this phase has issues, Phase A work is unaffected
+- `find_callers` + `find_callees` both ship at end of this phase
+
+This ordering means Phase A can ship in parallel with schema design for Phase B. The call-site edge system has a clean, separate blast radius.
 
 ---
 
 ## Sources
 
-- [MCP TypeScript SDK via Context7](https://context7.com/modelcontextprotocol/typescript-sdk/llms.txt): `registerTool()`, `registerResource()`, `registerPrompt()`, `InMemoryTransport`, `sendToolListChanged()`, progress notifications, server capabilities — HIGH confidence
-- [MCP SDK Migration Guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration.md): v1→v2 API changes, `InMemoryTransport` relocation to `@modelcontextprotocol/core` — HIGH confidence
-- [MCP Server Docs](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md): `registerTool` with `inputSchema`, `outputSchema`, `annotations`, resource templates, prompt registration — HIGH confidence
-- [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp): `.mcp.json` project scope, `claude mcp add` CLI, scoping behavior (project vs user vs local) — HIGH confidence
-- [MCP Tools Spec 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/server/tools): tool annotations spec (`readOnlyHint`, `idempotentHint`, `destructiveHint`), `listChanged` capability, `outputSchema` — HIGH confidence
-- [MCP Spec Lifecycle](https://modelcontextprotocol.io/specification/2025-03-26/basic/lifecycle): stdio shutdown sequence (close stdin → wait → SIGTERM → SIGKILL) — HIGH confidence
-- [Unit Testing MCP Servers — MCPcat](https://mcpcat.io/guides/writing-unit-tests-mcp-servers/): in-memory testing as table stakes pattern — MEDIUM confidence
-- [mcp-server-e2e-testing-example](https://github.com/mkusaka/mcp-server-e2e-testing-example): canonical InMemoryTransport + vitest pattern with stdio and SDK approaches — MEDIUM confidence
-- [MCP November 2025 Spec overview](https://medium.com/@dave-patten/mcps-next-phase-inside-the-november-2025-specification-49f298502b03): async tasks, elicitation, enterprise governance additions — MEDIUM confidence
-- Live codebase inspection: `src/mcp-server.ts`, `src/broker/main.ts`, `src/broker/server.ts`, `tests/unit/`, `tests/integration/`, `package.json` — HIGH confidence
+- [LSP 3.17 Specification — SymbolKind enum](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/) — HIGH confidence (official spec)
+- [tree-sitter Code Navigation — symbol kinds and roles](https://tree-sitter.github.io/tree-sitter/4-code-navigation.html) — HIGH confidence (official tree-sitter docs): standard kinds are `class`, `function`, `interface`, `method`, `module`; decorators are NOT a standard kind
+- [tree-sitter-python node types](https://github.com/tree-sitter/tree-sitter-python/blob/master/src/node-types.json) — HIGH confidence: `function_definition`, `class_definition`, `async_function_definition`, `decorator` node types confirmed
+- [tree-sitter-ruby grammar](https://github.com/tree-sitter/tree-sitter-ruby) — HIGH confidence: `method`, `singleton_method`, `class`, `module`, `constant` confirmed
+- [GitHub Blog: Introducing stack graphs](https://github.blog/open-source/introducing-stack-graphs/) — MEDIUM confidence: precision-first design; method calls and inheritance listed as open questions
+- [stack-graphs repo archived Sept 2025](https://github.com/github/stack-graphs) — MEDIUM confidence: confirmed via search result; project archived after shipping TS support
+- [code-graph-mcp tools](https://github.com/entrepeneur4lyf/code-graph-mcp) — MEDIUM confidence: `find_callers`/`find_callees` tool shapes confirmed; uses ast-grep backend; no accuracy metrics published
+- [Sourcegraph code intelligence — SCIP](https://sourcegraph.com/) — MEDIUM confidence: SCIP/LSIF precise navigation; requires language-specific indexer
+- [Sorbet attr_accessor heuristics](https://sorbet.org/docs/faq) — HIGH confidence: explicit documentation that `attr_accessor` requires syntactic literal arg; fragility of dynamic Ruby acknowledged
+- [Go exported/unexported — ardanlabs](https://www.ardanlabs.com/blog/2014/03/exportedunexported-identifiers-in-go.html) — HIGH confidence: uppercase = exported is lexical, enforced by Go compiler
+- [LSP SymbolKind string proposal #1186](https://github.com/microsoft/language-server-protocol/issues/1186) — HIGH confidence: confirms LSP lacks fine-grained Python method distinctions (`async def`, `classmethod`, etc.)
+- [roam-code — SQLite symbol graph MCP](https://github.com/Cranot/roam-code) — MEDIUM confidence: pattern confirms call graph + symbol search in SQLite is the right architecture
+- [Serena MCP — symbol-level retrieval](https://github.com/oraios/serena) — MEDIUM confidence: confirms `find_callers`-equivalent is table stakes for agent refactoring
+- [Dynamic dispatch — Wikipedia](https://en.wikipedia.org/wiki/Dynamic_dispatch) — HIGH confidence: confirms no static analysis tool resolves dynamic dispatch without runtime type information
+- FileScopeMCP PROJECT.md and v1.6 FEATURES.md — HIGH confidence (authoritative project context, no external verification needed)
 
 ---
 
-*Feature research for: FileScopeMCP v1.5 Production-Grade MCP Intelligence Layer*
-*Researched: 2026-04-17*
+*Feature research for: FileScopeMCP v1.7 Multi-Lang Symbols + Call-Site Edges*
+*Researched: 2026-04-23*
