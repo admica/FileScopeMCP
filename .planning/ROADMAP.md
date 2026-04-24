@@ -115,7 +115,7 @@ See: `.planning/milestones/v1.6-ROADMAP.md` for full phase details.
 
 **Phase Summary:**
 
-- [ ] **Phase 36: Schema Migration + Multi-Language Symbols** - Capture perf baseline, migrate `symbol_dependencies` schema, extract Python/Go/Ruby symbols, ship bulk backfill
+- [x] **Phase 36: Schema Migration + Multi-Language Symbols** (3/3 plans) — completed 2026-04-24
 - [ ] **Phase 37: TS/JS Call-Site Edge Extraction** - Populate `symbol_dependencies` via AST call-expression pass, extend atomic transaction and five-step cascade, bulk backfill
 - [ ] **Phase 38: MCP Surface** - Register `find_callers` + `find_callees` tools, InMemoryTransport integration tests, lock the data contract
 - [ ] **Phase 39: Deferred-Item Closure** - Formal closure of 7 historical quick-task artifacts; STATE.md Deferred Items table reaches zero entries
