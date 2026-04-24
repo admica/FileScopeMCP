@@ -17,6 +17,7 @@ import { log } from './logger.js';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
+import { runMultilangSymbolsBulkExtractionIfNeeded } from './migrate/bulk-multilang-symbol-extract.js';
 import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
 import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
@@ -281,6 +282,17 @@ export class ServerCoordinator {
       await runSymbolsBulkExtractionIfNeeded(projectRoot);
     } catch (err) {
       log(`Bulk symbol extraction failed (non-fatal): ${err}`);
+    }
+
+    // Phase 36 MLS-05 — populate symbols for every tracked Python/Go/Ruby file on first boot.
+    // Three independent per-language gates (D-26); does NOT reuse v1.6 symbols_bulk_extracted
+    // (Pitfall 17 / D-28b). Placement: AFTER runSymbolsBulkExtractionIfNeeded (so v1.6 symbols
+    // are in DB first), BEFORE buildFileTree (so the tree build sees all symbols).
+    // Non-fatal: a failure here logs and continues; the in-memory file tree is built either way.
+    try {
+      await runMultilangSymbolsBulkExtractionIfNeeded(projectRoot);
+    } catch (err) {
+      log(`Bulk multilang symbol extraction failed (non-fatal): ${err}`);
     }
 
     try {
