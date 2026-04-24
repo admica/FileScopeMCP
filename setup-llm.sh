@@ -305,12 +305,14 @@ llama-server \\
   -ngl 99 \\
   --n-cpu-moe 20 \\
   -fa on \\
-  -b 2048 -ub 2048 \\
+  -no-mmap \\
+  -b 2048 -ub 768 \\
   --cache-type-k q8_0 --cache-type-v q8_0 \\
   --jinja \\
   --no-warmup \\
   --host 0.0.0.0 --port $LLM_PORT \\
-  --metrics
+  --metrics \\
+  -np 1
 EOF
 }
 
