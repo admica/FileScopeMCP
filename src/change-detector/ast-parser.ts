@@ -324,12 +324,26 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
     // whose parent is `program`. Frame's startLine must match the
     // eventual symbols[] row's startLine for the setEdgesAndSymbols
     // lookup (Pitfall A).
+    //
+    // Gate the `node.parent` native-binding probe behind a cheap node.type
+    // check — only 5 node types can ever be top-level callers. Without this
+    // gate every visited AST node paid 2 native lookups (regressed the
+    // 10K-line parse test from 3s → 5s+).
     let pushed = false;
-    const parentType = node.parent?.type;
-    const grandparentType = node.parent?.parent?.type;
+    const t = node.type;
+    const isCandidateCaller =
+      t === 'export_statement' ||
+      t === 'function_declaration' ||
+      t === 'generator_function_declaration' ||
+      t === 'class_declaration' ||
+      t === 'lexical_declaration';
+    const parentType = isCandidateCaller ? node.parent?.type : undefined;
+    const grandparentType = parentType === 'export_statement' ? node.parent?.parent?.type : undefined;
     const isTopLevel =
-      parentType === 'program' ||
-      (parentType === 'export_statement' && grandparentType === 'program');
+      isCandidateCaller && (
+        parentType === 'program' ||
+        (parentType === 'export_statement' && grandparentType === 'program')
+      );
 
     if (isTopLevel) {
       if (node.type === 'export_statement') {
