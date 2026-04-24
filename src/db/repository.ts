@@ -1084,6 +1084,122 @@ export function findSymbols(opts: {
 }
 
 /**
+ * Find all symbols that call the named symbol (callers of a callee).
+ *
+ * Resolves target symbol IDs by name (+ optional filePath to disambiguate).
+ * Excludes self-loops (caller_symbol_id == callee_symbol_id).
+ * Returns {items, total, unresolvedCount}:
+ *   - total: pre-LIMIT count (post-self-loop-filter)
+ *   - unresolvedCount: edges where caller_symbol_id no longer exists in symbols table
+ */
+export function getCallers(
+  name: string,
+  filePath?: string,
+  limit: number = 50
+): { items: Array<{ path: string; name: string; kind: string; startLine: number; confidence: number }>; total: number; unresolvedCount: number } {
+  const sqlite = getSqlite();
+
+  // Step 1: resolve target (callee) symbol IDs
+  const targetRows = filePath
+    ? sqlite.prepare('SELECT id FROM symbols WHERE name = ? AND path = ?').all(name, filePath) as Array<{ id: number }>
+    : sqlite.prepare('SELECT id FROM symbols WHERE name = ?').all(name) as Array<{ id: number }>;
+
+  if (targetRows.length === 0) return { items: [], total: 0, unresolvedCount: 0 };
+
+  const ids = targetRows.map(r => r.id);
+  const placeholders = ids.map(() => '?').join(', ');
+
+  // Step 2: COUNT pre-LIMIT, self-loop excluded
+  const total = (sqlite.prepare(
+    `SELECT COUNT(*) AS n FROM symbol_dependencies
+     WHERE callee_symbol_id IN (${placeholders})
+       AND caller_symbol_id != callee_symbol_id`
+  ).get(...ids) as { n: number }).n;
+
+  // Step 3: SELECT with LIMIT + JOIN for caller info
+  const rows = sqlite.prepare(
+    `SELECT s.path, s.name, s.kind, s.start_line, sd.confidence
+     FROM symbol_dependencies sd
+     INNER JOIN symbols s ON s.id = sd.caller_symbol_id
+     WHERE sd.callee_symbol_id IN (${placeholders})
+       AND sd.caller_symbol_id != sd.callee_symbol_id
+     ORDER BY s.path ASC, s.start_line ASC
+     LIMIT ?`
+  ).all(...ids, limit) as Array<{ path: string; name: string; kind: string; start_line: number; confidence: number }>;
+
+  // Step 4: unresolvedCount — caller edges referencing symbols no longer in the DB
+  const unresolvedCount = (sqlite.prepare(
+    `SELECT COUNT(*) AS n FROM symbol_dependencies
+     WHERE callee_symbol_id IN (${placeholders})
+       AND caller_symbol_id NOT IN (SELECT id FROM symbols)`
+  ).get(...ids) as { n: number }).n;
+
+  return {
+    items: rows.map(r => ({ path: r.path, name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
+    total,
+    unresolvedCount,
+  };
+}
+
+/**
+ * Find all symbols that the named symbol calls (callees of a caller).
+ *
+ * Resolves caller symbol IDs by name (+ optional filePath to disambiguate).
+ * Excludes self-loops (caller_symbol_id == callee_symbol_id).
+ * Returns {items, total, unresolvedCount}:
+ *   - total: pre-LIMIT count (post-self-loop-filter)
+ *   - unresolvedCount: edges where callee_symbol_id no longer exists in symbols table
+ */
+export function getCallees(
+  name: string,
+  filePath?: string,
+  limit: number = 50
+): { items: Array<{ path: string; name: string; kind: string; startLine: number; confidence: number }>; total: number; unresolvedCount: number } {
+  const sqlite = getSqlite();
+
+  // Step 1: resolve source (caller) symbol IDs
+  const callerRows = filePath
+    ? sqlite.prepare('SELECT id FROM symbols WHERE name = ? AND path = ?').all(name, filePath) as Array<{ id: number }>
+    : sqlite.prepare('SELECT id FROM symbols WHERE name = ?').all(name) as Array<{ id: number }>;
+
+  if (callerRows.length === 0) return { items: [], total: 0, unresolvedCount: 0 };
+
+  const ids = callerRows.map(r => r.id);
+  const placeholders = ids.map(() => '?').join(', ');
+
+  // Step 2: COUNT pre-LIMIT, self-loop excluded
+  const total = (sqlite.prepare(
+    `SELECT COUNT(*) AS n FROM symbol_dependencies
+     WHERE caller_symbol_id IN (${placeholders})
+       AND caller_symbol_id != callee_symbol_id`
+  ).get(...ids) as { n: number }).n;
+
+  // Step 3: SELECT with LIMIT + JOIN for callee info
+  const rows = sqlite.prepare(
+    `SELECT s.path, s.name, s.kind, s.start_line, sd.confidence
+     FROM symbol_dependencies sd
+     INNER JOIN symbols s ON s.id = sd.callee_symbol_id
+     WHERE sd.caller_symbol_id IN (${placeholders})
+       AND sd.caller_symbol_id != sd.callee_symbol_id
+     ORDER BY s.path ASC, s.start_line ASC
+     LIMIT ?`
+  ).all(...ids, limit) as Array<{ path: string; name: string; kind: string; start_line: number; confidence: number }>;
+
+  // Step 4: unresolvedCount — callee edges referencing symbols no longer in the DB
+  const unresolvedCount = (sqlite.prepare(
+    `SELECT COUNT(*) AS n FROM symbol_dependencies
+     WHERE caller_symbol_id IN (${placeholders})
+       AND callee_symbol_id NOT IN (SELECT id FROM symbols)`
+  ).get(...ids) as { n: number }).n;
+
+  return {
+    items: rows.map(r => ({ path: r.path, name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
+    total,
+    unresolvedCount,
+  };
+}
+
+/**
  * Return all symbols for the given file path.
  */
 export function getSymbolsForFile(filePath: string): Array<SymbolRow & { path: string }> {
