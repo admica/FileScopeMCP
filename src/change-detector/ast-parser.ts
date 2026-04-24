@@ -8,7 +8,7 @@
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { log } from '../logger.js';
-import type { ExportSnapshot, ExportedSymbol } from './types.js';
+import type { ExportSnapshot, ExportedSymbol, CallSiteCandidate } from './types.js';
 import type { Symbol, SymbolKind } from '../db/symbol-types.js';
 
 const _require = createRequire(import.meta.url);
@@ -140,6 +140,9 @@ export interface RicherEdgeData {
   symbols:    Symbol[];
   /** Per-import-statement metadata (IMP-01, IMP-02). */
   importMeta: ImportMeta[];
+  // Phase 37 addition — call-site candidates emitted during the same visitNode walk.
+  /** Pre-resolution call-site records (CSE-02). Resolved by language-config.extractTsJsFileParse(). */
+  callSiteCandidates: CallSiteCandidate[];
 }
 
 /**
@@ -307,12 +310,70 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
   // Phase 33 accumulators — populated during the same visitNode walk.
   const symbols: Symbol[] = [];
   const importMeta: ImportMeta[] = [];
+  // Phase 37 accumulators — call-site candidate tracking (CSE-02).
+  const callSiteCandidates: CallSiteCandidate[] = [];
+  const callerStack: Array<{ name: string; startLine: number }> = [];
 
   // Build import name → source specifier map for inherits correlation
   const importNameToSource = new Map<string, string>();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function visitNode(node: any): void {
+    // Phase 37: push callerStack frame for top-level symbols ONLY.
+    // "Top-level" = parent is `program`, OR parent is `export_statement`
+    // whose parent is `program`. Frame's startLine must match the
+    // eventual symbols[] row's startLine for the setEdgesAndSymbols
+    // lookup (Pitfall A).
+    let pushed = false;
+    const parentType = node.parent?.type;
+    const grandparentType = node.parent?.parent?.type;
+    const isTopLevel =
+      parentType === 'program' ||
+      (parentType === 'export_statement' && grandparentType === 'program');
+
+    if (isTopLevel) {
+      if (node.type === 'export_statement') {
+        // Push using export_statement's own start row — matches extractExportedSymbol positionSource.
+        const decl = node.childForFieldName('declaration');
+        const nameNode = decl?.childForFieldName?.('name');
+        const name = nameNode?.text as string | undefined;
+        if (name && (decl.type === 'function_declaration' ||
+                     decl.type === 'generator_function_declaration' ||
+                     decl.type === 'class_declaration')) {
+          callerStack.push({ name, startLine: (node.startPosition.row as number) + 1 });
+          pushed = true;
+        }
+      } else if (node.type === 'function_declaration' ||
+                 node.type === 'generator_function_declaration' ||
+                 node.type === 'class_declaration') {
+        const nameNode = node.childForFieldName('name');
+        const name = nameNode?.text as string | undefined;
+        if (name) {
+          callerStack.push({ name, startLine: (node.startPosition.row as number) + 1 });
+          pushed = true;
+        }
+      } else if (node.type === 'lexical_declaration') {
+        // Per Landmine A simpler-alternative: attribute only the FIRST named
+        // declarator whose RHS is a function/arrow; later declarators silently
+        // discarded (callerStack empty for their subtrees).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const declarators = (node.children as any[]).filter(c => c?.type === 'variable_declarator');
+        for (const decl of declarators) {
+          const nameNode = decl.childForFieldName?.('name');
+          const valueNode = decl.childForFieldName?.('value');
+          if (nameNode && valueNode &&
+              (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression' || valueNode.type === 'function')) {
+            callerStack.push({
+              name: nameNode.text as string,
+              startLine: (node.startPosition.row as number) + 1,  // const keyword line — matches extractBareTopLevelSymbol
+            });
+            pushed = true;
+            break;
+          }
+        }
+      }
+    }
+
     if (node.type === 'import_statement') {
       const sourceNode = node.childForFieldName('source');
       if (sourceNode) {
@@ -356,7 +417,19 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
             if (fragment) regularImports.push(fragment);
           }
         }
+      } else if (fnNode && fnNode.type === 'identifier' && callerStack.length > 0) {
+        // Phase 37 CSE-02 — emit call-site candidate.
+        // Top of stack = current enclosing top-level symbol.
+        const caller = callerStack[callerStack.length - 1];
+        callSiteCandidates.push({
+          callerName:      caller.name,
+          callerStartLine: caller.startLine,
+          calleeName:      fnNode.text as string,
+          calleeSpecifier: null,   // resolved later in language-config.ts
+          callLine:        (node.startPosition.row as number) + 1,
+        });
       }
+      // else: member_expression / subscript_expression / other → silent discard (D-09)
     }
 
     // Detect class extends referencing an imported name
@@ -382,6 +455,9 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
     }
 
     for (let i = 0; i < node.childCount; i++) visitNode(node.child(i));
+
+    // Phase 37: pop callerStack frame after recursing into children (Landmine G — no early return).
+    if (pushed) callerStack.pop();
   }
 
   visitNode(tree.rootNode);
@@ -399,7 +475,7 @@ export function extractRicherEdges(filePath: string, source: string): RicherEdge
     }
   }
 
-  return { regularImports, reExportSources, inheritsFrom, symbols, importMeta };
+  return { regularImports, reExportSources, inheritsFrom, symbols, importMeta, callSiteCandidates };
 }
 
 // ─── Main extraction function ──────────────────────────────────────────────
