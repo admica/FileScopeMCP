@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A fully autonomous file intelligence system that watches project directories and maintains rich, up-to-date metadata about every file — summaries, relationships, key concepts, and change impact — so LLMs can query structured knowledge about a codebase without reading raw files. Features tree-sitter AST extraction with confidence-labeled edges, Louvain community detection, a standalone LLM broker for cross-repo job coordination, and a visual code exploration dashboard (Nexus).
+A fully autonomous file intelligence system that watches project directories and maintains rich, up-to-date metadata about every file — summaries, relationships, key concepts, and change impact — so LLMs can query structured knowledge about a codebase without reading raw files. Features multi-language symbol extraction (TS/JS/Python/Go/Ruby) with call-site edge resolution, tree-sitter AST extraction with confidence-labeled edges, Louvain community detection, a standalone LLM broker for cross-repo job coordination, and a visual code exploration dashboard (Nexus).
 
 ## Core Value
 
@@ -10,26 +10,27 @@ LLMs get accurate, current answers about any file's role, relationships, and con
 
 ## Current State
 
-Shipped v1.6 Symbol-Level Intelligence (2026-04-23). Seven milestones complete (35 phases total). Planning next milestone.
+Shipped v1.7 Multi-Lang Symbols + Call-Site Edges (2026-04-24). Eight milestones complete (39 phases total). Planning next milestone.
 
 **Architecture:**
-- MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface with 15 tools
+- MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface with 17 tools
 - LLM broker (singleton): standalone process coordinating all LLM access (llama.cpp / llama-server) via Unix socket IPC
 - Nexus dashboard: Fastify API + Svelte 5 SPA at 0.0.0.0:1234, read-only SQLite access
 
-**Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter, chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js, graphology
+**Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter (+ tree-sitter-go, tree-sitter-ruby), chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js, graphology
 
-**Codebase:** ~15K LOC TypeScript | 718 tests passing (7 skipped) | 35 phases shipped across 7 milestones
+**Codebase:** ~20K LOC TypeScript | 845+ tests passing | 39 phases shipped across 8 milestones
 
 ## Next Milestone Goals
 
-No active milestone. Top v1.7 candidates (see memory `project_v1_7_candidates.md`):
+No active milestone. Top v1.8 candidates:
 
-1. Multi-language symbol extraction (Python/Go/Ruby) — pending v1.6 adoption signal
-2. Symbol-level dependency edges — call-site resolution (`who calls foo`)
-3. Deletion tombstones on `list_changed_since` — enable `deleted_files` tracking
+1. Python/Go/Ruby call-site edge extraction (CSE-LANG-01..03) — extend symbol_dependencies beyond TS/JS
+2. Symbol metadata enrichment — Python `isAsync`, `__all__` exportedness, Ruby visibility modifiers
+3. Deletion tombstones on `list_changed_since` (CHG-06) — enable `deleted_files` tracking
+4. v1.6 scan regression clawback (PERF-06) — only if stacked v1.7 cost forces it
 
-Run `/gsd-new-milestone` to scope v1.7.
+Run `/gsd-new-milestone` to scope v1.8.
 
 ## Requirements
 
@@ -132,6 +133,19 @@ Run `/gsd-new-milestone` to scope v1.7.
 - ✓ `list_changed_since(since, maxItems?)` MCP tool — dual-mode dispatch (ISO-8601 timestamp + 7+ char git SHA via `git diff` ∩ DB); `NOT_INITIALIZED | INVALID_SINCE | NOT_GIT_REPO` error codes; no deletion tombstones — v1.6 (Phase 35, CHG-01..05)
 - ✓ Watcher lifecycle hardened for symbols — file-change re-extracts via single-pass AST walk (no separate timer); unlink invokes transactional three-DELETE cascade (`file_dependencies` + `symbols` + `files` in one `sqlite.transaction()`); mtime-based staleness shared with edges — v1.6 (Phase 35, WTC-01..03)
 - ✓ PERF budget held under 15% soft threshold — self-scan +13.75% (1833→2085ms), medium-repo +9.64% (332→364ms) vs Phase 33 baseline — v1.6 (PERF-01, PERF-02)
+- ✓ Python symbol extraction via tree-sitter-python (function, async function, class; decorator-aware startLine; top-level only) — v1.7 (MLS-01)
+- ✓ Go symbol extraction via tree-sitter-go@0.25.0 (function, method, struct, interface, type alias, const; uppercase-first isExport; multi-line const blocks) — v1.7 (MLS-02)
+- ✓ Ruby symbol extraction via tree-sitter-ruby@0.23.1 (method, singleton_method, class, module, constant; no attr_accessor synthesis) — v1.7 (MLS-03)
+- ✓ `extractLangFileParse()` three-way coordinator dispatch (TS/JS | Py/Go/Rb | other) — v1.7 (MLS-04)
+- ✓ Per-language bulk backfill with independent kv_state gates — v1.7 (MLS-05)
+- ✓ `symbol_dependencies` table (caller/callee FK, call_line, confidence) with dual indexes — v1.7 (CSE-01)
+- ✓ TS/JS call-site edge extraction in single-pass AST walk (local 1.0, imported 0.8, discard unresolvable) — v1.7 (CSE-02, CSE-03)
+- ✓ `setEdgesAndSymbols()` atomic transaction includes `symbol_dependencies` clear+insert — v1.7 (CSE-04)
+- ✓ Five-step `deleteFile()` cascade cleaning both sides of `symbol_dependencies` — v1.7 (CSE-05)
+- ✓ Bulk call-site backfill with three-key precondition enforcement — v1.7 (CSE-06)
+- ✓ `find_callers` / `find_callees` MCP tools (tools 16-17) with standardized envelope and maxItems clamping — v1.7 (MCP-01, MCP-02)
+- ✓ InMemoryTransport integration tests for call-site tools — v1.7 (MCP-04)
+- ✓ Historical deferred-item closure (7 quick-tasks from v1.0-v1.5 formally closed) — v1.7 (DEBT-01)
 
 ### Active
 
@@ -156,12 +170,12 @@ None — defining next milestone.
 - Formal version handshake between broker and instances — defer to future milestone
 - Authentication / access control for Nexus — read-only viewer on trusted LAN, no secrets exposed
 - WebSocket transport for Nexus — SSE sufficient for log streaming, no bidirectional needed
-- Cross-file call resolution — requires type registry, HIGH complexity
+- Cross-file call resolution via full type inference — name-based resolution at 0.8 confidence sufficient for v1.7; full type registry deferred indefinitely
 - Graph diff between scans — no clear use case
 - Real-time community updates — Louvain is batch-only; dirty-flag cache is correct pattern
 - One-script LLM backend setup — llama.cpp across platforms (Windows host, remote LAN, etc.) is inherently complex; zero-config goal applies to MCP/broker lifecycle only
 - Method-level symbols (v1.6) — reachable via class line ranges; adds parser surface without proportional query value
-- Cross-file call-site resolution (`who calls foo`) — needs full type registry, HIGH complexity
+- Cross-file call-site resolution via full type inference — shipped name-based resolution in v1.7 (confidence 0.8); full type registry not needed
 - Fuzzy symbol search — exact + prefix match sufficient for known-name lookup
 - Re-export transitive symbols (`export * from './foo'`) — parser complexity not justified; direct exports only
 - Symbol importance scoring — file-level importance is already approximate, per-symbol is noise
@@ -172,9 +186,9 @@ None — defining next milestone.
 
 ## Context
 
-Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), v1.4 (4 phases), v1.5 (4 phases), and v1.6 (3 phases). The system is a complete autonomous file intelligence platform with a standalone LLM broker, a visual code exploration dashboard (Nexus), rich graph intelligence — tree-sitter AST extraction for Python/Rust/C/C++/Go/TS/JS with richer edge types (imports, re_exports, inherits), edge weights, confidence labels, Louvain community detection, token budget caps on MCP tool responses — a production-grade agent surface — MCP spec-compliant registerTool() for all 15 tools with structured responses, hardened broker lifecycle (dual liveness check, crash handlers, drain-bounded shutdown), 718 tests including MCP transport integration coverage, and zero-config Claude Code auto-discovery via committed .mcp.json + cross-platform register-mcp helper — plus symbol-level intelligence: TS/JS symbol extraction driven by a single-pass AST walk shared with edge extraction, `find_symbol` MCP tool with GLOB prefix match and standardized envelope, `get_file_summary` enriched with `exports[]` + rich `dependents[]` (importedNames, importLines), and `list_changed_since` tool with dual ISO-8601 / git-SHA dispatch for post-edit re-orientation.
+Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), v1.4 (4 phases), v1.5 (4 phases), v1.6 (3 phases), and v1.7 (4 phases). The system is a complete autonomous file intelligence platform with multi-language symbol extraction (TS/JS/Python/Go/Ruby), call-site edge resolution ("who calls foo" via `find_callers`/`find_callees`), a standalone LLM broker, a visual code exploration dashboard (Nexus), rich graph intelligence — tree-sitter AST extraction with richer edge types, confidence labels, Louvain community detection — a production-grade agent surface with 17 MCP tools, 845+ tests including MCP transport integration coverage, and zero-config Claude Code auto-discovery.
 
-Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, graphology, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
+Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter (+ tree-sitter-go, tree-sitter-ruby), graphology, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
 
 ## Constraints
 
@@ -231,6 +245,14 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | `find_symbol` description as `string[].join(' ')` literal | Length probe regex-extracts without JS eval | ✓ Good (v1.6) |
 | Transactional three-DELETE cascade in `deleteFile()` | Watcher unlink never leaves orphaned symbols; one `sqlite.transaction()` closure | ✓ Good (v1.6) |
 | JSX components as `function` kind | Reachable via existing AST nodes; no `component` kind heuristic needed | ✓ Good (v1.6) |
+| D-06 reversed: tree-sitter-go for symbol extraction | Grammar now stable at 0.25.0; regex stays for edge extraction only | ✓ Good (v1.7) |
+| Ruby via tree-sitter-ruby@0.23.1 | STACK.md live-validated; supersedes ARCHITECTURE.md conservative "defer Ruby" | ✓ Good (v1.7) |
+| symbol_dependencies integer FK with atomic transaction | Avoids natural key FK; transaction-scoped ID replacement resolves FLAG-02 | ✓ Good (v1.7) |
+| find_callers/find_callees (not get_ prefix) | Consistency with existing find_symbol naming | ✓ Good (v1.7) |
+| Per-language kv_state gates (not reuse v1.6 key) | Independent backfill per language; no false "already done" on partial runs | ✓ Good (v1.7) |
+| Name-based call-site resolution (no type inference) | 0.8 confidence sufficient; ts-morph 235ms startup + 13MB dep not justified | ✓ Good (v1.7) |
+| Barrel file discard in call-site resolution | Re-export chain following adds parser complexity without proportional value | ✓ Good (v1.7) |
+| VERIFICATION.md as phase exit gate | Addresses 4-milestone skip pattern from v1.3-v1.6 | ✓ Good (v1.7) |
 
 ## Evolution
 
@@ -250,4 +272,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-24 after v1.6 Symbol-Level Intelligence milestone shipped*
+*Last updated: 2026-04-24 after v1.7 Multi-Lang Symbols + Call-Site Edges milestone shipped*

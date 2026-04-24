@@ -248,6 +248,54 @@
 
 ---
 
+## Milestone: v1.7 — Multi-Lang Symbols + Call-Site Edges
+
+**Shipped:** 2026-04-24
+**Phases:** 4 | **Plans:** 8
+
+### What Was Built
+- Python/Go/Ruby symbol extractors via tree-sitter grammars (tree-sitter-go@0.25.0, tree-sitter-ruby@0.23.1); `find_symbol` returns symbols for all 5 supported languages
+- TS/JS call-site edge extraction populating `symbol_dependencies` table — local calls at confidence 1.0, imported calls at 0.8, unresolvable silently discarded
+- `find_callers` and `find_callees` MCP tools (tools 16-17) enabling agents to answer "who calls foo" via one-hop JOINs
+- Five-step `deleteFile()` cascade cleaning both sides of `symbol_dependencies` atomically
+- Bulk backfill pipeline: multi-lang symbols via three per-language kv_state gates → call-site edges with three-key precondition enforcement
+- All 7 historical deferred quick-task items formally closed; STATE.md Deferred Items at zero
+- 845+ tests passing; performance under 20% budget (actually improved −9.7% vs baseline)
+
+### What Worked
+- VERIFICATION.md as a mandatory phase exit gate for every phase (first milestone to enforce this consistently)
+- Single-day build again (52 commits, 8,537 lines added) — tight 4-phase linear chain mirrors v1.6 velocity
+- Three-key precondition gate on bulk call-site backfill enforced phase ordering at boot — no race conditions
+- Post-audit fix (4acef8e) caught live scan callSiteEdges drop-bug — audit → fix → close cycle worked cleanly
+- Per-language kv_state keys prevented false "already done" on partial backfill runs
+
+### What Was Inefficient
+- Audit run before the final fix (4acef8e) — audit reported `gaps_found` that were already being addressed in the same session
+- Phase 36 ROADMAP.md showed "0/3 Not started" despite all 3 plans being complete — progress table not updated during execution
+- `audit-open` tool false-positived on all 7 quick tasks despite them having SUMMARY.md files — naming convention mismatch in audit tool
+- REQUIREMENTS.md traceability table started stale again (12 "Pending") — fixed in post-audit commit, same pattern as v1.6
+
+### Patterns Established
+- Per-language kv_state gates (`symbols_py_bulk_extracted`, etc.) for independent backfill sub-passes
+- Three-key precondition checks on dependent migrations (call-site bulk requires all three symbol bulks)
+- `CallSiteCandidate` → resolution → `CallSiteEdge` pipeline as the pattern for future language call-site support
+- Confidence tiering: 1.0 same-file local, 0.8 imported cross-file, discard unresolvable — no intermediate guessing
+- `callerStack` push/pop tracking nested function scope during AST walk
+
+### Key Lessons
+1. VERIFICATION.md as phase exit gate works — first milestone where every phase shipped one; no retroactive generation needed
+2. Audit → fix → close cycle is healthy: run audit, fix gaps found, proceed to close — don't skip the audit even when confident
+3. REQUIREMENTS.md traceability staleness is a recurring pattern (v1.5, v1.6, v1.7) — should be automated or checked by verification workflow
+4. Post-audit integration fixes (live scan path, watcher path) validate that the audit catches real bugs, not just documentation gaps
+5. D-06 reversal (Go from regex to tree-sitter) worked cleanly — grammar stability should be re-evaluated per-milestone, not treated as permanent decisions
+
+### Cost Observations
+- Model mix: opus for orchestration, sonnet for execution agents
+- Sessions: ~3 across 1 day (Apr 24)
+- Notable: second consecutive single-day milestone; 4 phases + 8 plans + 845 tests in ~5 hours
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -261,6 +309,7 @@
 | v1.4 | 4 | 8 | 1 | Registry pattern enables single-day multi-language milestone |
 | v1.5 | 4 | 11 | 6 | Protocol-layer tests + zero-config auto-registration |
 | v1.6 | 3 | 10 | 1 | Ruthless scope audit → 3 high-value tools, single-day ship |
+| v1.7 | 4 | 8 | 1 | VERIFICATION.md enforced as phase exit gate; call-site edges |
 
 ### Cumulative Quality
 
@@ -273,6 +322,7 @@
 | v1.4 | 260+ | 18 | 17/18 + 1 accepted deviation (AST-05) |
 | v1.5 | 673 | 21 | 20/21 (BRKR-04 partial, see audit) |
 | v1.6 | 718 | 30 | 30/30 via audit + retroactive VERIFICATION.md |
+| v1.7 | 845+ | 17 | 17/17 — VERIFICATION.md per phase (first fully gate-enforced milestone) |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -284,3 +334,5 @@
 6. Ruthless scope audits that cut features before planning are cheaper than cutting during execution (v1.6 — 8 candidates → 3)
 7. PERF baselines captured at Phase 1 of a milestone make end-of-milestone regression checks trivial (v1.6)
 8. Single-pass invariants (one AST parse, shared accumulators) need grep-source tests to survive future language expansion (v1.6)
+9. VERIFICATION.md as phase exit gate works when enforced — v1.7 is the first milestone where every phase shipped one without retroactive generation (v1.7)
+10. Audit → fix → close cycle is healthy and catches real integration bugs, not just doc gaps (v1.7 — live scan callSiteEdges drop, watcher path missing)

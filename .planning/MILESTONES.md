@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.7 Multi-Lang Symbols + Call-Site Edges (Shipped: 2026-04-24)
+
+**Phases completed:** 4 phases (36-39), 8 plans
+**Requirements:** 17/17 satisfied
+**Stats:** 52 commits | 54 files changed | +8,537 / -71 lines | 1 day (Apr 24, 2026)
+**Codebase:** 20,118 LOC TypeScript | 845+ tests
+
+**Key accomplishments:**
+
+- Multi-language symbol extraction — Python, Go, Ruby extractors via tree-sitter (`tree-sitter-go@0.25.0`, `tree-sitter-ruby@0.23.1`); `find_symbol` returns symbols for all languages; top-level only with language-specific `isExport` heuristics
+- Call-site edge extraction — TS/JS `call_expression` resolution in single-pass AST walk populates `symbol_dependencies` table with caller/callee relationships; local calls at confidence 1.0, imported calls at 0.8, unresolvable silently discarded
+- `find_callers(name, filePath?, maxItems?)` and `find_callees(name, filePath?, maxItems?)` MCP tools (tools 16 and 17) — agents can answer "who calls foo" via one-hop `symbol_dependencies` JOIN queries; self-loops filtered, `unresolvedCount` for honest signal
+- Five-step `deleteFile()` cascade — materialize symbol IDs → both-sides DELETE `symbol_dependencies` → DELETE `file_dependencies` → DELETE `symbols` → DELETE `files`; regression-tested in `watcher-symbol-lifecycle.test.ts`
+- Bulk backfill pipeline — multi-lang symbols via three per-language `kv_state` gates; call-site edges via `call_site_edges_bulk_extracted` with three-key precondition enforcement; auto-runs at boot
+- Historical debt closure — all 7 deferred quick-task items from v1.0-v1.5 formally closed; STATE.md Deferred Items table at zero entries
+
+---
+
 ## v1.6 Symbol-Level Intelligence (Shipped: 2026-04-23)
 
 **Phases completed:** 3 phases (33-35), 10 plans, 10 tasks

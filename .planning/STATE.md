@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Multi-Lang Symbols + Call-Site Edges
-status: milestone_complete
-stopped_at: Phase 39 context gathered
-last_updated: "2026-04-24T19:39:34.473Z"
+status: shipped
+stopped_at: Milestone v1.7 archived
+last_updated: "2026-04-24T20:30:00.000Z"
 last_activity: 2026-04-24
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
   percent: 100
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 39 — deferred-item-closure
+**Current focus:** Planning next milestone (v1.8)
 
 ## Current Position
 
-Phase: 39
-Plan: Not started
-Status: Milestone complete
+Phase: —
+Plan: —
+Status: v1.7 shipped, no active milestone
 Last activity: 2026-04-24
 
 ## Accumulated Context
@@ -36,46 +36,17 @@ Last activity: 2026-04-24
 
 All decisions logged in PROJECT.md Key Decisions table.
 
-v1.6-specific decisions from scope audit (2026-04-23):
-
-- File-granular → symbol-granular level-of-detail shift is the one structural change; all other LLM-surface gaps are workarounds for this mismatch
-- Three tools only (`find_symbol`, enriched `get_file_summary`, `list_changed_since`) — everything else cut to avoid bloat
-- TS/JS only v1.6; Python/Go/Ruby deferred to v1.7 pending adoption signal
-- Parser emits symbols in single AST pass alongside edges — no second walk
-- Additive schema only (`symbols` table); no breaking changes to existing tool responses
-- Deletion tracking deferred — `list_changed_since` returns only existing files with mtime
-- [Phase 34]: Inlined getDependentsWithImports return type — single call site, no new DependentWithImports interface in symbol-types.ts
-- [Phase 34]: Used direct INSERT helper insertDepRow() in tests rather than extending setEdges() — needed fine-grained control over NULL imported_names and package_import rows
-- [Phase 34]: Established GLOB+bracket-escape as the case-sensitive prefix-match pattern (new to codebase, no PRAGMA needed)
-- [Phase 34]: Extended tests/unit/tool-outputs.test.ts as the contract test home (R-3: tests/contract/ does not exist); avoided a single-file directory
-- [Phase 34]: Inlined find_symbol clamp + projection in the handler (5 lines) rather than extracting normalizeFindSymbolArgs()
-- [Phase 34]: find_symbol description authored as string[].join(' ') literal so the length probe can regex-extract without JS eval
-
-v1.7 scoping decisions (2026-04-24):
-
-- Multi-lang symbol extraction covers Python + Go + Ruby
-- D-06 REVERSED: Go uses `tree-sitter-go@0.25.0` for symbol extraction (grammar now stable); `resolveGoImports` regex stays for edge extraction only
-- Ruby ships via `tree-sitter-ruby@0.23.1` AST extraction (STACK.md live-validated); ARCHITECTURE.md conservative "defer Ruby" recommendation superseded
-- Symbol-level call-site edges are TS/JS only for v1.7; Python/Go/Ruby symbol-edges deferred to v1.8
-- Edge depth limited to call-site resolution — no class-inheritance-at-symbol-level in v1.7
-- Deletion tombstones on `list_changed_since` stay deferred (no adoption pull)
-- Perf tuning of v1.6 scan regression (+13.75% / +9.64%) deferred — still under 15% soft threshold
-- `symbol_dependencies` uses integer FK design (ARCHITECTURE.md) with atomic transaction-scoped ID replacement (FLAG-02 resolved) — not natural key FK substitute
-- Tool names: `find_callers` / `find_callees` (not `get_` prefix) — consistency with existing `find_symbol`
-- Per-language `kv_state` keys: `symbols_py_bulk_extracted`, `symbols_go_bulk_extracted`, `symbols_rb_bulk_extracted` — do NOT reuse `symbols_bulk_extracted` from v1.6
-- VERIFICATION.md is a phase exit gate for every v1.7 phase — not retroactive artifact at milestone close
-
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None — roadmap is ready.
+None.
 
 ## Deferred Items
 
-All historical quick-task deferred items closed in Phase 39 (2026-04-24). See Phase 39 closure for details.
+None — all historical items closed in v1.7 Phase 39.
 
 ### Quick Tasks Completed
 
@@ -90,7 +61,5 @@ All historical quick-task deferred items closed in Phase 39 (2026-04-24). See Ph
 ## Session Continuity
 
 Last activity: 2026-04-24
-Stopped at: Phase 39 context gathered
-Resume file: --resume-file
-
-**Planned Phase:** 39 (Deferred-Item Closure) — 1 plans — 2026-04-24T19:39:34.464Z
+Stopped at: Milestone v1.7 archived
+Resume: `/gsd-new-milestone` to scope v1.8
