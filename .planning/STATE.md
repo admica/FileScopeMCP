@@ -4,14 +4,14 @@ milestone: v1.7
 milestone_name: Multi-Lang Symbols + Call-Site Edges
 status: executing
 stopped_at: Phase 38 context gathered
-last_updated: "2026-04-24T18:19:13.806Z"
+last_updated: "2026-04-24T18:38:12.416Z"
 last_activity: 2026-04-24 -- Phase 37 execution started
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 5
+  total_plans: 7
   completed_plans: 5
-  percent: 100
+  percent: 71
 ---
 
 # Project State
@@ -107,4 +107,4 @@ Resume file: --resume-file
 
 **Next:** `/gsd-plan-phase 36` to begin planning Phase 36: Schema Migration + Multi-Language Symbols.
 
-**Planned Phase:** 37 (TS/JS Call-Site Edge Extraction) — 2 plans — 2026-04-24T16:46:31.565Z
+**Planned Phase:** 38 (MCP Surface) — 2 plans — 2026-04-24T18:38:12.406Z
