@@ -117,7 +117,7 @@ See: `.planning/milestones/v1.6-ROADMAP.md` for full phase details.
 
 - [x] **Phase 36: Schema Migration + Multi-Language Symbols** (3/3 plans) — completed 2026-04-24
 - [x] **Phase 37: TS/JS Call-Site Edge Extraction** (2/2 plans) — completed 2026-04-24
-- [ ] **Phase 38: MCP Surface** - Register `find_callers` + `find_callees` tools, InMemoryTransport integration tests, lock the data contract
+- [x] **Phase 38: MCP Surface** - Register `find_callers` + `find_callees` tools, InMemoryTransport integration tests, lock the data contract (completed 2026-04-24)
 - [ ] **Phase 39: Deferred-Item Closure** - Formal closure of 7 historical quick-task artifacts; STATE.md Deferred Items table reaches zero entries
 
 ## Phase Details
@@ -180,11 +180,11 @@ Plans:
   3. `maxItems` is clamped to `[1, 500]` with a default of 50; responses exceeding the limit include `truncated: true`
   4. Tool descriptions document Ruby `attr_accessor` limitation and reopened-class multi-result behavior
   5. InMemoryTransport integration tests cover both tools, asserting envelope shape and `maxItems` clamping (consistent with v1.5 coverage pattern)
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 38-01-PLAN.md — Repository helpers getCallers() + getCallees() in repository.ts + find_callers/find_callees tool registration in mcp-server.ts + unit tests
-- [ ] 38-02-PLAN.md — InMemoryTransport integration tests for both tools + 38-VERIFICATION.md phase exit gate
+- [x] 38-01-PLAN.md — Repository helpers getCallers() + getCallees() in repository.ts + find_callers/find_callees tool registration in mcp-server.ts + unit tests
+- [x] 38-02-PLAN.md — InMemoryTransport integration tests for both tools + 38-VERIFICATION.md phase exit gate
 
 **Cross-cutting notes:**
 - Tool names use `find_` prefix for consistency with existing `find_symbol` (not `get_` prefix — FLAG resolved in REQUIREMENTS.md).
@@ -201,10 +201,10 @@ Plans:
   1. Each of the 7 deferred quick-task items has either a written SUMMARY.md (if the commit landed) or a documented wontfix reason in STATE.md
   2. STATE.md Deferred Items table has zero entries after this phase closes
   3. No new deferred items were added from v1.7 phases without a documented reason
-**Plans**: TBD (suggested: 1 plan — 39-01: audit + close all 7 items)
+**Plans**: 1 plan
 
 Plans:
-- [ ] 39-01: Audit the 7 historical quick-task artifacts from STATE.md; write minimal SUMMARY.md for items where a commit landed; mark remaining items wontfix with documented reason; clear the Deferred Items table in STATE.md
+- [ ] 39-01-PLAN.md — Write b7k SUMMARY.md, verify 6 existing SUMMARYs, clear STATE.md Deferred Items table
 
 **Cross-cutting notes:**
 - Items to close: `1-update-readme-md-and-root-roadmap-md-to-`, `260323-kgd-auto-init-mcp-to-cwd-rename-set-project-`, `260324-0yz-comprehensive-documentation-update-readm`, `260401-a19-fix-double-change-impact-and-structured-ou`, `260401-b7k-fix-cpp-dependency-parsing-and-importance`, `260414-otc-make-sure-the-install-setup-scripts-of-t`, `260416-b8w-fix-nexus-tree-view-repo-store-queries-a`.
@@ -251,5 +251,5 @@ Plans:
 | 35. Changed-Since Tool + Watcher Integration | v1.6 | 3/3 | Complete | 2026-04-23 |
 | 36. Schema Migration + Multi-Language Symbols | v1.7 | 0/3 | Not started | - |
 | 37. TS/JS Call-Site Edge Extraction | v1.7 | 2/2 | Complete | 2026-04-24 |
-| 38. MCP Surface | v1.7 | 0/2 | Not started | - |
+| 38. MCP Surface | v1.7 | 2/2 | Complete    | 2026-04-24 |
 | 39. Deferred-Item Closure | v1.7 | 0/1 | Not started | - |

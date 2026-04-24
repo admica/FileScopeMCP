@@ -4,14 +4,14 @@ milestone: v1.7
 milestone_name: Multi-Lang Symbols + Call-Site Edges
 status: planning
 stopped_at: Phase 39 context gathered
-last_updated: "2026-04-24T19:31:43.667Z"
+last_updated: "2026-04-24T19:39:34.473Z"
 last_activity: 2026-04-24
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 7
+  total_plans: 8
   completed_plans: 7
-  percent: 100
+  percent: 88
 ---
 
 # Project State
@@ -104,3 +104,5 @@ All 7 are historical quick tasks from v1.0-v1.5. All scheduled for formal closur
 Last activity: 2026-04-24
 Stopped at: Phase 39 context gathered
 Resume file: --resume-file
+
+**Planned Phase:** 39 (Deferred-Item Closure) — 1 plans — 2026-04-24T19:39:34.464Z
