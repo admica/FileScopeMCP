@@ -18,7 +18,7 @@ import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
 import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
-import { extractEdges, extractTsJsFileParse } from './language-config.js';
+import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
 import type { Symbol as SymbolRow } from './db/symbol-types.js';
 import type { ImportMeta } from './change-detector/ast-parser.js';
@@ -744,6 +744,10 @@ export class ServerCoordinator {
         const content = await fs.readFile(filePath, 'utf-8');
         const ext = path.extname(filePath).toLowerCase();
         const isTsJs = ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx';
+        // Phase 36 MLS-04 — three-way dispatch (D-23). Py/Go/Rb flow through
+        // extractLangFileParse so per-language symbol extractors populate the
+        // symbols table on the scan path.
+        const isPyGoRb = ext === '.py' || ext === '.go' || ext === '.rb';
 
         let edges: EdgeResult[] = [];
         let symbols: SymbolRow[] = [];
@@ -756,6 +760,16 @@ export class ServerCoordinator {
             edges = parsed.edges;
             symbols = parsed.symbols;
             importMeta = parsed.importMeta;
+            useAtomicWrite = true;
+          } else {
+            edges = await extractEdges(filePath, content, config.baseDirectory);
+          }
+        } else if (isPyGoRb) {
+          const parsed = await extractLangFileParse(filePath, content, config.baseDirectory);
+          if (parsed) {
+            edges = parsed.edges;
+            symbols = parsed.symbols;
+            // importMeta intentionally unset — D-05 (Py/Go/Rb don't carry it in v1.7).
             useAtomicWrite = true;
           } else {
             edges = await extractEdges(filePath, content, config.baseDirectory);
