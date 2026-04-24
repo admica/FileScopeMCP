@@ -116,7 +116,7 @@ See: `.planning/milestones/v1.6-ROADMAP.md` for full phase details.
 **Phase Summary:**
 
 - [x] **Phase 36: Schema Migration + Multi-Language Symbols** (3/3 plans) — completed 2026-04-24
-- [ ] **Phase 37: TS/JS Call-Site Edge Extraction** - Populate `symbol_dependencies` via AST call-expression pass, extend atomic transaction and five-step cascade, bulk backfill
+- [x] **Phase 37: TS/JS Call-Site Edge Extraction** (2/2 plans) — completed 2026-04-24
 - [ ] **Phase 38: MCP Surface** - Register `find_callers` + `find_callees` tools, InMemoryTransport integration tests, lock the data contract
 - [ ] **Phase 39: Deferred-Item Closure** - Formal closure of 7 historical quick-task artifacts; STATE.md Deferred Items table reaches zero entries
 
@@ -159,8 +159,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 37-01-PLAN.md — `CallSiteCandidate` + `CallSiteEdge` interfaces in `src/change-detector/types.ts`; extend `extractRicherEdges()` with `callerStack` push/pop and `callSiteCandidates` emission (no new `parser.parse()`); extend `extractTsJsFileParse()` with `localSymbolIndex` + `importedSymbolIndex` resolution (conf 1.0 local / 0.8 imported / silent discard; Pitfall 10 ambiguity defense; Pitfall 11 barrel discard; single batch DB query chunked at 500); extend `setEdgesAndSymbols()` with optional `callSiteEdges?` — caller-side DELETE + per-edge INSERT inside existing `sqlite.transaction()` (FLAG-02 resolution); colocated test files `ast-parser.call-sites.test.ts`, `language-config.call-sites.test.ts`, `repository.call-sites.test.ts`
-- [ ] 37-02-PLAN.md — Extend `deleteFile()` to five-step cascade (materialize symbol IDs → both-sides DELETE `symbol_dependencies` → DELETE `file_dependencies` → DELETE `symbols` → DELETE `files` — ordering load-bearing, D-21); new `src/file-watcher.watcher-symbol-lifecycle.test.ts` regression (unlink cascade + callee-side cross-file cleanup + change caller-side clear); `src/migrate/bulk-call-site-extract.ts` gated on `call_site_edges_bulk_extracted`, three-key precondition check (`symbols_py_bulk_extracted` AND `symbols_go_bulk_extracted` AND `symbols_rb_bulk_extracted` — no unified gate exists in Phase 36); coordinator startup wiring after `runMultilangSymbolsBulkExtractionIfNeeded`; `37-VERIFICATION.md` phase exit gate citing test + describe + test-name per CSE-02..06 + perf budget line
+- [x] 37-01-PLAN.md — `CallSiteCandidate` + `CallSiteEdge` interfaces in `src/change-detector/types.ts`; extend `extractRicherEdges()` with `callerStack` push/pop and `callSiteCandidates` emission (no new `parser.parse()`); extend `extractTsJsFileParse()` with `localSymbolIndex` + `importedSymbolIndex` resolution (conf 1.0 local / 0.8 imported / silent discard; Pitfall 10 ambiguity defense; Pitfall 11 barrel discard; single batch DB query chunked at 500); extend `setEdgesAndSymbols()` with optional `callSiteEdges?` — caller-side DELETE + per-edge INSERT inside existing `sqlite.transaction()` (FLAG-02 resolution); colocated test files `ast-parser.call-sites.test.ts`, `language-config.call-sites.test.ts`, `repository.call-sites.test.ts`
+- [x] 37-02-PLAN.md — Extend `deleteFile()` to five-step cascade (materialize symbol IDs → both-sides DELETE `symbol_dependencies` → DELETE `file_dependencies` → DELETE `symbols` → DELETE `files` — ordering load-bearing, D-21); new `src/file-watcher.watcher-symbol-lifecycle.test.ts` regression (unlink cascade + callee-side cross-file cleanup + change caller-side clear); `src/migrate/bulk-call-site-extract.ts` gated on `call_site_edges_bulk_extracted`, three-key precondition check (`symbols_py_bulk_extracted` AND `symbols_go_bulk_extracted` AND `symbols_rb_bulk_extracted` — no unified gate exists in Phase 36); coordinator startup wiring after `runMultilangSymbolsBulkExtractionIfNeeded`; `37-VERIFICATION.md` phase exit gate citing test + describe + test-name per CSE-02..06 + perf budget line
 
 **Cross-cutting notes:**
 - The call-expression pass walks the already-parsed in-memory AST — no second `parser.parse()` call. This resolves Pitfall 14 for this phase.
@@ -250,6 +250,6 @@ Plans:
 | 34. Symbol-Aware MCP Surface | v1.6 | 2/2 | Complete | 2026-04-23 |
 | 35. Changed-Since Tool + Watcher Integration | v1.6 | 3/3 | Complete | 2026-04-23 |
 | 36. Schema Migration + Multi-Language Symbols | v1.7 | 0/3 | Not started | - |
-| 37. TS/JS Call-Site Edge Extraction | v1.7 | 0/2 | Not started | - |
+| 37. TS/JS Call-Site Edge Extraction | v1.7 | 2/2 | Complete | 2026-04-24 |
 | 38. MCP Surface | v1.7 | 0/2 | Not started | - |
 | 39. Deferred-Item Closure | v1.7 | 0/1 | Not started | - |
