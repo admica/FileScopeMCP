@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-04-24T15:02:54.415Z",
+  "commit": "a6a4676",
+  "node_version": "v22.21.1",
+  "self": {
+    "elapsed_ms": 2403,
+    "file_count": 490
+  },
+  "medium": {
+    "elapsed_ms": 434,
+    "file_count": 102
+  }
+}
