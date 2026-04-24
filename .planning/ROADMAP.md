@@ -118,7 +118,7 @@ See: `.planning/milestones/v1.6-ROADMAP.md` for full phase details.
 - [x] **Phase 36: Schema Migration + Multi-Language Symbols** (3/3 plans) — completed 2026-04-24
 - [x] **Phase 37: TS/JS Call-Site Edge Extraction** (2/2 plans) — completed 2026-04-24
 - [x] **Phase 38: MCP Surface** - Register `find_callers` + `find_callees` tools, InMemoryTransport integration tests, lock the data contract (completed 2026-04-24)
-- [ ] **Phase 39: Deferred-Item Closure** - Formal closure of 7 historical quick-task artifacts; STATE.md Deferred Items table reaches zero entries
+- [x] **Phase 39: Deferred-Item Closure** - Formal closure of 7 historical quick-task artifacts; STATE.md Deferred Items table reaches zero entries (completed 2026-04-24)
 
 ## Phase Details
 
@@ -204,7 +204,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 39-01-PLAN.md — Write b7k SUMMARY.md, verify 6 existing SUMMARYs, clear STATE.md Deferred Items table
+- [x] 39-01-PLAN.md — Write b7k SUMMARY.md, verify 6 existing SUMMARYs, clear STATE.md Deferred Items table
 
 **Cross-cutting notes:**
 - Items to close: `1-update-readme-md-and-root-roadmap-md-to-`, `260323-kgd-auto-init-mcp-to-cwd-rename-set-project-`, `260324-0yz-comprehensive-documentation-update-readm`, `260401-a19-fix-double-change-impact-and-structured-ou`, `260401-b7k-fix-cpp-dependency-parsing-and-importance`, `260414-otc-make-sure-the-install-setup-scripts-of-t`, `260416-b8w-fix-nexus-tree-view-repo-store-queries-a`.
@@ -252,4 +252,4 @@ Plans:
 | 36. Schema Migration + Multi-Language Symbols | v1.7 | 0/3 | Not started | - |
 | 37. TS/JS Call-Site Edge Extraction | v1.7 | 2/2 | Complete | 2026-04-24 |
 | 38. MCP Surface | v1.7 | 2/2 | Complete    | 2026-04-24 |
-| 39. Deferred-Item Closure | v1.7 | 0/1 | Not started | - |
+| 39. Deferred-Item Closure | v1.7 | 1/1 | Complete    | 2026-04-24 |
