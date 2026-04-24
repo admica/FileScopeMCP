@@ -18,6 +18,7 @@ import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
 import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
 import { runMultilangSymbolsBulkExtractionIfNeeded } from './migrate/bulk-multilang-symbol-extract.js';
+import { runCallSiteEdgesBulkExtractionIfNeeded } from './migrate/bulk-call-site-extract.js';
 import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
 import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
@@ -293,6 +294,15 @@ export class ServerCoordinator {
       await runMultilangSymbolsBulkExtractionIfNeeded(projectRoot);
     } catch (err) {
       log(`Bulk multilang symbol extraction failed (non-fatal): ${err}`);
+    }
+
+    // Phase 37 CSE-06 — populate symbol_dependencies for TS/JS files.
+    // Hard-abort precondition: all Phase 36 per-language symbol gates must be set.
+    // Non-fatal: failure logs and continues; file tree still built.
+    try {
+      await runCallSiteEdgesBulkExtractionIfNeeded(projectRoot);
+    } catch (err) {
+      log(`Bulk call-site edge extraction failed (non-fatal): ${err}`);
     }
 
     try {

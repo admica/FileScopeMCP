@@ -147,18 +147,49 @@ export function upsertFile(node: FileNode): void {
 }
 
 /**
- * Deletes a file by path. Atomically removes:
- *   - all file_dependencies rows where this file is source or target,
- *   - all symbols rows for this path (Phase 35 WTC-02 cascade),
- *   - the files row itself.
- * All three DELETEs run in a single better-sqlite3 transaction so a crash
- * leaves the DB in a consistent state (prior to Phase 35 these deletes
- * ran non-atomically — see Phase 35 RESEARCH Conflict 1).
+ * Deletes a file by path. Atomically removes (Phase 37 CSE-05 five-step cascade):
+ *   1. Materializes symbol IDs BEFORE the symbols DELETE (ordering is load-bearing — D-21).
+ *   2. Both-sides DELETE on symbol_dependencies: the file is gone entirely so
+ *      both caller-side AND callee-side rows must be removed. Unlike setEdgesAndSymbols
+ *      (caller-side only), deleteFile uses both-sides deletion because no eventual-
+ *      consistency window applies — the file no longer exists.
+ *   3. All file_dependencies rows where this file is source or target.
+ *   4. All symbols rows for this path.
+ *   5. The files row itself.
+ * All steps run in a single better-sqlite3 transaction so a crash leaves the DB
+ * in a consistent state (prior to Phase 35 these deletes ran non-atomically;
+ * Phase 37 extends to cover symbol_dependencies — D-20).
  */
 export function deleteFile(filePath: string): void {
   const sqlite = getSqlite();
   const db = getDb();
   const tx = sqlite.transaction(() => {
+    // Phase 37 CSE-05 — five-step cascade. Ordering is load-bearing:
+    // Step 1 MUST materialize IDs BEFORE Step 4 deletes symbols (D-21).
+
+    // Step 1: materialize symbol IDs before the symbols row is deleted.
+    const symbolIds = (sqlite
+      .prepare('SELECT id FROM symbols WHERE path = ?')
+      .all(filePath) as Array<{ id: number }>)
+      .map(r => r.id);
+
+    // Step 2: both-sides DELETE on symbol_dependencies.
+    // Unlike setEdgesAndSymbols (caller-side only), deleteFile
+    // clears BOTH caller and callee rows because the file is
+    // gone entirely — no eventual-consistency window applies.
+    // Guard: empty IN () is a SQL syntax error; skip when no symbols.
+    if (symbolIds.length > 0) {
+      const placeholders = symbolIds.map(() => '?').join(', ');
+      sqlite
+        .prepare(
+          `DELETE FROM symbol_dependencies
+           WHERE caller_symbol_id IN (${placeholders})
+              OR callee_symbol_id IN (${placeholders})`
+        )
+        .run(...symbolIds, ...symbolIds);
+    }
+
+    // Step 3: file_dependencies (source OR target side) — existing, unchanged.
     db.delete(file_dependencies)
       .where(
         or(
@@ -167,7 +198,11 @@ export function deleteFile(filePath: string): void {
         )
       )
       .run();
+
+    // Step 4: symbols — existing, unchanged.
     sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+
+    // Step 5: files — existing, unchanged.
     db.delete(files).where(eq(files.path, filePath)).run();
   });
   tx();
