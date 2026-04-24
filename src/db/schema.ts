@@ -81,6 +81,21 @@ export const kv_state = sqliteTable('kv_state', {
   value: text('value').notNull(),
 });
 
+// Phase 36 CSE-01 — symbol-to-symbol call-site edges.
+// Written in Phase 37; ships EMPTY in Phase 36. FK to symbols.id is conceptual
+// only (no physical constraint) — symbols.id is reset on every file re-scan
+// (Pitfall 7); Phase 37 resolves write-side invariance via atomic transaction.
+export const symbol_dependencies = sqliteTable('symbol_dependencies', {
+  id:               integer('id').primaryKey({ autoIncrement: true }),
+  caller_symbol_id: integer('caller_symbol_id').notNull(),
+  callee_symbol_id: integer('callee_symbol_id').notNull(),
+  call_line:        integer('call_line').notNull(),
+  confidence:       real('confidence').notNull(),
+}, (t) => [
+  index('symbol_deps_caller_idx').on(t.caller_symbol_id),
+  index('symbol_deps_callee_idx').on(t.callee_symbol_id),
+]);
+
 // Schema versioning — single integer row
 // Future phases check this and apply upgrade logic as needed
 export const schema_version = sqliteTable('schema_version', {

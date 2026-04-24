@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // scripts/bench-scan.mjs
-// Phase 33 PERF-01 baseline capture tool.
+// Milestone baseline capture tool (PERF-01 / PERF-02 / PERF-03).
 // Runs coordinator.init() over (a) the repo itself and (b) tests/fixtures/medium-repo.
-// Writes .planning/phases/33-symbol-extraction-foundation/baseline.json.
+// Writes .planning/phases/36-schema-migration-multi-language-symbols/v1.7-baseline.json.
 //
-// Reusable post-implementation for Phase 35 PERF-02 regression check (same script).
+// Reusable across milestone baselines — update OUT_PATH when a new milestone starts.
 // REQUIRES a prior `npm run build` — imports from dist/.
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -20,7 +20,7 @@ const REPO_JS        = path.join(REPO_ROOT, 'dist', 'db', 'repository.js');
 const FIXTURE_ROOT   = path.join(REPO_ROOT, 'tests', 'fixtures', 'medium-repo');
 const OUT_PATH       = path.join(
   REPO_ROOT, '.planning', 'phases',
-  '33-symbol-extraction-foundation', 'baseline.json'
+  '36-schema-migration-multi-language-symbols', 'v1.7-baseline.json'
 );
 
 if (!existsSync(COORDINATOR_JS) || !existsSync(REPO_JS)) {
@@ -70,12 +70,11 @@ const fixture = await timeScan(FIXTURE_ROOT);
 console.error(`[bench-scan] medium-repo: ${fixture.elapsed} ms, ${fixture.fileCount} files`);
 
 const baseline = {
-  captured_at:         new Date().toISOString(),
-  self_scan_ms:        self.elapsed,
-  medium_repo_scan_ms: fixture.elapsed,
-  file_counts:         { self: self.fileCount, medium_repo: fixture.fileCount },
-  node_version:        process.version,
-  commit_sha:          commitSha,
+  captured_at:  new Date().toISOString(),
+  commit:       commitSha,
+  node_version: process.version,
+  self:         { elapsed_ms: self.elapsed,    file_count: self.fileCount },
+  medium:       { elapsed_ms: fixture.elapsed, file_count: fixture.fileCount },
 };
 
 mkdirSync(path.dirname(OUT_PATH), { recursive: true });

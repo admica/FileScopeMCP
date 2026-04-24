@@ -8,7 +8,7 @@
 //     only top-level navigable declarations with line-range info.
 // Keeping them separate prevents coupling find_symbol's schema to semantic-diff churn.
 
-export type SymbolKind = 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const';
+export type SymbolKind = 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const' | 'module' | 'struct';
 
 export interface Symbol {
   name:      string;
