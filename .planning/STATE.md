@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Multi-Lang Symbols + Call-Site Edges
-status: executing
-stopped_at: Phase 38 context gathered
-last_updated: "2026-04-24T18:38:12.416Z"
-last_activity: 2026-04-24 -- Phase 37 execution started
+status: planning
+stopped_at: Phase 39 context gathered
+last_updated: "2026-04-24T19:31:43.667Z"
+last_activity: 2026-04-24
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 5
-  percent: 71
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 37 — TS/JS Call-Site Edge Extraction
+**Current focus:** Phase 39 — deferred-item-closure
 
 ## Current Position
 
-Phase: 37 (TS/JS Call-Site Edge Extraction) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 37
-Last activity: 2026-04-24 -- Phase 37 execution started
+Phase: 39
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-04-24
 
 ## Accumulated Context
 
@@ -102,9 +102,5 @@ All 7 are historical quick tasks from v1.0-v1.5. All scheduled for formal closur
 ## Session Continuity
 
 Last activity: 2026-04-24
-Stopped at: Phase 38 context gathered
+Stopped at: Phase 39 context gathered
 Resume file: --resume-file
-
-**Next:** `/gsd-plan-phase 36` to begin planning Phase 36: Schema Migration + Multi-Language Symbols.
-
-**Planned Phase:** 38 (MCP Surface) — 2 plans — 2026-04-24T18:38:12.406Z
