@@ -834,6 +834,7 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{
   edges: EdgeResult[];
   symbols: SymbolRow[];
   importMeta: ImportMeta[];
+  callSiteEdges?: import('./change-detector/types.js').CallSiteEdge[];
   useAtomicWrite: boolean;
 }> {
   log(`[analyzeNewFile] Analyzing ${filePath}`);
@@ -852,6 +853,7 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{
   let edges: EdgeResult[] = [];
   let symbols: SymbolRow[] = [];
   let importMeta: ImportMeta[] = [];
+  let callSiteEdges: import('./change-detector/types.js').CallSiteEdge[] | undefined;
   let useAtomicWrite = false;
 
   if (isTsJs) {
@@ -860,6 +862,7 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{
       edges = parsed.edges;
       symbols = parsed.symbols;
       importMeta = parsed.importMeta;
+      callSiteEdges = parsed.callSiteEdges;
       useAtomicWrite = true;
     } else {
       edges = await extractEdges(filePath, content, projectRoot);
@@ -882,7 +885,7 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{
     });
 
   log(`[analyzeNewFile] Found deps for ${filePath}: ${JSON.stringify({ dependencies: dependencies.length, packageDependencies: packageDependencies.length })}`);
-  return { dependencies, packageDependencies, edges, symbols, importMeta, useAtomicWrite };
+  return { dependencies, packageDependencies, edges, symbols, importMeta, callSiteEdges, useAtomicWrite };
 }
 
 
@@ -920,7 +923,7 @@ export async function updateFileNodeOnChange(
   const oldDeps = new Set(existingNode.dependencies || []);
 
   // Re-analyze file content
-  const { dependencies: newDeps, packageDependencies: newPkgDeps, edges, symbols, importMeta, useAtomicWrite } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+  const { dependencies: newDeps, packageDependencies: newPkgDeps, edges, symbols, importMeta, callSiteEdges, useAtomicWrite } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
   const newDepsSet = new Set(newDeps);
 
   // Update mtime
@@ -981,7 +984,7 @@ export async function updateFileNodeOnChange(
   // Persist to SQLite
   upsertFile(existingNode);
   if (useAtomicWrite) {
-    setEdgesAndSymbols(existingNode.path, edges, symbols, importMeta);
+    setEdgesAndSymbols(existingNode.path, edges, symbols, importMeta, callSiteEdges);
   } else {
     setEdges(existingNode.path, edges);
   }
@@ -1073,7 +1076,7 @@ export async function addFileNode(
 
     // 4. Analyze the new file's content for dependencies
     // Use the placeholder analysis function
-    const { dependencies, packageDependencies, edges, symbols, importMeta, useAtomicWrite } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
+    const { dependencies, packageDependencies, edges, symbols, importMeta, callSiteEdges: newCallSiteEdges, useAtomicWrite } = await analyzeNewFile(normalizedFilePath, activeProjectRoot);
     newNode.dependencies = dependencies;
     newNode.packageDependencies = packageDependencies;
 
@@ -1101,7 +1104,7 @@ export async function addFileNode(
     // 9. Persist to SQLite
     upsertFile(newNode);
     if (useAtomicWrite) {
-      setEdgesAndSymbols(newNode.path, edges, symbols, importMeta);
+      setEdgesAndSymbols(newNode.path, edges, symbols, importMeta, newCallSiteEdges);
     } else {
       setEdges(newNode.path, edges);
     }

@@ -9,24 +9,24 @@
 
 ### Performance Baseline (PERF)
 
-- [ ] **PERF-03**: `v1.7-baseline.json` bench-scan snapshot is captured before any v1.7 extraction code lands. Acts as comparison point for all subsequent phases; each phase must verify self-scan stays below 20% above this baseline. Single-pass invariant enforced via grep-source test.
+- [x] **PERF-03**: `v1.7-baseline.json` bench-scan snapshot is captured before any v1.7 extraction code lands. Acts as comparison point for all subsequent phases; each phase must verify self-scan stays below 20% above this baseline. Single-pass invariant enforced via grep-source test.
 
 ### Multi-Language Symbol Extraction (MLS)
 
-- [ ] **MLS-01**: Python symbol extraction via `tree-sitter-python`: `function_definition` + `async_function_definition` (both node types), `class_definition`, `decorated_definition` with decorator-aware `startLine`. Top-level only. `isExport` via `_` prefix convention. Extends `SymbolKind` as needed.
-- [ ] **MLS-02**: Go symbol extraction via `tree-sitter-go@0.25.0` (reverses v1.4 D-06): `function_declaration`, `method_declaration`, `type_declaration` (struct / interface / alias), `const_declaration`. `isExport` via uppercase-first-char. Multi-line `const (…)` blocks emit one symbol per `const_spec`. Adds `'struct'` to `SymbolKind`.
-- [ ] **MLS-03**: Ruby symbol extraction via `tree-sitter-ruby@0.23.1`: `method`, `singleton_method`, `class`, `module`, and top-level `constant` assignments. No `attr_accessor` / `attr_reader` / `attr_writer` synthesis. All classes/modules/methods/constants treated as exported. Adds `'module'` to `SymbolKind`.
-- [ ] **MLS-04**: `extractLangFileParse()` exported from `language-config.ts` and wired into coordinator pass-2 dispatch (TS/JS | Python+Go+Ruby | other). `find_symbol` returns the new-language symbols with no tool changes.
-- [ ] **MLS-05**: `src/migrate/bulk-multilang-symbol-extract.ts` backfills existing repos via per-language `kv_state` gate keys (new keys, no reuse of v1.6 `symbols_bulk_extracted`).
+- [x] **MLS-01**: Python symbol extraction via `tree-sitter-python`: `function_definition` + `async_function_definition` (both node types), `class_definition`, `decorated_definition` with decorator-aware `startLine`. Top-level only. `isExport` via `_` prefix convention. Extends `SymbolKind` as needed.
+- [x] **MLS-02**: Go symbol extraction via `tree-sitter-go@0.25.0` (reverses v1.4 D-06): `function_declaration`, `method_declaration`, `type_declaration` (struct / interface / alias), `const_declaration`. `isExport` via uppercase-first-char. Multi-line `const (…)` blocks emit one symbol per `const_spec`. Adds `'struct'` to `SymbolKind`.
+- [x] **MLS-03**: Ruby symbol extraction via `tree-sitter-ruby@0.23.1`: `method`, `singleton_method`, `class`, `module`, and top-level `constant` assignments. No `attr_accessor` / `attr_reader` / `attr_writer` synthesis. All classes/modules/methods/constants treated as exported. Adds `'module'` to `SymbolKind`.
+- [x] **MLS-04**: `extractLangFileParse()` exported from `language-config.ts` and wired into coordinator pass-2 dispatch (TS/JS | Python+Go+Ruby | other). `find_symbol` returns the new-language symbols with no tool changes.
+- [x] **MLS-05**: `src/migrate/bulk-multilang-symbol-extract.ts` backfills existing repos via per-language `kv_state` gate keys (new keys, no reuse of v1.6 `symbols_bulk_extracted`).
 
 ### Call-Site Edge Schema + Extraction (CSE)
 
-- [ ] **CSE-01**: New `symbol_dependencies` table: `id` autoincrement, `caller_symbol_id` (FK → symbols.id), `callee_symbol_id` (FK → symbols.id), `call_line`, `confidence`. Dual indexes on both FK columns.
-- [ ] **CSE-02**: TS/JS `call_expression` AST pass extends `extractRicherEdges()` and returns `callSiteEdges: CallSiteEdge[]`. Walks already-parsed AST — no second `parser.parse()`.
-- [ ] **CSE-03**: Resolution algorithm: same-file calls via in-memory `localSymbolIndex` (confidence 1.0); imported calls via `importedSymbolIndex` from batch DB query on `imported_names` (confidence 0.8); unresolvable calls silently discarded. TS/JS only — other-lang call-site edges deferred to v1.8.
-- [ ] **CSE-04**: `setEdgesAndSymbols()` in `repository.ts` accepts optional `callSiteEdges?` and clears+re-inserts `symbol_dependencies` rows in the SAME `sqlite.transaction()` as `upsertSymbols()`. Resolves FLAG-02 (symbol.id instability across re-scan).
-- [ ] **CSE-05**: `deleteFile()` extended to five-step transaction: materialize symbol IDs → DELETE symbol_dependencies (source OR target) → DELETE file_dependencies → DELETE symbols → DELETE files. Regression test in `watcher-symbol-lifecycle.test.ts` asserts `symbol_dependencies` empty after `unlink`.
-- [ ] **CSE-06**: `src/migrate/bulk-call-site-extract.ts` backfills existing repos flag-gated on `call_site_edges_bulk_extracted`; the gate checks `multilang_symbols_bulk_extracted` is set first (enforces phase ordering at boot).
+- [x] **CSE-01**: New `symbol_dependencies` table: `id` autoincrement, `caller_symbol_id` (FK → symbols.id), `callee_symbol_id` (FK → symbols.id), `call_line`, `confidence`. Dual indexes on both FK columns.
+- [x] **CSE-02**: TS/JS `call_expression` AST pass extends `extractRicherEdges()` and returns `callSiteEdges: CallSiteEdge[]`. Walks already-parsed AST — no second `parser.parse()`.
+- [x] **CSE-03**: Resolution algorithm: same-file calls via in-memory `localSymbolIndex` (confidence 1.0); imported calls via `importedSymbolIndex` from batch DB query on `imported_names` (confidence 0.8); unresolvable calls silently discarded. TS/JS only — other-lang call-site edges deferred to v1.8.
+- [x] **CSE-04**: `setEdgesAndSymbols()` in `repository.ts` accepts optional `callSiteEdges?` and clears+re-inserts `symbol_dependencies` rows in the SAME `sqlite.transaction()` as `upsertSymbols()`. Resolves FLAG-02 (symbol.id instability across re-scan).
+- [x] **CSE-05**: `deleteFile()` extended to five-step transaction: materialize symbol IDs → DELETE symbol_dependencies (source OR target) → DELETE file_dependencies → DELETE symbols → DELETE files. Regression test in `watcher-symbol-lifecycle.test.ts` asserts `symbol_dependencies` empty after `unlink`.
+- [x] **CSE-06**: `src/migrate/bulk-call-site-extract.ts` backfills existing repos flag-gated on `call_site_edges_bulk_extracted`; the gate checks `multilang_symbols_bulk_extracted` is set first (enforces phase ordering at boot).
 
 ### MCP Surface (MCP)
 
@@ -83,18 +83,18 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PERF-03 | Phase 36 | Pending |
-| MLS-01 | Phase 36 | Pending |
-| MLS-02 | Phase 36 | Pending |
-| MLS-03 | Phase 36 | Pending |
-| MLS-04 | Phase 36 | Pending |
-| MLS-05 | Phase 36 | Pending |
-| CSE-01 | Phase 36 | Pending |
-| CSE-02 | Phase 37 | Pending |
-| CSE-03 | Phase 37 | Pending |
-| CSE-04 | Phase 37 | Pending |
-| CSE-05 | Phase 37 | Pending |
-| CSE-06 | Phase 37 | Pending |
+| PERF-03 | Phase 36 | Complete |
+| MLS-01 | Phase 36 | Complete |
+| MLS-02 | Phase 36 | Complete |
+| MLS-03 | Phase 36 | Complete |
+| MLS-04 | Phase 36 | Complete |
+| MLS-05 | Phase 36 | Complete |
+| CSE-01 | Phase 36 | Complete |
+| CSE-02 | Phase 37 | Complete |
+| CSE-03 | Phase 37 | Complete |
+| CSE-04 | Phase 37 | Complete |
+| CSE-05 | Phase 37 | Complete |
+| CSE-06 | Phase 37 | Complete |
 | MCP-01 | Phase 38 | Complete |
 | MCP-02 | Phase 38 | Complete |
 | MCP-03 | Phase 38 | Complete |

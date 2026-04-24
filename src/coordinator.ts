@@ -774,6 +774,7 @@ export class ServerCoordinator {
         let edges: EdgeResult[] = [];
         let symbols: SymbolRow[] = [];
         let importMeta: ImportMeta[] = [];
+        let callSiteEdges: import('./change-detector/types.js').CallSiteEdge[] | undefined;
         let useAtomicWrite = false;
 
         if (isTsJs) {
@@ -782,6 +783,7 @@ export class ServerCoordinator {
             edges = parsed.edges;
             symbols = parsed.symbols;
             importMeta = parsed.importMeta;
+            callSiteEdges = parsed.callSiteEdges;
             useAtomicWrite = true;
           } else {
             edges = await extractEdges(filePath, content, config.baseDirectory);
@@ -814,7 +816,7 @@ export class ServerCoordinator {
 
         if (useAtomicWrite) {
           // TS/JS: atomic per-file write of edges + symbols + importMeta (D-15).
-          setEdgesAndSymbols(filePath, edges, symbols, importMeta);
+          setEdgesAndSymbols(filePath, edges, symbols, importMeta, callSiteEdges);
         } else if (edges.length > 0) {
           setEdges(filePath, edges);
         }
