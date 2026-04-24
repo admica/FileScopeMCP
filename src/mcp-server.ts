@@ -36,6 +36,8 @@ import {
   getSymbolsForFile,
   getFilesChangedSince,
   getFilesByPaths,
+  getCallers,
+  getCallees,
 } from './db/repository.js';
 import type { SymbolKind } from './db/symbol-types.js';
 import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
@@ -381,6 +383,84 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
       })),
       total,
       ...(truncated && { truncated: true }),
+    });
+  });
+
+  server.registerTool("find_callers", {
+    title: "Find Callers",
+    description: [
+      "Find all symbols that call the named symbol.",
+      "Exact case-sensitive name match. If multiple symbols share the name (e.g., reopened Ruby classes), callers of all matching symbols are returned.",
+      "`filePath` restricts which symbol definition is the target — use it when a name is defined in multiple files.",
+      "`maxItems` defaults to 50, clamped to [1, 500].",
+      "Response: `{items: [{path, name, kind, startLine, confidence}], total, truncated?: true, unresolvedCount}`.",
+      "`unresolvedCount` reports how many caller edges reference a symbol that no longer exists — trigger `scan_all` to refresh stale edges.",
+      "Self-calls (recursive functions) are excluded from results.",
+      "Ruby `attr_accessor` / `attr_reader` / `attr_writer` are not indexed and will not appear as callers.",
+      "Reopened Ruby classes produce multiple symbol rows with the same name — callers of all matching symbols are returned; filter by `filePath` if disambiguation is needed.",
+      "Returns `NOT_INITIALIZED` if the server hasn't been set up. Zero matches returns `{items: [], total: 0, unresolvedCount: 0}` — never an error.",
+      "Example: `find_callers(\"processFile\")` returns every symbol that calls `processFile`.",
+    ].join(' '),
+    inputSchema: {
+      name: z.string().min(1).describe("Symbol name — exact case-sensitive match"),
+      filePath: z.string().optional().describe("Restrict target lookup to this file path"),
+      maxItems: z.coerce.number().int().optional().describe("Max items to return, clamped to [1, 500], default 50"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ name, filePath, maxItems }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
+    const limit = Math.max(1, Math.min(500, maxItems ?? 50));
+    const { items, total, unresolvedCount } = getCallers(name, filePath, limit);
+    const truncated = items.length < total;
+    return mcpSuccess({
+      items,
+      total,
+      ...(truncated && { truncated: true }),
+      unresolvedCount,
+    });
+  });
+
+  server.registerTool("find_callees", {
+    title: "Find Callees",
+    description: [
+      "Find all symbols that the named symbol calls.",
+      "Exact case-sensitive name match. If multiple symbols share the name (e.g., reopened Ruby classes), callees of all matching symbols are returned.",
+      "`filePath` restricts which symbol definition is the caller — use it when a name is defined in multiple files.",
+      "`maxItems` defaults to 50, clamped to [1, 500].",
+      "Response: `{items: [{path, name, kind, startLine, confidence}], total, truncated?: true, unresolvedCount}`.",
+      "`unresolvedCount` reports how many callee edges reference a symbol that no longer exists — trigger `scan_all` to refresh stale edges.",
+      "Self-calls (recursive functions) are excluded from results.",
+      "Ruby `attr_accessor` / `attr_reader` / `attr_writer` are not indexed and will not appear as callees.",
+      "Reopened Ruby classes produce multiple symbol rows with the same name — callees of all matching symbols are returned; filter by `filePath` if disambiguation is needed.",
+      "Returns `NOT_INITIALIZED` if the server hasn't been set up. Zero matches returns `{items: [], total: 0, unresolvedCount: 0}` — never an error.",
+      "Example: `find_callees(\"processFile\")` returns every symbol that `processFile` calls.",
+    ].join(' '),
+    inputSchema: {
+      name: z.string().min(1).describe("Symbol name — exact case-sensitive match"),
+      filePath: z.string().optional().describe("Restrict caller lookup to this file path"),
+      maxItems: z.coerce.number().int().optional().describe("Max items to return, clamped to [1, 500], default 50"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ name, filePath, maxItems }) => {
+    if (!coordinator.isInitialized()) return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
+    const limit = Math.max(1, Math.min(500, maxItems ?? 50));
+    const { items, total, unresolvedCount } = getCallees(name, filePath, limit);
+    const truncated = items.length < total;
+    return mcpSuccess({
+      items,
+      total,
+      ...(truncated && { truncated: true }),
+      unresolvedCount,
     });
   });
 
