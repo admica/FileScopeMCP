@@ -34,11 +34,17 @@ let PythonLang: unknown = null;
 let RustLang: unknown = null;
 let CLang: unknown = null;
 let CppLang: unknown = null;
+// Phase 36 MLS-02/MLS-03 — Go + Ruby grammars for symbol extraction (D-14, D-18).
+// Note: Go edges still use regex via extractGoEdges (D-06 reversed only for symbols).
+let GoLang: unknown = null;
+let RubyLang: unknown = null;
 
 try { PythonLang = _require('tree-sitter-python'); } catch (e) { log(`[language-config] Failed to load tree-sitter-python: ${e}`); }
 try { RustLang = _require('tree-sitter-rust'); } catch (e) { log(`[language-config] Failed to load tree-sitter-rust: ${e}`); }
 try { CLang = _require('tree-sitter-c'); } catch (e) { log(`[language-config] Failed to load tree-sitter-c: ${e}`); }
 try { CppLang = _require('tree-sitter-cpp'); } catch (e) { log(`[language-config] Failed to load tree-sitter-cpp: ${e}`); }
+try { GoLang = _require('tree-sitter-go'); } catch (e) { log(`[language-config] Failed to load tree-sitter-go: ${e}`); }
+try { RubyLang = _require('tree-sitter-ruby'); } catch (e) { log(`[language-config] Failed to load tree-sitter-ruby: ${e}`); }
 
 // Parser instances — one per grammar (parser is stateful)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,6 +64,9 @@ const pythonParser = createParser(PythonLang);
 const rustParser = createParser(RustLang);
 const cParser = createParser(CLang);
 const cppParser = createParser(CppLang);
+// Phase 36 MLS-02/MLS-03 — eager module-level singletons (D-04 one-parse-per-call invariant).
+const goParser = createParser(GoLang);
+const rubyParser = createParser(RubyLang);
 import {
   IMPORT_PATTERNS,
   resolveImportPath,
@@ -69,6 +78,8 @@ import {
   normalizePath,
 } from './file-utils.js';
 import { PackageDependency } from './types.js';
+// Phase 36 MLS-01..03 — Symbol/SymbolKind for per-language symbol extractors.
+import type { Symbol, SymbolKind } from './db/symbol-types.js';
 
 // ─── Public types ──────────────────────────────────────────────────────────────
 
@@ -222,6 +233,87 @@ async function extractPythonEdges(
   visitNodeAsync(tree.rootNode);
   await Promise.all(asyncEdgePromises);
   return edges;
+}
+
+// ─── Python symbol extractor (MLS-01) ─────────────────────────────────────────
+
+/**
+ * Phase 36 MLS-01 — extract top-level Python symbols from a single parser pass.
+ *
+ * Scope (per D-10 / Pitfall 3): visit ONLY direct children of the root `module`
+ * node — no nested methods or nested classes. One `pythonParser.parse()` call
+ * per invocation (D-04 single-pass invariant).
+ *
+ * Node handling:
+ * - `function_definition` + `async_function_definition` → kind='function'
+ *   (D-11 defensive — current grammar emits `function_definition` with an
+ *   `async` keyword child; the `async_function_definition` branch is a no-op
+ *   today but future-proofs against grammar change).
+ * - `class_definition` → kind='class'.
+ * - `decorated_definition` → startLine from the outer node (decorator line per
+ *   D-12 / Pitfall 2), name + kind from the inner function/class.
+ *
+ * `isExport` rule (D-13): `!name.startsWith('_')` — single-underscore and
+ * dunder names are non-exported. `__all__` handling deferred to v1.8 (MLS-META-02).
+ */
+export function extractPythonSymbols(_filePath: string, content: string): Symbol[] {
+  if (!pythonParser) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tree = (pythonParser as any).parse(content);   // ← exactly ONE parse call (D-04)
+  const out: Symbol[] = [];
+  const root = tree.rootNode;
+
+  for (let i = 0; i < root.namedChildCount; i++) {     // D-10: top-level only
+    const node = root.namedChild(i);
+
+    if (node.type === 'function_definition' || node.type === 'async_function_definition') {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      out.push({
+        name,
+        kind: 'function',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        isExport: !name.startsWith('_'),                // D-13
+      });
+    } else if (node.type === 'class_definition') {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      out.push({
+        name,
+        kind: 'class',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        isExport: !name.startsWith('_'),
+      });
+    } else if (node.type === 'decorated_definition') {
+      // D-12 / Pitfall 2 — startLine from the decorated_definition (outer), name
+      // + kind from the inner declaration. Decorator line, NOT def line.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let inner: any = null;
+      for (let j = 0; j < node.namedChildCount; j++) {
+        const c = node.namedChild(j);
+        if (c.type === 'function_definition' ||
+            c.type === 'async_function_definition' ||
+            c.type === 'class_definition') {
+          inner = c;
+          break;
+        }
+      }
+      if (!inner) continue;
+      const name = inner.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      const kind: SymbolKind = inner.type === 'class_definition' ? 'class' : 'function';
+      out.push({
+        name,
+        kind,
+        startLine: node.startPosition.row + 1,          // decorator line (Pitfall 2)
+        endLine: node.endPosition.row + 1,
+        isExport: !name.startsWith('_'),
+      });
+    }
+  }
+  return out;
 }
 
 // ─── Rust AST extractor ────────────────────────────────────────────────────────
@@ -647,6 +739,124 @@ async function extractGoEdges(
   return edges;
 }
 
+// ─── Go symbol extractor (MLS-02) ─────────────────────────────────────────────
+
+/**
+ * Phase 36 MLS-02 — extract top-level Go symbols from a single parser pass.
+ * Note: Go edges still use regex via extractGoEdges. This function is a
+ * SYMBOLS-only AST pass (D-06 REVERSED per D-14). One `goParser.parse()` call.
+ *
+ * Node handling (D-15/D-16):
+ * - `function_declaration` → kind='function' (name type `identifier`).
+ * - `method_declaration` → kind='function' (name type `field_identifier`;
+ *   Pitfall 4 — use childForFieldName('name'), NOT type-filter).
+ * - `type_declaration` → iterate namedChildren:
+ *     - `type_spec` with inner `struct_type` → kind='struct' (D-06 new kind).
+ *     - `type_spec` with inner `interface_type` → kind='interface'.
+ *     - `type_spec` with any other inner → kind='type'.
+ *     - `type_alias` (e.g., `type MyAlias = int`) → kind='type'.
+ * - `const_declaration` → emit one symbol per `const_spec` (D-16).
+ *
+ * `isExport` (D-17): first ASCII char uppercase ([65..90]).
+ */
+export function extractGoSymbols(_filePath: string, content: string): Symbol[] {
+  if (!goParser) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tree = (goParser as any).parse(content);      // ← exactly ONE parse call (D-04)
+  const out: Symbol[] = [];
+  const root = tree.rootNode;
+
+  for (let i = 0; i < root.namedChildCount; i++) {
+    const node = root.namedChild(i);
+
+    if (node.type === 'function_declaration') {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      out.push({
+        name,
+        kind: 'function',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        isExport: isGoExported(name),
+      });
+    } else if (node.type === 'method_declaration') {
+      // D-07: method → 'function'. Pitfall 4: name field is `field_identifier`,
+      // not `identifier`. childForFieldName('name') is type-agnostic.
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      out.push({
+        name,
+        kind: 'function',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        isExport: isGoExported(name),
+      });
+    } else if (node.type === 'type_declaration') {
+      // type_declaration may have multiple type_spec children (rare — `type (...)` blocks).
+      for (let j = 0; j < node.namedChildCount; j++) {
+        const spec = node.namedChild(j);
+        if (spec.type === 'type_alias') {
+          const name = spec.childForFieldName('name')?.text as string | undefined;
+          if (!name) continue;
+          out.push({
+            name,
+            kind: 'type',
+            startLine: spec.startPosition.row + 1,
+            endLine: spec.endPosition.row + 1,
+            isExport: isGoExported(name),
+          });
+        } else if (spec.type === 'type_spec') {
+          const nameNode = spec.childForFieldName('name');
+          const name = nameNode?.text as string | undefined;
+          if (!name) continue;
+          // Find the inner "body" child — the namedChild that is not the name node.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let inner: any = null;
+          for (let k = 0; k < spec.namedChildCount; k++) {
+            const c = spec.namedChild(k);
+            if (c !== nameNode) { inner = c; break; }
+          }
+          let kind: SymbolKind = 'type';
+          if (inner?.type === 'struct_type') kind = 'struct';
+          else if (inner?.type === 'interface_type') kind = 'interface';
+          out.push({
+            name,
+            kind,
+            startLine: spec.startPosition.row + 1,
+            endLine: spec.endPosition.row + 1,
+            isExport: isGoExported(name),
+          });
+        }
+      }
+    } else if (node.type === 'const_declaration') {
+      // D-16: emit one symbol per const_spec. First named child of const_spec
+      // is the identifier (verified 2026-04-24 live probe).
+      for (let j = 0; j < node.namedChildCount; j++) {
+        const spec = node.namedChild(j);
+        if (spec.type !== 'const_spec') continue;
+        const idNode = spec.namedChild(0);
+        const name = idNode?.text as string | undefined;
+        if (!name) continue;
+        out.push({
+          name,
+          kind: 'const',
+          startLine: spec.startPosition.row + 1,
+          endLine: spec.endPosition.row + 1,
+          isExport: isGoExported(name),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Go export rule (D-17): first ASCII char uppercase. */
+function isGoExported(name: string): boolean {
+  if (name.length === 0) return false;
+  const c = name.charCodeAt(0);
+  return c >= 65 && c <= 90;   // 'A'..'Z' ASCII
+}
+
 // ─── Ruby extractor ────────────────────────────────────────────────────────────
 
 /**
@@ -691,6 +901,126 @@ async function extractRubyEdges(
   }
 
   return edges;
+}
+
+// ─── Ruby symbol extractor (MLS-03) ───────────────────────────────────────────
+
+/**
+ * Phase 36 MLS-03 — extract top-level Ruby symbols from a single parser pass.
+ * One `rubyParser.parse()` call (D-04).
+ *
+ * Scope (per D-19): visit ONLY direct children of the root `program` node.
+ * Nested methods inside classes are NOT emitted — top-level only.
+ *
+ * Node handling:
+ * - `method` + `singleton_method` → kind='function' (D-07).
+ * - `class` → kind='class'. Name node is `constant` (e.g., `Foo`) OR
+ *   `scope_resolution` (e.g., `Foo::Bar`). Use `.text` either way — this
+ *   yields the full qualified name (D-22 note).
+ * - `module` → kind='module' (D-06 new SymbolKind).
+ * - `assignment` where `left` is a `constant` node → kind='const' (D-08).
+ *   Plain identifier assignments (lowercase variables) are NOT emitted.
+ *
+ * `isExport`: always `true` (D-21 — Ruby has no export keyword; visibility
+ * modifiers are deferred to v1.8 MLS-META-03).
+ *
+ * Deliberate non-emissions (Pitfall 5 / D-20): `attr_accessor`, `attr_reader`,
+ * `attr_writer` — these are method calls that SYNTHESIZE methods at runtime,
+ * not AST declarations. Documented as a find_symbol limitation (D-29).
+ *
+ * Reopened classes (Pitfall 6 / D-22): multiple `class Foo` blocks in the same
+ * file produce multiple Symbol rows with identical name + kind and different
+ * startLines — intentional; find_symbol callers filter by filePath.
+ */
+export function extractRubySymbols(_filePath: string, content: string): Symbol[] {
+  if (!rubyParser) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tree = (rubyParser as any).parse(content);    // ← exactly ONE parse call (D-04)
+  const out: Symbol[] = [];
+  const root = tree.rootNode;   // type === 'program'
+
+  for (let i = 0; i < root.namedChildCount; i++) {
+    const node = root.namedChild(i);
+    const startLine = node.startPosition.row + 1;
+    const endLine = node.endPosition.row + 1;
+
+    if (node.type === 'method' || node.type === 'singleton_method') {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      out.push({ name, kind: 'function', startLine, endLine, isExport: true });  // D-21
+    } else if (node.type === 'class') {
+      const nameNode = node.childForFieldName('name');
+      if (!nameNode) continue;
+      // nameNode.type is either `constant` ("Foo") or `scope_resolution`
+      // ("Foo::Bar"). .text gives the full qualified name (D-22).
+      const name = nameNode.text as string;
+      out.push({ name, kind: 'class', startLine, endLine, isExport: true });
+    } else if (node.type === 'module') {
+      const name = node.childForFieldName('name')?.text as string | undefined;
+      if (!name) continue;
+      out.push({ name, kind: 'module', startLine, endLine, isExport: true });   // D-06
+    } else if (node.type === 'assignment') {
+      // D-08: only emit when lhs is a `constant` (Ruby-uppercase name).
+      // Plain `my_var = 42` has lhs type `identifier` and is NOT emitted.
+      const left = node.childForFieldName('left');
+      if (left?.type === 'constant') {
+        out.push({
+          name: left.text as string,
+          kind: 'const',
+          startLine,
+          endLine,
+          isExport: true,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+// ─── Non-TS/JS file-parse dispatcher (MLS-04) ─────────────────────────────────
+
+/**
+ * Phase 36 MLS-04 — dispatcher for Python / Go / Ruby file parsing, returning
+ * edges + symbols together. Mirror of extractTsJsFileParse but for non-TS/JS
+ * AST-backed languages.
+ *
+ * Contract (D-05):
+ * - `.py` / `.go` / `.rb` → `{ edges, symbols }` (importMeta intentionally
+ *   omitted — v1.7 carries `imported_names` only for TS/JS).
+ * - Any other extension → `null` (callers fall back to extractEdges()).
+ *
+ * Calls the per-language edge extractor AND the per-language symbol extractor.
+ * For Go/Ruby the edge extraction stays on regex (resolveGoImports /
+ * resolveRubyImports) while the symbol extractor uses the tree-sitter AST —
+ * a two-pass-per-file pattern, but each function still makes ≤ 1 parser.parse()
+ * call (single-pass invariant, D-31/Pitfall 14).
+ */
+export async function extractLangFileParse(
+  filePath: string,
+  content: string,
+  projectRoot: string
+): Promise<{
+  edges: EdgeResult[];
+  symbols: Symbol[];
+  importMeta?: import('./change-detector/ast-parser.js').ImportMeta[];
+} | null> {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.py') {
+    const edges = await extractPythonEdges(filePath, content, projectRoot);
+    const symbols = extractPythonSymbols(filePath, content);
+    return { edges, symbols };
+  }
+  if (ext === '.go') {
+    const edges = await extractGoEdges(filePath, content, projectRoot);
+    const symbols = extractGoSymbols(filePath, content);
+    return { edges, symbols };
+  }
+  if (ext === '.rb') {
+    const edges = await extractRubyEdges(filePath, content, projectRoot);
+    const symbols = extractRubySymbols(filePath, content);
+    return { edges, symbols };
+  }
+  return null;
 }
 
 // ─── Generic regex extractor factory ──────────────────────────────────────────
