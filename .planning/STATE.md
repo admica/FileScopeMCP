@@ -1,36 +1,35 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.6
-milestone_name: Symbol-Level Intelligence
-status: ready_to_plan
-stopped_at: Completed 34-02-PLAN.md
-last_updated: "2026-04-23T22:36:18.872Z"
-last_activity: 2026-04-23
+milestone: null
+milestone_name: null
+status: milestone_complete
+stopped_at: v1.6 Symbol-Level Intelligence shipped 2026-04-23; archived 2026-04-24
+last_updated: "2026-04-24T03:45:00.000Z"
+last_activity: 2026-04-24
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-23)
+See: .planning/PROJECT.md (updated 2026-04-24)
 
 **Core value:** LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
-**Current focus:** Phase 34 — Symbol-Aware MCP Surface
+**Current focus:** Planning next milestone — run `/gsd-new-milestone` to scope v1.7.
 
 ## Current Position
 
-Phase: 35
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-04-23
+Milestone: v1.6 Symbol-Level Intelligence — **SHIPPED 2026-04-23**, archived 2026-04-24.
+No active phase. Seven milestones complete (35 phases total).
+Last activity: 2026-04-24
 
-Progress: [░░░░░░░░░░] 0% (v1.6: 0/3 phases)
+Next: `/gsd-new-milestone` to begin v1.7 scoping.
 
 ## Accumulated Context
 
@@ -59,7 +58,23 @@ None.
 
 ### Blockers/Concerns
 
-None yet — milestone just started.
+None — v1.6 shipped.
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-04-24:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 1-update-readme-md-and-root-roadmap-md-to- | missing (pre-v1.6 artifact, no completion marker) |
+| quick_task | 260323-kgd-auto-init-mcp-to-cwd-rename-set-project- | missing (commit 50b7016 landed; dir has no SUMMARY) |
+| quick_task | 260324-0yz-comprehensive-documentation-update-readm | missing (commit a96b263 landed; dir has no SUMMARY) |
+| quick_task | 260401-a19-fix-double-change-impact-and-structured-ou | missing (pre-v1.6 artifact, no completion marker) |
+| quick_task | 260401-b7k-fix-cpp-dependency-parsing-and-importance | missing (pre-v1.6 artifact, no completion marker) |
+| quick_task | 260414-otc-make-sure-the-install-setup-scripts-of-t | missing (commit 101d8f0 landed; dir has no SUMMARY) |
+| quick_task | 260416-b8w-fix-nexus-tree-view-repo-store-queries-a | missing (commit 2d1177b landed; dir has no SUMMARY) |
+
+All 7 are historical quick tasks from v1.0-v1.5 that shipped via git but never had audit completion markers written. No v1.6 work affected.
 
 ### Quick Tasks Completed
 

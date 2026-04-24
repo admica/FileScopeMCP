@@ -1,5 +1,25 @@
 # Milestones
 
+## v1.6 Symbol-Level Intelligence (Shipped: 2026-04-23)
+
+**Phases completed:** 3 phases (33-35), 10 plans, 10 tasks
+**Requirements:** 30/30 satisfied
+**Stats:** 40 commits | 154 files changed | +14,331 / -96 lines | 1 day (Apr 23, 2026)
+**Known deferred items at close:** 7 (see STATE.md Deferred Items) — all historical quick-task slugs from v1.0-v1.5, no v1.6 work affected
+**Tech debt at close:** 2 phases (33, 35) shipped without `/gsd-verify-work` — VERIFICATION.md generated retroactively from audit + test files; REQUIREMENTS.md traceability table reconciled at close
+
+**Key accomplishments:**
+
+- Symbol extraction during scan — TS/JS files populate a `symbols` SQLite table with top-level declarations (function/class/interface/type/enum/const, line range, `isExport` flag) via a single-pass AST walk shared with edge extraction; migration-time bulk-extract gated by `kv_state` flag
+- Import-name metadata on dependency edges — `file_dependencies` gains `imported_names` + `import_line` columns, namespace imports record `*`, additive migration preserves pre-v1.6 rows
+- `find_symbol(name, kind?, exportedOnly=true, maxItems?)` MCP tool — case-sensitive exact + trailing-`*` prefix match via SQLite GLOB, standardized `{items, total, truncated?: true}` envelope, clamp `[1, 500]`
+- `get_file_summary` enrichment — new `exports: [{name, kind, startLine, endLine}]` field sorted by startLine; `dependents[]` upgraded from `string[]` to `[{path, importedNames, importLines}]` with NULL-coerced to `[]` for non-TS/JS files
+- `list_changed_since(since, maxItems?)` MCP tool — dual-mode dispatch (ISO-8601 timestamp via `Date.parse`, 7+ char git SHA via `execFileSync git diff` + DB intersection); extended ErrorCode union with `INVALID_SINCE | NOT_GIT_REPO`; no deletion tombstones (CHG-05)
+- Watcher lifecycle hardened for symbols — file-change events re-extract via single-pass walk, unlink invokes transactional cascade (`file_dependencies` + `symbols` + `files` in one `sqlite.transaction()`); `watcher-symbol-lifecycle.test.ts` regression guard with paranoid `SELECT COUNT(*)` post-delete
+- `scripts/inspect-symbols.mjs` CLI (`npm run inspect-symbols <path>`) for parser debugging; 14th→15th MCP tool registered; performance gate passed at +13.75% self-scan / +9.64% medium-repo (both under 15% soft threshold)
+
+---
+
 ## v1.5 Production-Grade MCP Intelligence Layer (Shipped: 2026-04-23)
 
 **Phases completed:** 4 phases (29-32), 11 plans, 17 tasks

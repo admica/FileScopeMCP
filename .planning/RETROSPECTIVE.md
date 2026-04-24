@@ -198,6 +198,56 @@
 
 ---
 
+## Milestone: v1.6 — Symbol-Level Intelligence
+
+**Shipped:** 2026-04-23
+**Phases:** 3 | **Plans:** 10
+
+### What Was Built
+- Symbol extraction during scan — TS/JS files populate a `symbols` SQLite table via a single-pass AST walk shared with edge extraction; migration-time bulk-extract gated by `kv_state` flag
+- Import-name metadata on dependency edges — `imported_names` + `import_line` columns on `file_dependencies`, namespace imports record `*`
+- Two new MCP tools: `find_symbol(name, kind?, exportedOnly=true, maxItems?)` (case-sensitive exact + trailing-`*` GLOB prefix, `{items, total, truncated?}` envelope) and `list_changed_since(since, maxItems?)` (dual ISO-8601 + git-SHA dispatch, DB intersection)
+- `get_file_summary` enrichment — new `exports[]` field (sorted by startLine, isExport-filtered) and `dependents[]` upgraded from `string[]` to `[{path, importedNames, importLines}]`
+- Watcher lifecycle for symbols — single-pass re-extract on change, transactional three-DELETE cascade on unlink, regression guard via `watcher-symbol-lifecycle.test.ts`
+- `npm run inspect-symbols` CLI; 15th registered MCP tool (up from 13)
+- 718 tests passing (+45 new on top of v1.5's 673); performance under 15% soft threshold
+
+### What Worked
+- Ruthless scope audit (2026-04-23) cut from 8 candidate features to 3 high-value tools — no bloat shipped
+- Single-day build (2026-04-23, 40 commits) driven by a tight 3-phase linear chain (schema+parser → MCP surface → watcher+changed-since)
+- Single-pass AST walk mandate for symbols + edges enforced early — PERF-02 passed comfortably (+13.75% self / +9.64% medium-repo vs Phase 33 baseline)
+- Phase 34 restored VERIFICATION.md rigor (14/14 truths, 91 new passing tests) — first phase in v1.5+v1.6 to produce a formal verification artifact
+- Bench-scan CLI (33-01) captured reproducible baseline + end metrics; `bench-end.json` vs `baseline.json` made PERF-02 a pure comparison
+- Zod `z.coerce.boolean().default(true)` pattern for `find_symbol.exportedOnly` locked by grep-source test — regression guard against accidental default flip
+
+### What Was Inefficient
+- Phases 33 + 35 skipped `/gsd-verify-work` again — milestone close generated VERIFICATION.md retroactively from audit + test files
+- REQUIREMENTS.md traceability table status column stayed "Pending" for all 30 REQ-IDs despite phases complete; checkboxes for 9 Phase-35 requirements never flipped during execution — both reconciled at milestone close
+- Phase 35 plan SUMMARY files used body-level `**Requirements:**` line instead of frontmatter `requirements-completed:` (Phase 33 + 34 used frontmatter) — audit flagged the inconsistency
+- SDK bug: `gsd-sdk query milestone.complete` passes empty args to `phasesArchive`, dropping the required version arg — workflow fell back to manual archival. Reported for v0.2.
+- 7 historical quick-task dirs (from v1.0-v1.5) re-surfaced in `audit-open` at close — same deferred debt as v1.5 close; still unresolved
+
+### Patterns Established
+- `kv_state` table as a general-purpose one-shot migration gate (bulk-extract guarded by a single kv row)
+- GLOB + bracket-escape as the case-sensitive prefix-match pattern for SQLite (no PRAGMA, no new indexes)
+- Tool descriptions authored as `string[].join(' ')` so a length probe can regex-extract without JS eval
+- Transactional three-DELETE cascade in `deleteFile()` — single `sqlite.transaction()` closure keeps `file_dependencies`, `symbols`, `files` coherent on unlink
+- Single AST parse shared across multiple accumulators (edges + symbols + importMeta) — new invariant for all future language support
+
+### Key Lessons
+1. PERF baselines captured at Phase 1 pay off at Phase N — `baseline.json` + `bench-end.json` made PERF-02 trivially auditable
+2. Scope audits that cut features before planning are cheaper than cutting during execution — the 2026-04-23 audit deleted 5 candidate tools from the wishlist
+3. `/gsd-verify-work` continues to be skipped on fast-moving phases — retroactive VERIFICATION.md from audit + tests is an acceptable compensating control, but it hides the original intent rot
+4. Ruthless cuts (TS/JS only, no deletion tombstones, no method-level symbols) shipped a focused milestone in one day; expanding later is cheap
+5. Single-pass parser mandates need a grep-source test (like find_symbol's length probe) to prevent accidental double-parse regressions in future language support
+
+### Cost Observations
+- Model mix: opus-heavy orchestration, sonnet for execution agents
+- Sessions: ~4 across 1 day (Apr 23)
+- Notable: fastest milestone yet by day-count (1 day for 3 phases + 10 plans + 718-test run); 14K+ line diff driven largely by test files and fixtures
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -209,6 +259,8 @@
 | v1.2 | 4 | 8 | 4 | Dedicated cleanup phase after architecture change |
 | v1.3 | 5 | 12 | 3 | Integration checker as verification substitute |
 | v1.4 | 4 | 8 | 1 | Registry pattern enables single-day multi-language milestone |
+| v1.5 | 4 | 11 | 6 | Protocol-layer tests + zero-config auto-registration |
+| v1.6 | 3 | 10 | 1 | Ruthless scope audit → 3 high-value tools, single-day ship |
 
 ### Cumulative Quality
 
@@ -219,11 +271,16 @@
 | v1.2 | 250+ | 12 | via audit |
 | v1.3 | 250+ | 35 | 35/35 via integration checker |
 | v1.4 | 260+ | 18 | 17/18 + 1 accepted deviation (AST-05) |
+| v1.5 | 673 | 21 | 20/21 (BRKR-04 partial, see audit) |
+| v1.6 | 718 | 30 | 30/30 via audit + retroactive VERIFICATION.md |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Milestone audit before shipping catches integration issues that phase-level testing misses
-2. Verification documentation should be part of implementation, not a separate phase
+2. Verification documentation should be part of implementation, not a separate phase — skipping it keeps showing up as tech debt at milestone close (v1.3, v1.4, v1.5, v1.6)
 3. Read-only dashboards over existing data are high-value/low-effort (v1.3)
 4. Dedicated cleanup phases after major architecture changes prevent dead code accumulation (v1.2)
-5. Fast milestones (2-3 days) are achievable when scope is tight and phases are independent (v1.1, v1.3)
+5. Fast milestones (1-3 days) are achievable when scope is tight and phases are independent or linear (v1.1, v1.3, v1.4, v1.6)
+6. Ruthless scope audits that cut features before planning are cheaper than cutting during execution (v1.6 — 8 candidates → 3)
+7. PERF baselines captured at Phase 1 of a milestone make end-of-milestone regression checks trivial (v1.6)
+8. Single-pass invariants (one AST parse, shared accumulators) need grep-source tests to survive future language expansion (v1.6)

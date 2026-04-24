@@ -8,30 +8,28 @@ A fully autonomous file intelligence system that watches project directories and
 
 LLMs get accurate, current answers about any file's role, relationships, and contents through MCP queries — without ever needing to read the raw files or maintain the metadata themselves.
 
-## Current Milestone: v1.6 Symbol-Level Intelligence
-
-**Goal:** Elevate FileScopeMCP from file-granular to symbol-granular for three daily-use LLM queries — kill grep for symbol navigation, expose import-names on dependent edges, add "changed since" re-orientation.
-
-**Target features:**
-- Symbol extraction (TS/JS only) — function/class/interface/type/enum/const with line ranges
-- `find_symbol` MCP tool with kind filter and exportedOnly default
-- `get_file_summary` enriched with `exports[]` + `dependents[].importedNames[]` + `importLines[]`
-- `list_changed_since` MCP tool (timestamp + git-SHA modes, no deletion tracking)
-- Parser single-pass: symbols emit alongside edges, no second AST walk
-- `npm run inspect-symbols` CLI for parser debugging
-
 ## Current State
 
-Shipped v1.5 Production-Grade MCP Intelligence Layer (2026-04-23). Six milestones complete (32 phases total).
+Shipped v1.6 Symbol-Level Intelligence (2026-04-23). Seven milestones complete (35 phases total). Planning next milestone.
 
 **Architecture:**
-- MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface
-- LLM broker (singleton): standalone process coordinating all Ollama access via Unix socket IPC
+- MCP server (per-repo daemon): file watching, metadata maintenance, MCP tool interface with 15 tools
+- LLM broker (singleton): standalone process coordinating all LLM access (llama.cpp / llama-server) via Unix socket IPC
 - Nexus dashboard: Fastify API + Svelte 5 SPA at 0.0.0.0:1234, read-only SQLite access
 
 **Tech stack:** TypeScript 5.8, Node.js 22, ESM, esbuild, better-sqlite3, drizzle-orm, tree-sitter, chokidar, zod, vitest, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js, graphology
 
-**Codebase:** ~15K LOC TypeScript | 574+ tests passing | 32 phases shipped across 6 milestones
+**Codebase:** ~15K LOC TypeScript | 718 tests passing (7 skipped) | 35 phases shipped across 7 milestones
+
+## Next Milestone Goals
+
+No active milestone. Top v1.7 candidates (see memory `project_v1_7_candidates.md`):
+
+1. Multi-language symbol extraction (Python/Go/Ruby) — pending v1.6 adoption signal
+2. Symbol-level dependency edges — call-site resolution (`who calls foo`)
+3. Deletion tombstones on `list_changed_since` — enable `deleted_files` tracking
+
+Run `/gsd-new-milestone` to scope v1.7.
 
 ## Requirements
 
@@ -131,6 +129,9 @@ Shipped v1.5 Production-Grade MCP Intelligence Layer (2026-04-23). Six milestone
 - ✓ `find_symbol` MCP tool — case-sensitive exact + trailing-`*` prefix, `kind` filter, `exportedOnly` default true, `{items, total, truncated?}` envelope — v1.6 (Phase 34, FIND-01..05)
 - ✓ `get_file_summary.exports[]` populated from symbols table for TS/JS files — v1.6 (Phase 34, SUM-01)
 - ✓ `get_file_summary.dependents[]` upgraded to `[{path, importedNames, importLines}]` — v1.6 (Phase 34, SUM-02..04)
+- ✓ `list_changed_since(since, maxItems?)` MCP tool — dual-mode dispatch (ISO-8601 timestamp + 7+ char git SHA via `git diff` ∩ DB); `NOT_INITIALIZED | INVALID_SINCE | NOT_GIT_REPO` error codes; no deletion tombstones — v1.6 (Phase 35, CHG-01..05)
+- ✓ Watcher lifecycle hardened for symbols — file-change re-extracts via single-pass AST walk (no separate timer); unlink invokes transactional three-DELETE cascade (`file_dependencies` + `symbols` + `files` in one `sqlite.transaction()`); mtime-based staleness shared with edges — v1.6 (Phase 35, WTC-01..03)
+- ✓ PERF budget held under 15% soft threshold — self-scan +13.75% (1833→2085ms), medium-repo +9.64% (332→364ms) vs Phase 33 baseline — v1.6 (PERF-01, PERF-02)
 
 ### Active
 
@@ -171,7 +172,7 @@ None — defining next milestone.
 
 ## Context
 
-Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), v1.4 (4 phases), and v1.5 (4 phases). The system is a complete autonomous file intelligence platform with a standalone LLM broker, a visual code exploration dashboard (Nexus), rich graph intelligence — tree-sitter AST extraction for Python/Rust/C/C++/Go/TS/JS with richer edge types (imports, re_exports, inherits), edge weights, confidence labels, Louvain community detection, token budget caps on MCP tool responses — and a production-grade agent surface: MCP spec-compliant registerTool() for all 13 tools with structured responses, hardened broker lifecycle (dual liveness check, crash handlers, drain-bounded shutdown), 574+ tests including MCP transport integration coverage, and zero-config Claude Code auto-discovery via committed .mcp.json + cross-platform register-mcp helper.
+Shipped v1.0 (9 phases), v1.1 (6 phases), v1.2 (4 phases), v1.3 (5 phases), v1.4 (4 phases), v1.5 (4 phases), and v1.6 (3 phases). The system is a complete autonomous file intelligence platform with a standalone LLM broker, a visual code exploration dashboard (Nexus), rich graph intelligence — tree-sitter AST extraction for Python/Rust/C/C++/Go/TS/JS with richer edge types (imports, re_exports, inherits), edge weights, confidence labels, Louvain community detection, token budget caps on MCP tool responses — a production-grade agent surface — MCP spec-compliant registerTool() for all 15 tools with structured responses, hardened broker lifecycle (dual liveness check, crash handlers, drain-bounded shutdown), 718 tests including MCP transport integration coverage, and zero-config Claude Code auto-discovery via committed .mcp.json + cross-platform register-mcp helper — plus symbol-level intelligence: TS/JS symbol extraction driven by a single-pass AST walk shared with edge extraction, `find_symbol` MCP tool with GLOB prefix match and standardized envelope, `get_file_summary` enriched with `exports[]` + rich `dependents[]` (importedNames, importLines), and `list_changed_since` tool with dual ISO-8601 / git-SHA dispatch for post-edit re-orientation.
 
 Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk, chokidar, zod, vitest, better-sqlite3, drizzle-orm, tree-sitter, graphology, Vercel AI SDK, Fastify 5, Svelte 5, Vite 8, Tailwind CSS 4, Cytoscape.js, D3.js.
 
@@ -221,6 +222,15 @@ Tech stack: TypeScript 5.8, Node.js 22, ESM, esbuild, @modelcontextprotocol/sdk,
 | Committed .mcp.json at repo root | Claude Code auto-discovers per-repo MCP servers when scope matches CWD | ✓ Good (v1.5) |
 | ESM .mjs register script | Cross-platform (macOS/Linux/Windows) without bash dependency; process.execPath handles nvm/volta | ✓ Good (v1.5) |
 | Fail-soft ENOENT on claude CLI | Never break ./build.sh for users without Claude Code installed | ✓ Good (v1.5) |
+| Symbol extraction in single AST pass alongside edges | Avoid second `parser.parse()` per file; PERF-critical for scan wall-time | ✓ Good (v1.6) |
+| Additive schema for symbols (no breaking changes) | Preserve existing tool response shapes; `dependents[]` upgrade is the only wire change | ✓ Good (v1.6) |
+| TS/JS only symbol extraction in v1.6 | Ruthless scope cut — ship daily-use surface first, expand on adoption signal | ✓ Good (v1.6) |
+| No deletion tombstones on `list_changed_since` | Intersection with DB drops deletions inherently; tombstone table deferred | ✓ Good (v1.6) |
+| GLOB prefix-match with bracket-escape for `find_symbol` | SQLite GLOB is natively case-sensitive; no PRAGMA, no new indexes | ✓ Good (v1.6) |
+| Inlined `getDependentsWithImports` return type | Single call site; new interface would be noise | ✓ Good (v1.6) |
+| `find_symbol` description as `string[].join(' ')` literal | Length probe regex-extracts without JS eval | ✓ Good (v1.6) |
+| Transactional three-DELETE cascade in `deleteFile()` | Watcher unlink never leaves orphaned symbols; one `sqlite.transaction()` closure | ✓ Good (v1.6) |
+| JSX components as `function` kind | Reachable via existing AST nodes; no `component` kind heuristic needed | ✓ Good (v1.6) |
 
 ## Evolution
 
@@ -240,4 +250,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-23 after Phase 34 Symbol-Aware MCP Surface (v1.6) shipped*
+*Last updated: 2026-04-24 after v1.6 Symbol-Level Intelligence milestone shipped*
