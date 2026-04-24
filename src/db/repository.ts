@@ -1101,7 +1101,8 @@ export function setEdgesAndSymbols(
   sourcePath: string,
   edges: EdgeResult[],
   syms: SymbolRow[],
-  importMeta?: ImportMeta[]
+  importMeta?: ImportMeta[],
+  callSiteEdges?: import('../change-detector/types.js').CallSiteEdge[]
 ): void {
   const sqlite = getSqlite();
   const tx = sqlite.transaction(() => {
@@ -1149,6 +1150,21 @@ export function setEdgesAndSymbols(
       }).run();
     }
 
+    // Phase 37 CSE-04 — caller-side symbol_dependencies clear.
+    // Must run BEFORE the symbols DELETE below so the subquery still resolves the
+    // OLD symbol IDs (FLAG-02: after DELETE+INSERT, old IDs are gone and the
+    // subquery would return the NEW IDs, missing the stale rows entirely).
+    // When callSiteEdges is undefined, this whole block is skipped — preserves Phase 36
+    // backward compat (D-15). When provided (even empty), always clear caller-side so
+    // stale edges are removed when a re-scan yields zero resolvable calls.
+    if (callSiteEdges !== undefined) {
+      // Clear caller-side BEFORE symbols DELETE so old IDs are still queryable.
+      sqlite.prepare(
+        `DELETE FROM symbol_dependencies
+         WHERE caller_symbol_id IN (SELECT id FROM symbols WHERE path = ?)`
+      ).run(sourcePath);
+    }
+
     // Symbols
     sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(sourcePath);
     if (syms.length > 0) {
@@ -1157,6 +1173,35 @@ export function setEdgesAndSymbols(
       );
       for (const s of syms) {
         stmt.run(sourcePath, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
+      }
+    }
+
+    // Phase 37 CSE-04 continued — insert fresh call-site edges using the new symbol IDs.
+    // Runs AFTER symbols INSERT so caller IDs are fresh in this same txn (FLAG-02 resolution).
+    // Callee-side rows from OTHER files are left untouched (D-19 eventual-consistency).
+    if (callSiteEdges !== undefined && callSiteEdges.length > 0) {
+      // D-17: prepared statements created ONCE outside the per-edge loop.
+      const callerLookup = sqlite.prepare(
+        `SELECT id FROM symbols WHERE path = ? AND name = ? AND start_line = ? LIMIT 1`
+      );
+      const calleeLookup = sqlite.prepare(
+        `SELECT id FROM symbols WHERE path = ? AND name = ? LIMIT 1`
+      );
+      const edgeInsert = sqlite.prepare(
+        `INSERT INTO symbol_dependencies (caller_symbol_id, callee_symbol_id, call_line, confidence)
+         VALUES (?, ?, ?, ?)`
+      );
+
+      for (const edge of callSiteEdges) {
+        const callerRow = callerLookup.get(sourcePath, edge.callerName, edge.callerStartLine) as
+          { id: number } | undefined;
+        if (!callerRow) continue;  // symbol row missing (Pitfall A callerStartLine mismatch, or race) — silent discard
+
+        const calleeRow = calleeLookup.get(edge.calleePath, edge.calleeName) as
+          { id: number } | undefined;
+        if (!calleeRow) continue;  // callee not in DB (renamed since index built, or cross-file out-of-date) — silent discard
+
+        edgeInsert.run(callerRow.id, calleeRow.id, edge.callLine, edge.confidence);
       }
     }
   });

@@ -156,11 +156,11 @@ Plans:
   2. After a file is unlinked, `SELECT COUNT(*) FROM symbol_dependencies WHERE caller_symbol_id IN (SELECT id FROM symbols WHERE path = ?)` returns 0 (five-step cascade verified)
   3. After editing a TS/JS file and re-scanning it, `symbol_dependencies` rows for that file reflect the current state — no stale edges from the prior scan
   4. Self-scan wall time remains below 20% above `v1.7-baseline.json`; call-site resolution uses a single batch DB query per file (not one query per call expression)
-**Plans**: TBD (suggested: 2 plans — 37-01: `extractRicherEdges()` call-expression pass + `setEdgesAndSymbols()` extension; 37-02: `deleteFile()` five-step cascade + `watcher-symbol-lifecycle.test.ts` regression + bulk backfill)
+**Plans:** 2 plans
 
 Plans:
-- [ ] 37-01: Extend `extractRicherEdges()` to return `callSiteEdges: CallSiteEdge[]`; resolution algorithm (same-file `localSymbolIndex` at confidence 1.0, imported via `importedSymbolIndex` batch query at confidence 0.8, silent discard for unresolvable); extend `setEdgesAndSymbols()` to accept optional `callSiteEdges?` and clear+re-insert `symbol_dependencies` in the same `sqlite.transaction()`
-- [ ] 37-02: Extend `deleteFile()` to five-step transaction (materialize symbol IDs → DELETE `symbol_dependencies` → DELETE `file_dependencies` → DELETE `symbols` → DELETE `files`); regression test in `watcher-symbol-lifecycle.test.ts` asserting `symbol_dependencies` empty after unlink; `src/migrate/bulk-call-site-extract.ts` flag-gated on `call_site_edges_bulk_extracted` (checks `multilang_symbols_bulk_extracted` gate first)
+- [ ] 37-01-PLAN.md — `CallSiteCandidate` + `CallSiteEdge` interfaces in `src/change-detector/types.ts`; extend `extractRicherEdges()` with `callerStack` push/pop and `callSiteCandidates` emission (no new `parser.parse()`); extend `extractTsJsFileParse()` with `localSymbolIndex` + `importedSymbolIndex` resolution (conf 1.0 local / 0.8 imported / silent discard; Pitfall 10 ambiguity defense; Pitfall 11 barrel discard; single batch DB query chunked at 500); extend `setEdgesAndSymbols()` with optional `callSiteEdges?` — caller-side DELETE + per-edge INSERT inside existing `sqlite.transaction()` (FLAG-02 resolution); colocated test files `ast-parser.call-sites.test.ts`, `language-config.call-sites.test.ts`, `repository.call-sites.test.ts`
+- [ ] 37-02-PLAN.md — Extend `deleteFile()` to five-step cascade (materialize symbol IDs → both-sides DELETE `symbol_dependencies` → DELETE `file_dependencies` → DELETE `symbols` → DELETE `files` — ordering load-bearing, D-21); new `src/file-watcher.watcher-symbol-lifecycle.test.ts` regression (unlink cascade + callee-side cross-file cleanup + change caller-side clear); `src/migrate/bulk-call-site-extract.ts` gated on `call_site_edges_bulk_extracted`, three-key precondition check (`symbols_py_bulk_extracted` AND `symbols_go_bulk_extracted` AND `symbols_rb_bulk_extracted` — no unified gate exists in Phase 36); coordinator startup wiring after `runMultilangSymbolsBulkExtractionIfNeeded`; `37-VERIFICATION.md` phase exit gate citing test + describe + test-name per CSE-02..06 + perf budget line
 
 **Cross-cutting notes:**
 - The call-expression pass walks the already-parsed in-memory AST — no second `parser.parse()` call. This resolves Pitfall 14 for this phase.
@@ -168,7 +168,7 @@ Plans:
 - Resolution uses import specifier + symbol name (not name alone) to prevent over-matching on same-name symbols across files (Pitfall 10).
 - Barrel files are discarded silently — no re-export chain following (Pitfall 11).
 - `symbols.id` FK instability is resolved by atomic transaction-scoped ID replacement (Pitfall 7). Do not use natural key as FK substitute.
-- Bulk backfill (`CSE-06`) enforces phase ordering at boot: aborts if `multilang_symbols_bulk_extracted` is not set.
+- Bulk backfill (`CSE-06`) enforces phase ordering at boot: aborts if ANY of the three Phase 36 per-language gates (`symbols_py_bulk_extracted`, `symbols_go_bulk_extracted`, `symbols_rb_bulk_extracted`) is unset. No unified `multilang_symbols_bulk_extracted` key exists — Phase 37 must check all three individually (verified in 37-RESEARCH.md §Item 7).
 
 ### Phase 38: MCP Surface
 **Goal**: Register `find_callers` and `find_callees` MCP tools via `registerTool()`, backed by repository helpers that JOIN `symbol_dependencies`, and ship InMemoryTransport integration tests that lock the response contract.

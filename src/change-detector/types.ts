@@ -27,6 +27,34 @@ export interface ExportSnapshot {
 }
 
 /**
+ * Phase 37 CSE-02 — pre-resolution record emitted by extractRicherEdges()
+ * when a call_expression inside a tracked top-level caller is encountered.
+ * Resolved into CallSiteEdge by language-config.extractTsJsFileParse().
+ */
+export interface CallSiteCandidate {
+  callerName:       string;   // enclosing function/class/const name (top-level only)
+  callerStartLine:  number;   // joining key back to symbol row after upsert
+  calleeName:       string;   // raw identifier at the call site
+  calleeSpecifier:  string | null;  // import specifier if imported; null = same-file candidate
+  callLine:         number;   // 1-indexed source line of the call expression
+}
+
+/**
+ * Phase 37 CSE-03/04 — resolved call-site edge consumed by
+ * setEdgesAndSymbols(). caller_symbol_id / callee_symbol_id are
+ * resolved inside the same sqlite.transaction() after upsertSymbols
+ * runs (Pitfall 7 / FLAG-02 resolution).
+ */
+export interface CallSiteEdge {
+  callerName:       string;
+  callerStartLine:  number;
+  calleePath:       string;   // sourcePath for local; import target's absolute path for imported
+  calleeName:       string;
+  callLine:         number;
+  confidence:       number;   // 1.0 local, 0.8 imported
+}
+
+/**
  * The result of comparing two ExportSnapshots (or classifying a first-parse).
  * The affectsDependents boolean is the critical field for Phase 4's CascadeEngine.
  */

@@ -23,6 +23,7 @@ import { log } from './logger.js';
 import { EXTRACTED, INFERRED, CONFIDENCE_SOURCE_EXTRACTED, CONFIDENCE_SOURCE_INFERRED } from './confidence.js';
 import type { ConfidenceSource } from './confidence.js';
 import { extractRicherEdges } from './change-detector/ast-parser.js';
+import type { CallSiteEdge } from './change-detector/types.js';
 
 const _require = createRequire(import.meta.url);
 
@@ -669,6 +670,7 @@ export async function extractTsJsFileParse(
   edges: EdgeResult[];
   symbols: import('./db/symbol-types.js').Symbol[];
   importMeta: import('./change-detector/ast-parser.js').ImportMeta[];
+  callSiteEdges: CallSiteEdge[];   // Phase 37 CSE-03 — resolved call-site edges
 } | null> {
   const richer = extractRicherEdges(filePath, content);
   if (!richer) return null;
@@ -688,7 +690,114 @@ export async function extractTsJsFileParse(
     if (edge) edges.push({ ...edge, originalSpecifier: sourceSpecifier });
   }
 
-  return { edges, symbols: richer.symbols, importMeta: richer.importMeta };
+  // Phase 37 CSE-03 — call-site resolution pass.
+  // Builds localSymbolIndex (from this file's symbols[] — D-10)
+  // and importedSymbolIndex (from a single batch DB query — D-11, D-32).
+
+  // 3a. Local index — first-match-wins on duplicate names (D-10).
+  const localSymbolIndex = new Map<string, import('./db/symbol-types.js').Symbol>();
+  for (const sym of richer.symbols) {
+    if (!localSymbolIndex.has(sym.name)) localSymbolIndex.set(sym.name, sym);
+  }
+
+  // 3b. Reuse already-resolved edges to build spec → targetPath map (Item 6 caching).
+  // `edges` already contains resolved absolute target paths for local imports.
+  // Avoids redundant fsPromises.access calls from re-running resolveTsJsImport.
+  const specToTargetPath = new Map<string, string>();
+  for (const edge of edges) {
+    if (edge.originalSpecifier && !edge.isPackage) {
+      specToTargetPath.set(edge.originalSpecifier, edge.target);
+    }
+  }
+
+  // 3c. Barrel-file detector (D-13 / Pitfall 11).
+  const BARREL_RE = /[\\/]index\.(ts|tsx|js|mjs|cjs|jsx)$/;
+
+  // 3d. Collect unique non-barrel target paths from importMeta entries with importedNames.
+  const targetPathsSet = new Set<string>();
+  for (const meta of richer.importMeta) {
+    const t = specToTargetPath.get(meta.specifier);
+    if (!t) continue;                 // package or unresolved — skip
+    if (BARREL_RE.test(t)) continue;  // barrel — silent discard (D-13)
+    targetPathsSet.add(t);
+  }
+  const targetPaths = Array.from(targetPathsSet);
+
+  // 3e. Single batch query — chunked at 500 per getFilesByPaths precedent.
+  type SymbolRow = { id: number; name: string; path: string };
+  const allSymbolRows: SymbolRow[] = [];
+  if (targetPaths.length > 0) {
+    const { getSqlite } = await import('./db/db.js');
+    const sqlite = getSqlite();
+    const CHUNK = 500;
+    for (let i = 0; i < targetPaths.length; i += CHUNK) {
+      const chunk = targetPaths.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = sqlite
+        .prepare(`SELECT id, name, path FROM symbols WHERE path IN (${placeholders})`)
+        .all(...chunk) as SymbolRow[];
+      allSymbolRows.push(...rows);
+    }
+  }
+
+  // 3f. Build importedSymbolIndex with Pitfall 10 ambiguity defense.
+  // Key = imported name. Value = { path }. Ambiguous names are removed.
+  const importedSymbolIndex = new Map<string, { path: string }>();
+  const ambiguousNames = new Set<string>();
+  for (const meta of richer.importMeta) {
+    const targetPath = specToTargetPath.get(meta.specifier);
+    if (!targetPath) continue;
+    if (BARREL_RE.test(targetPath)) continue;  // barrel — skip per D-13
+    for (const importedName of meta.importedNames) {
+      if (importedName === '*' || importedName === 'default') continue;
+      const match = allSymbolRows.find(r => r.path === targetPath && r.name === importedName);
+      if (!match) continue;
+      if (ambiguousNames.has(importedName)) continue;  // already flagged ambiguous
+      if (importedSymbolIndex.has(importedName)) {
+        const prev = importedSymbolIndex.get(importedName)!;
+        if (prev.path !== targetPath) {
+          // Pitfall 10: same name imported from different files — silent discard.
+          importedSymbolIndex.delete(importedName);
+          ambiguousNames.add(importedName);
+          continue;
+        }
+      }
+      importedSymbolIndex.set(importedName, { path: targetPath });
+    }
+  }
+
+  // 3g. Resolve each CallSiteCandidate → CallSiteEdge (D-12 resolution order).
+  const callSiteEdges: CallSiteEdge[] = [];
+  for (const c of richer.callSiteCandidates) {
+    // Step 1: local (confidence 1.0)
+    if (localSymbolIndex.has(c.calleeName)) {
+      callSiteEdges.push({
+        callerName:      c.callerName,
+        callerStartLine: c.callerStartLine,
+        calleePath:      filePath,
+        calleeName:      c.calleeName,
+        callLine:        c.callLine,
+        confidence:      1.0,
+      });
+      continue;
+    }
+    // Step 2: imported unambiguous (confidence 0.8)
+    const imp = importedSymbolIndex.get(c.calleeName);
+    if (imp) {
+      callSiteEdges.push({
+        callerName:      c.callerName,
+        callerStartLine: c.callerStartLine,
+        calleePath:      imp.path,
+        calleeName:      c.calleeName,
+        callLine:        c.callLine,
+        confidence:      0.8,
+      });
+      continue;
+    }
+    // Step 3: unresolvable → silent discard (D-12 step 3).
+  }
+
+  return { edges, symbols: richer.symbols, importMeta: richer.importMeta, callSiteEdges };
 }
 
 // ─── Go extractor ─────────────────────────────────────────────────────────────
