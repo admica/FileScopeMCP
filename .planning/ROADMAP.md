@@ -180,11 +180,11 @@ Plans:
   3. `maxItems` is clamped to `[1, 500]` with a default of 50; responses exceeding the limit include `truncated: true`
   4. Tool descriptions document Ruby `attr_accessor` limitation and reopened-class multi-result behavior
   5. InMemoryTransport integration tests cover both tools, asserting envelope shape and `maxItems` clamping (consistent with v1.5 coverage pattern)
-**Plans**: TBD (suggested: 2 plans — 38-01: repository helpers + tool registration; 38-02: InMemoryTransport integration tests + contract assertions)
+**Plans:** 2 plans
 
 Plans:
-- [ ] 38-01: Repository helpers `getCallers(name, filePath?, limit)` and `getCallees()` in `repository.ts` (JOIN `symbol_dependencies` + `symbols` + `files`; self-loop WHERE filter; callee index on `callee_symbol_id` required); register `find_callers` and `find_callees` via `registerTool()` with `ToolAnnotations` in `mcp-server.ts`
-- [ ] 38-02: InMemoryTransport integration tests for both tools asserting `{items, total, truncated?}` envelope, `maxItems` clamping behavior, and self-loop exclusion
+- [ ] 38-01-PLAN.md — Repository helpers getCallers() + getCallees() in repository.ts + find_callers/find_callees tool registration in mcp-server.ts + unit tests
+- [ ] 38-02-PLAN.md — InMemoryTransport integration tests for both tools + 38-VERIFICATION.md phase exit gate
 
 **Cross-cutting notes:**
 - Tool names use `find_` prefix for consistency with existing `find_symbol` (not `get_` prefix — FLAG resolved in REQUIREMENTS.md).
