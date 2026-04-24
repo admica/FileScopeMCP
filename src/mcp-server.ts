@@ -336,19 +336,21 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
   server.registerTool("find_symbol", {
     title: "Find Symbol",
     description: [
-      "Resolve a symbol name (function/class/interface/type/enum/const) to its defining file + line range in a single call — no need to grep source.",
+      "Resolve a symbol name (function/class/interface/type/enum/const/module/struct) to its defining file + line range in a single call — no need to grep source.",
       "Exact case-sensitive match; trailing `*` switches to prefix match (e.g. `React*` matches `React`, `ReactDOM`, `Reactive`). Any other `*` in the name is treated as a literal character.",
-      "`kind` accepts: \"function\" | \"class\" | \"interface\" | \"type\" | \"enum\" | \"const\". Unknown kind returns an empty result, never an error.",
+      "`kind` accepts: \"function\" | \"class\" | \"interface\" | \"type\" | \"enum\" | \"const\" | \"module\" | \"struct\". Unknown kind returns an empty result, never an error.",
       "`exportedOnly` defaults to `true` — private helpers only appear when you pass `exportedOnly: false`.",
       "`maxItems` defaults to 50, clamped to [1, 500].",
       "Response: `{items: [{path, name, kind, startLine, endLine, isExport}], total, truncated?: true}`. `total` is the pre-truncation count; `truncated` is present only when items were dropped.",
       "Use `find_symbol` when you know a symbol name; use `get_file_summary` when you have a path and want its exports + dependents.",
       "Returns `NOT_INITIALIZED` if the server hasn't been set up. All other outcomes (no match, unknown kind, empty prefix) return `{items: [], total: 0}` — never an error.",
+      "Ruby `attr_accessor` / `attr_reader` / `attr_writer` are not indexed (synthesized at runtime, not in AST).",
+      "Reopened Ruby classes produce multiple symbol rows with the same name — filter by `filePath` if disambiguation is needed.",
       "Example: `find_symbol(\"useState*\")` returns every symbol whose name starts with `useState`."
     ].join(' '),
     inputSchema: {
       name: z.string().min(1).describe("Symbol name; trailing `*` triggers prefix match"),
-      kind: z.string().optional().describe("function | class | interface | type | enum | const (unknown kind returns empty)"),
+      kind: z.string().optional().describe("function | class | interface | type | enum | const | module | struct (unknown kind returns empty)"),
       exportedOnly: z.coerce.boolean().default(true).describe("Default true — pass false to include private helpers"),
       maxItems: z.coerce.number().int().optional().describe("Max items to return, clamped to [1, 500], default 50"),
     },
