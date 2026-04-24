@@ -1,5 +1,5 @@
 // tests/integration/mcp-transport.test.ts
-// MCP transport-layer integration tests: exercises all 13 tools through
+// MCP transport-layer integration tests: exercises all 17 tools through
 // InMemoryTransport using a real ServerCoordinator and real SQLite DB.
 // Decision D-02: tests in tests/integration/.
 // Decision D-08: each tool gets at minimum a smoke test, verifying {ok: true/false} shape.
@@ -29,12 +29,16 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ServerCoordinator } from '../../src/coordinator.js';
 import { registerTools } from '../../src/mcp-server.js';
 import { closeDatabase } from '../../src/db/db.js';
+import { setEdgesAndSymbols } from '../../src/db/repository.js';
+import { extractTsJsFileParse } from '../../src/language-config.js';
 
 let tmpDir: string;
 let server: McpServer;
 let coordinator: ServerCoordinator;
 let client: Client;
 let sampleFilePath: string;
+let helperFilePath: string;
+let greetFilePath: string;
 
 beforeAll(async () => {
   // Create isolated temp directory for this test suite
@@ -45,11 +49,38 @@ beforeAll(async () => {
   sampleFilePath = path.join(tmpDir, 'sample.ts');
   writeFileSync(sampleFilePath, 'export const x = 1;\nexport function hello(): string { return "hello"; }\n');
 
+  // Phase 38 fixture: cross-file call for find_callers / find_callees integration tests.
+  // IMPORTANT: helper.ts must sort BEFORE the caller file alphabetically so the bulk
+  // call-site extractor processes helper.ts first (writing fresh symbol IDs) before the
+  // caller file references them. Caller file is named 'main.ts' (sorts after 'helper.ts').
+  helperFilePath = path.join(tmpDir, 'helper.ts');
+  writeFileSync(helperFilePath, 'export function helper(): string { return "help"; }\n');
+
+  greetFilePath = path.join(tmpDir, 'main.ts');
+  writeFileSync(greetFilePath, [
+    "import { helper } from './helper';",
+    'export function greet(): string { return helper(); }',
+    'export function recurse(): void { recurse(); }',
+  ].join('\n') + '\n');
+
   // Initialize coordinator with temp dir (manages DB lifecycle internally).
   // Per RESEARCH.md anti-pattern: do NOT call coordinator.initServer() —
   // it reads process.argv and auto-inits to CWD. Use init(tmpDir) directly.
   coordinator = new ServerCoordinator();
   await coordinator.init(tmpDir);
+
+  // Phase 38 fixture: populate symbol_dependencies for find_callers/find_callees tests.
+  // The bulk call-site extractor (runCallSiteEdgesBulkExtractionIfNeeded) runs during
+  // coordinator.init() BEFORE buildFileTree scans the disk, so getAllFiles() is empty on
+  // a fresh DB and the extractor produces zero rows. We manually run a post-init pass here,
+  // processing helper.ts first so its symbol IDs are fresh before main.ts references them.
+  for (const fixturePath of [helperFilePath, greetFilePath]) {
+    const content = await fs.readFile(fixturePath, 'utf-8');
+    const parsed = await extractTsJsFileParse(fixturePath, content, tmpDir);
+    if (parsed) {
+      setEdgesAndSymbols(fixturePath, parsed.edges, parsed.symbols, parsed.importMeta, parsed.callSiteEdges);
+    }
+  }
 
   // Create MCP server and register all tools
   server = new McpServer({ name: 'test-server', version: '1.0.0' });
@@ -314,6 +345,106 @@ describe('get_communities', () => {
     if (!parsed.ok) {
       expect(parsed.error).toBeDefined();
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tool 16: find_callers — Phase 38 MCP-01
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('find_callers', () => {
+  it('returns correct envelope shape for a known callee', async () => {
+    const parsed = await callAndParse('find_callers', { name: 'helper' });
+    expect(parsed.ok).toBe(true);
+    expect(Array.isArray(parsed.items)).toBe(true);
+    expect(typeof parsed.total).toBe('number');
+    expect(typeof parsed.unresolvedCount).toBe('number');
+    expect(parsed.unresolvedCount).toBe(0);
+    // At least one caller (greet calls helper)
+    expect(parsed.items.length).toBeGreaterThanOrEqual(1);
+    // Each item has the required shape
+    const item = parsed.items[0];
+    expect(typeof item.path).toBe('string');
+    expect(typeof item.name).toBe('string');
+    expect(typeof item.kind).toBe('string');
+    expect(typeof item.startLine).toBe('number');
+    expect(typeof item.confidence).toBe('number');
+    // D-12: no endLine, no isExport in response
+    expect(item.endLine).toBeUndefined();
+    expect(item.isExport).toBeUndefined();
+  });
+
+  it('clamps maxItems 0 to 1', async () => {
+    const parsed = await callAndParse('find_callers', { name: 'helper', maxItems: 0 });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.items.length).toBeLessThanOrEqual(1);
+  });
+
+  it('clamps maxItems 1000 to 500', async () => {
+    const parsed = await callAndParse('find_callers', { name: 'helper', maxItems: 1000 });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.items.length).toBeLessThanOrEqual(500);
+  });
+
+  it('excludes self-loops (recursive call not in callers)', async () => {
+    const parsed = await callAndParse('find_callers', { name: 'recurse' });
+    expect(parsed.ok).toBe(true);
+    // recurse() calls itself — should NOT appear as its own caller
+    const selfCaller = parsed.items.find((i: any) => i.name === 'recurse');
+    expect(selfCaller).toBeUndefined();
+  });
+
+  it('returns empty result for non-existent symbol', async () => {
+    const parsed = await callAndParse('find_callers', { name: 'no_such_symbol_xyzzy' });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.items).toEqual([]);
+    expect(parsed.total).toBe(0);
+    expect(parsed.unresolvedCount).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tool 17: find_callees — Phase 38 MCP-02
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('find_callees', () => {
+  it('returns correct envelope shape for a known caller', async () => {
+    const parsed = await callAndParse('find_callees', { name: 'greet' });
+    expect(parsed.ok).toBe(true);
+    expect(Array.isArray(parsed.items)).toBe(true);
+    expect(typeof parsed.total).toBe('number');
+    expect(typeof parsed.unresolvedCount).toBe('number');
+    expect(parsed.unresolvedCount).toBe(0);
+    // greet calls helper — should have at least 1 callee
+    expect(parsed.items.length).toBeGreaterThanOrEqual(1);
+    const item = parsed.items[0];
+    expect(typeof item.path).toBe('string');
+    expect(typeof item.name).toBe('string');
+    expect(typeof item.kind).toBe('string');
+    expect(typeof item.startLine).toBe('number');
+    expect(typeof item.confidence).toBe('number');
+    expect(item.endLine).toBeUndefined();
+    expect(item.isExport).toBeUndefined();
+  });
+
+  it('clamps maxItems 0 to 1', async () => {
+    const parsed = await callAndParse('find_callees', { name: 'greet', maxItems: 0 });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.items.length).toBeLessThanOrEqual(1);
+  });
+
+  it('clamps maxItems 1000 to 500', async () => {
+    const parsed = await callAndParse('find_callees', { name: 'greet', maxItems: 1000 });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.items.length).toBeLessThanOrEqual(500);
+  });
+
+  it('returns empty result for non-existent symbol', async () => {
+    const parsed = await callAndParse('find_callees', { name: 'no_such_symbol_xyzzy' });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.items).toEqual([]);
+    expect(parsed.total).toBe(0);
+    expect(parsed.unresolvedCount).toBe(0);
   });
 });
 
