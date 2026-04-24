@@ -24,6 +24,8 @@ import {
   findSymbols,
   getDependentsWithImports,
   getSymbolsForFile,
+  getFilesChangedSince,
+  getFilesByPaths,
 } from '../../src/db/repository.js';
 
 let tmpDir: string;
@@ -533,11 +535,90 @@ describe('get_file_summary response contract — Phase 34 enrichment', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// list_changed_since response contract (Phase 35)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function insertFileWithMtime(p: string, mtime: number | null): void {
+  const sqlite = getSqlite();
+  const name = p.split('/').pop() ?? p;
+  sqlite
+    .prepare('INSERT OR REPLACE INTO files (path, name, is_directory, importance, mtime) VALUES (?, ?, 0, ?, ?)')
+    .run(p, name, 0, mtime);
+}
+
+describe('list_changed_since response contract (Phase 35)', () => {
+  it('returns {items: [], total: 0} with no truncated key on empty result', () => {
+    clear();
+    const rows = getFilesChangedSince(9999999);
+    const sorted = rows.map(r => ({ path: r.path, mtime: r.mtime ?? 0 }));
+    const limit = 50;
+    const total = sorted.length;
+    const items = sorted.slice(0, limit);
+    const truncated = items.length < total;
+    const response: Record<string, unknown> = {
+      items,
+      total,
+      ...(truncated && { truncated: true }),
+    };
+    expect(response.items).toEqual([]);
+    expect(response.total).toBe(0);
+    expect('truncated' in response).toBe(false);
+  });
+
+  it('item shape is {path, mtime} only — no extra keys leak through', () => {
+    clear();
+    insertFileWithMtime('/src/a.ts', 2000);
+    const rows = getFilesChangedSince(1000);
+    const projected = rows.map(r => ({ path: r.path, mtime: r.mtime ?? 0 }));
+    expect(projected).toEqual([{ path: '/src/a.ts', mtime: 2000 }]);
+    expect(Object.keys(projected[0]).sort()).toEqual(['mtime', 'path']);
+  });
+
+  it('includes truncated: true when items.length < total', () => {
+    clear();
+    for (let i = 0; i < 5; i++) {
+      insertFileWithMtime(`/src/f${i}.ts`, 2000 + i);
+    }
+    const rows = getFilesChangedSince(1000);
+    const limit = 2;
+    const sorted = rows.map(r => ({ path: r.path, mtime: r.mtime ?? 0 })).sort((a, b) => b.mtime - a.mtime);
+    const total = sorted.length;
+    const items = sorted.slice(0, limit);
+    const truncated = items.length < total;
+    const response: Record<string, unknown> = {
+      items,
+      total,
+      ...(truncated && { truncated: true }),
+    };
+    expect(response.total).toBe(5);
+    expect(response.truncated).toBe(true);
+    expect((response.items as any[]).length).toBe(2);
+  });
+
+  it('SHA-mode intersection returns only DB-present paths', () => {
+    clear();
+    insertFileWithMtime('/src/present.ts', 1000);
+    const gitOutput = ['/src/present.ts', '/src/deleted.ts'];
+    const rows = getFilesByPaths(gitOutput);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].path).toBe('/src/present.ts');
+  });
+
+  it('null mtime coerces to 0 in response projection (D-15)', () => {
+    clear();
+    insertFileWithMtime('/src/nullm.ts', null);
+    const rows = getFilesByPaths(['/src/nullm.ts']);
+    const projected = rows.map(r => ({ path: r.path, mtime: r.mtime ?? 0 }));
+    expect(projected[0].mtime).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Tool name registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('MCP tool name registry', () => {
-  it('all 14 expected tool names exist in mcp-server.ts source', async () => {
+  it('all 15 expected tool names exist in mcp-server.ts source', async () => {
     const src = await fs.readFile(
       path.join(process.cwd(), 'src/mcp-server.ts'),
       'utf-8'
@@ -558,6 +639,7 @@ describe('MCP tool name registry', () => {
       'get_cycles_for_file',
       'get_communities',
       'find_symbol',
+      'list_changed_since',
     ];
 
     for (const tool of expectedTools) {

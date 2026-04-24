@@ -2,13 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ReadBuffer, deserializeMessage, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import { execFileSync } from 'node:child_process';
+import * as fsSync from 'node:fs';
 import { z } from "zod";
 import * as path from "path";
 import {
   ToolResponse,
   FileTreeConfig,
 } from "./types.js";
-import { normalizePath, excludeAndRemoveFile } from "./file-utils.js";
+import { normalizePath, excludeAndRemoveFile, canonicalizePath } from "./file-utils.js";
 import { getConfig } from './global-state.js';
 import { log, enableDaemonFileLogging } from './logger.js';
 import {
@@ -32,6 +34,8 @@ import {
   findSymbols,
   getDependentsWithImports,
   getSymbolsForFile,
+  getFilesChangedSince,
+  getFilesByPaths,
 } from './db/repository.js';
 import type { SymbolKind } from './db/symbol-types.js';
 import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
@@ -135,7 +139,8 @@ class StdioTransport implements Transport {
   }
 }
 
-type ErrorCode = "NOT_INITIALIZED" | "INVALID_PATH" | "BROKER_DISCONNECTED" | "NOT_FOUND" | "OPERATION_FAILED";
+type ErrorCode = "NOT_INITIALIZED" | "INVALID_PATH" | "BROKER_DISCONNECTED" | "NOT_FOUND" | "OPERATION_FAILED"
+             | "INVALID_SINCE" | "NOT_GIT_REPO";
 
 function mcpError(code: ErrorCode, message: string): ToolResponse {
   return {
@@ -372,6 +377,90 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
         endLine: s.endLine,
         isExport: s.isExport,
       })),
+      total,
+      ...(truncated && { truncated: true }),
+    });
+  });
+
+  server.registerTool("list_changed_since", {
+    title: "List Changed Since",
+    description: [
+      "Re-orient after multi-file edits — returns every tracked file whose mtime (or git history) is newer than a given reference point.",
+      "Two modes, auto-detected: an ISO-8601 timestamp (e.g. `2026-04-23T10:00:00Z`) OR a git commit SHA of 7–40 hex characters (e.g. `860fe61`). Any 7–40 char hex string is treated as a SHA; everything else is parsed as a date.",
+      "SHA mode invokes `git diff --name-only <sha> HEAD`, canonicalizes the paths, and intersects with the DB — returning only files currently tracked. If `git diff` fails for any reason (unknown SHA, corrupt repo, git not installed, etc.) the call returns `INVALID_SINCE` — no SHA is ever assumed valid without git's confirmation.",
+      "No deletion tracking: only files currently in the DB appear. Deleted files are NOT listed.",
+      "Response shape: `{items: [{path, mtime}], total, truncated?: true}`. `mtime` is a ms-epoch number; in SHA mode, files whose DB mtime is NULL coerce to `0`. Default `maxItems` is 50, clamped to `[1, 500]`. Results are sorted `mtime DESC, path ASC`.",
+      "Error codes: `NOT_INITIALIZED` (server not set up), `INVALID_SINCE` (unparseable input or failed git), `NOT_GIT_REPO` (SHA mode without `.git` at project root).",
+      "Empty result is success: `{items: [], total: 0}` — never an error.",
+      "Example (timestamp): `list_changed_since(\"2026-04-23T10:00:00Z\")`. Example (SHA): `list_changed_since(\"860fe61\")`."
+    ].join(' '),
+    inputSchema: {
+      since: z.string().min(1).describe("ISO-8601 timestamp or 7–40 char git SHA"),
+      maxItems: z.coerce.number().int().optional().describe("Max items to return, clamped to [1, 500], default 50"),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  }, async ({ since, maxItems }) => {
+    if (!coordinator.isInitialized()) {
+      return mcpError("NOT_INITIALIZED", "Server not initialized. Call set_base_directory first or restart with --base-dir.");
+    }
+
+    // D-17: clamp maxItems to [1, 500], default 50
+    const limit = Math.max(1, Math.min(500, maxItems ?? 50));
+
+    // D-01: SHA regex dispatch first, then Date.parse
+    const SHA_RE = /^[0-9a-fA-F]{7,40}$/;
+
+    let rows: Array<{ path: string; mtime: number | null }>;
+
+    if (SHA_RE.test(since)) {
+      // SHA mode (D-05 through D-10)
+      const projectRoot = coordinator.getProjectRoot()!;
+      if (!fsSync.existsSync(path.join(projectRoot, '.git'))) {
+        return mcpError("NOT_GIT_REPO", "Current project root has no .git directory. SHA mode requires a git repository.");
+      }
+      let stdout: string;
+      try {
+        stdout = execFileSync('git', ['diff', '--name-only', since, 'HEAD'], {
+          cwd: projectRoot,
+          timeout: 5000,
+          encoding: 'utf-8',
+        });
+      } catch (err) {
+        // D-08: any git failure after the .git gate → INVALID_SINCE. Log, do not leak stderr.
+        log('[list_changed_since] git diff failed: ' + (err instanceof Error ? err.message : String(err)));
+        return mcpError("INVALID_SINCE", "git diff failed for the given SHA. The SHA may be unknown, or git may not be available.");
+      }
+      const repoPaths = stdout.trim().split('\n').filter(Boolean);
+      const absPaths = repoPaths.map(p => canonicalizePath(path.resolve(projectRoot, p)));
+      rows = getFilesByPaths(absPaths);
+    } else {
+      // Timestamp mode (D-11 through D-13)
+      const ms = Date.parse(since);
+      if (isNaN(ms)) {
+        return mcpError("INVALID_SINCE", "Unparseable `since` value. Expect ISO-8601 timestamp (e.g. 2026-04-23T10:00:00Z) or a 7–40 character git SHA.");
+      }
+      rows = getFilesChangedSince(ms);
+    }
+
+    // D-16: sort mtime DESC, path ASC; D-15: null mtime → 0
+    const sorted = rows
+      .map(r => ({ path: r.path, mtime: r.mtime ?? 0 }))
+      .sort((a, b) => {
+        if (b.mtime !== a.mtime) return b.mtime - a.mtime;
+        return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+      });
+
+    const total = sorted.length;
+    const items = sorted.slice(0, limit);
+    const truncated = items.length < total;
+
+    return mcpSuccess({
+      items,
       total,
       ...(truncated && { truncated: true }),
     });
