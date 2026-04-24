@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-24)
 
 Phase: 39
 Plan: Not started
-Status: Ready to plan
+Status: Phase 39 in progress
 Last activity: 2026-04-24
 
 ## Accumulated Context
@@ -75,19 +75,7 @@ None — roadmap is ready.
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-04-24:
-
-| Category | Item | Status |
-|----------|------|--------|
-| quick_task | 1-update-readme-md-and-root-roadmap-md-to- | missing (pre-v1.6 artifact, no completion marker) — to be closed in Phase 39 |
-| quick_task | 260323-kgd-auto-init-mcp-to-cwd-rename-set-project- | missing (commit 50b7016 landed; dir has no SUMMARY) — to be closed in Phase 39 |
-| quick_task | 260324-0yz-comprehensive-documentation-update-readm | missing (commit a96b263 landed; dir has no SUMMARY) — to be closed in Phase 39 |
-| quick_task | 260401-a19-fix-double-change-impact-and-structured-ou | missing (pre-v1.6 artifact, no completion marker) — to be closed in Phase 39 |
-| quick_task | 260401-b7k-fix-cpp-dependency-parsing-and-importance | missing (pre-v1.6 artifact, no completion marker) — to be closed in Phase 39 |
-| quick_task | 260414-otc-make-sure-the-install-setup-scripts-of-t | missing (commit 101d8f0 landed; dir has no SUMMARY) — to be closed in Phase 39 |
-| quick_task | 260416-b8w-fix-nexus-tree-view-repo-store-queries-a | missing (commit 2d1177b landed; dir has no SUMMARY) — to be closed in Phase 39 |
-
-All 7 are historical quick tasks from v1.0-v1.5. All scheduled for formal closure in Phase 39 (DEBT-01).
+All historical quick-task deferred items closed in Phase 39 (2026-04-24). See Phase 39 closure for details.
 
 ### Quick Tasks Completed
 
