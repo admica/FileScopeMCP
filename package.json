@@ -1,7 +1,7 @@
 {
   "name": "FileScopeMCP",
   "version": "1.0.0",
-  "description": "MCP server for file hierarchy and dependency tracking",
+  "description": "MCP server for codebase intelligence — importance ranking, dependency mapping, symbol extraction, call graph analysis, and LLM-powered summaries",
   "main": "dist/mcp-server.js",
   "type": "module",
   "scripts": {

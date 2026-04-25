@@ -9,19 +9,29 @@
 
 FileScopeMCP watches your code, ranks every file by importance, maps all dependencies, and keeps AI-generated summaries fresh in the background. When your LLM asks "what does this file do?" — it gets a real answer without reading the source.
 
-Works with **Claude Code**, **Cursor AI**, or as a standalone daemon. Supports 12 languages out of the box.
+Works with **Claude Code**, **Cursor AI**, or as a standalone daemon. Supports TypeScript, JavaScript, Python, C, C++, Rust, Go, Ruby, Lua, Zig, PHP, C#, and Java.
 
 ## Key Features
 
 **Importance ranking** — every file scored 0-10 based on how many things depend on it, what it exports, and where it lives. Your LLM sees the critical files first.
 
-**Dependency mapping** — bidirectional import tracking across Python, JS/TS, C/C++, Rust, Go, Ruby, Lua, Zig, PHP, C#, Java. Finds circular dependencies too.
+**Dependency mapping** — bidirectional import tracking across all supported languages. AST-level extraction (tree-sitter) for TS/JS, Python, C, C++, Rust, Go, and Ruby; regex-based for Lua, Zig, PHP, C#, and Java. Finds circular dependencies too.
+
+**Symbol intelligence** — extracts functions, classes, interfaces, types, enums, consts, modules, and structs from source via tree-sitter. `find_symbol` resolves names to file + line range. `find_callers` and `find_callees` map the call graph for TS/JS so your AI can answer "who calls this function?" before refactoring.
 
 **Always fresh** — file watcher + semantic change detection means metadata updates automatically. AST-level diffing for TS/JS, LLM-powered analysis for everything else. Only re-processes what actually changed.
 
 **LLM broker** — a background process coordinates all AI work through llama.cpp's llama-server (or any OpenAI-compatible HTTP API). Priority queue ensures interactive queries beat background processing. Runs on a single GPU.
 
 **Nexus dashboard** — a web UI at `localhost:1234` that lets you visually explore your codebase across all your repos. Interactive dependency graphs, file detail panels, live broker activity, and per-repo health monitoring.
+
+## Prerequisites
+
+- **Node.js >= 22** and npm ([download](https://nodejs.org/))
+- **Build tools** for native modules (`better-sqlite3`, `tree-sitter`):
+  - Linux: `sudo apt install build-essential python3`
+  - macOS: `xcode-select --install`
+  - Windows: Visual Studio Build Tools with C++ workload
 
 ## Quick Start
 
@@ -31,16 +41,16 @@ cd FileScopeMCP
 ./build.sh          # installs deps, compiles, registers with Claude Code
 ```
 
-`./build.sh` registers FileScopeMCP globally via `claude mcp add --scope user` (idempotent; re-run with `npm run register-mcp`). If the `claude` CLI is missing, the build still succeeds — see [docs/mcp-clients.md](docs/mcp-clients.md) for manual setup.
+`./build.sh` registers FileScopeMCP globally via `claude mcp add --scope user` (idempotent; re-run with `npm run register-mcp`). If the `claude` CLI is missing, the build still succeeds — see [docs/mcp-clients.md](docs/mcp-clients.md) for Cursor AI and other MCP clients.
 
-That's it. Open a Claude Code session in any project and FileScopeMCP auto-initializes. Try:
+That's it. Open a Claude Code session in any project and FileScopeMCP auto-initializes. The MCP tools appear automatically — your AI can call them directly during conversation:
 
 ```
 find_important_files(limit: 5)
 status()
 ```
 
-**Want AI summaries?** Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. Without it, everything else still works.
+**Want AI summaries?** Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. Without it, everything else still works (file tracking, dependencies, symbols, call graphs — just no LLM-generated summaries).
 
 Add to your project's `.gitignore`:
 ```
@@ -52,21 +62,29 @@ Add to your project's `.gitignore`:
 
 | Tool | What it does |
 |------|-------------|
-| `find_important_files` | Top files by importance score |
-| `get_file_summary` | Everything about a file: summary, concepts, change impact, deps, staleness |
-| `list_files` | Full file tree with importance |
-| `detect_cycles` | Find circular dependency chains |
 | `status` | Broker connection, queue depth, LLM progress, watcher state |
-| `scan_all` | Queue entire codebase for LLM processing |
-| `set_base_directory` | Point at a different project |
-| `set_file_summary` / `set_file_importance` | Manual overrides |
-| `exclude_and_remove` | Drop files/patterns from tracking |
+| `find_important_files` | Top files by importance score with dependency counts |
+| `get_file_summary` | Everything about a file: summary, concepts, change impact, exports, deps, staleness |
+| `list_files` | Full file tree (no args) or flat top-N by importance (with `maxItems`) |
+| `find_symbol` | Resolve a symbol name to file + line range; supports prefix match via trailing `*` |
+| `find_callers` | Find all symbols that call a named symbol (TS/JS call graph) |
+| `find_callees` | Find all symbols that a named symbol calls (TS/JS call graph) |
+| `search` | Search file metadata across symbols, summaries, purpose, and paths |
+| `list_changed_since` | Files changed since a timestamp or git SHA |
+| `get_communities` | Louvain-clustered file groups by import coupling |
+| `detect_cycles` | Find circular dependency chains |
 | `get_cycles_for_file` | Cycles involving a specific file |
+| `scan_all` | Queue files for LLM summarization via the broker |
+| `set_base_directory` | Point at a different project |
+| `set_file_summary` | Manually set or override a file's LLM summary |
+| `set_file_importance` | Manually set a file's importance score (0-10) |
+| `exclude_and_remove` | Drop files/patterns from tracking (destructive) |
 
 ## Nexus Dashboard
 
 ```bash
-npm run nexus       # opens at http://localhost:1234
+npm run build:nexus  # one-time build (API + UI)
+npm run nexus        # starts at http://localhost:1234
 ```
 
 A read-only web dashboard that connects to every FileScopeMCP repo on your machine:
@@ -84,6 +102,8 @@ Auto-discovers repos by scanning for `.filescope/data.db` directories. No config
 Your code changes
     → file watcher picks it up
     → AST diff classifies the change (exports? types? body only?)
+    → symbols extracted (functions, classes, types, etc.)
+    → call-site edges resolved (TS/JS: who calls what)
     → importance scores recalculated
     → staleness cascades to dependents (only if exports/types changed)
     → LLM broker regenerates summaries, concepts, change impact
@@ -100,7 +120,7 @@ Everything lives in `.filescope/data.db` (SQLite, WAL mode) per project. The bro
 | [Configuration](docs/configuration.md) | Per-project config, broker config, ignore patterns |
 | [MCP Clients](docs/mcp-clients.md) | Setup for Claude Code, Cursor AI, daemon mode |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-| [Internals](docs/internals.md) | Dependency detection, importance formula, cascade engine, storage |
+| [Internals](docs/internals.md) | Dependency detection, importance formula, symbol extraction, call-site edges, storage |
 
 ## License
 

@@ -51,6 +51,37 @@ Two complementary strategies:
 - **Startup sweep** — runs once at initialization. Compares every tracked file against the filesystem to detect adds, deletes, and modifications that occurred while the server was offline.
 - **Per-file mtime check** — when you call `get_file_summary`, the system compares current mtime against the last recorded value. If changed, the file is immediately flagged stale and queued for re-analysis.
 
+## Symbol Extraction
+
+Tree-sitter AST parsing extracts top-level symbols (functions, classes, interfaces, types, enums, consts, modules, structs) from source files. Symbols are stored in the `symbols` table with name, kind, start/end line, export status, and owning file path.
+
+Extraction runs per-language:
+
+| Language | Kinds extracted | Export rule |
+|----------|----------------|------------|
+| TypeScript / JavaScript | function, class, interface, type, enum, const | `export` keyword |
+| Python | function, class (top-level only, decorator-aware) | `!name.startsWith('_')` |
+| Go | function, method, struct, interface, type, const | Uppercase first char |
+| Ruby | function, class, module, const | Always exported (no keyword) |
+
+Ruby `attr_accessor` / `attr_reader` / `attr_writer` are not indexed (synthesized at runtime, not in AST). Reopened Ruby classes produce multiple symbol rows with the same name.
+
+## Call-Site Edges (TS/JS)
+
+For TypeScript and JavaScript files, a second AST pass over the already-parsed tree extracts call expressions and resolves them to symbol-level edges in the `symbol_dependencies` table:
+
+1. **Local resolution** — callee name matches a symbol defined in the same file (confidence 1.0)
+2. **Imported resolution** — callee name matches a symbol imported from another file, verified against the DB (confidence 0.8)
+3. **Unresolvable** — silently discarded (no edge created)
+
+Barrel files (`index.ts` etc.) are excluded to prevent over-matching. Ambiguous names (same name imported from multiple files) are discarded. Self-calls (recursion) are filtered from query results.
+
+Call-site edges for Python, Go, and Ruby are not yet implemented.
+
+## Community Detection
+
+Louvain clustering on the local import graph groups tightly-coupled files into communities. Each community is represented by its highest-importance member. Communities are lazily recomputed only when the dependency graph changes (dirty flag tracked in DB).
+
 ## Cycle Detection
 
 1. Loads all local import edges from SQLite in a single batch query
@@ -62,11 +93,17 @@ Two complementary strategies:
 
 All data in `.filescope/data.db` (SQLite, WAL mode):
 
-- `files` — metadata, staleness flags, summary, concepts, change_impact
-- `file_dependencies` — bidirectional relationships
-- `schema_version` — migration versioning
+| Table | Purpose |
+|-------|---------|
+| `files` | Metadata, staleness flags, summary, concepts, change_impact |
+| `file_dependencies` | Directed import edges with edge type, confidence, and weight |
+| `symbols` | Extracted symbols (name, kind, startLine, endLine, isExport) per file |
+| `symbol_dependencies` | Call-site edges between symbols (caller → callee with confidence) |
+| `file_communities` | Louvain community assignments |
+| `kv_state` | Key-value store for bulk migration gates and feature flags |
+| `schema_version` | Migration versioning |
 
-Auto-migration: on first run, any legacy JSON tree files are imported into SQLite automatically.
+Auto-migration: on first run, any legacy JSON tree files are imported into SQLite automatically. Schema migrations run automatically on startup.
 
 ## LLM Broker Architecture
 

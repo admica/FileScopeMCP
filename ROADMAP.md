@@ -24,19 +24,26 @@ Items below have been implemented and are listed here for historical context.
 ### Architecture
 - **Replace polling integrity sweep with mtime-based lazy validation** — One-time startup sweep replaces the 30 s polling loop. Per-file mtime checks on MCP tool access catch changes missed by the watcher. No more periodic full-tree scans.
 - **SQLite storage** — Replaced JSON file persistence with SQLite + WAL mode. drizzle-orm typed schema. Auto-migration from legacy JSON trees.
-- **Test coverage** — 250 tests covering change detection, cascade engine, LLM pipeline, SQLite migration, MCP server integration, repository layer, coordinator lifecycle, cycle detection, streaming scan, and `.filescopeignore`.
+- **Test coverage** — 845+ tests covering change detection, cascade engine, LLM pipeline, SQLite migration, MCP server integration, repository layer, coordinator lifecycle, cycle detection, streaming scan, `.filescopeignore`, symbol extraction, call-site edges, community detection, and InMemoryTransport integration.
 
 ### Features
 - **Summary auto-generation** — Full background LLM pipeline with multi-provider support (Anthropic, Ollama, OpenAI-compatible).
 - **Cycle detection** — Iterative Tarjan's SCC algorithm detects all circular dependency groups. Exposed via `detect_cycles` and `get_cycles_for_file` MCP tools.
-- **Go language support** — `import` statement parsing with `go.mod` module resolution.
-- **Ruby language support** — `require` and `require_relative` parsing with `.rb` extension probing.
+- **Community detection** — Louvain clustering on import graph groups tightly-coupled files. Exposed via `get_communities` MCP tool.
+- **Go language support** — `import` statement parsing with `go.mod` module resolution. Tree-sitter symbol extraction.
+- **Ruby language support** — `require` and `require_relative` parsing with `.rb` probing. Tree-sitter symbol extraction.
+- **Python language support** — Tree-sitter AST for both dependency edges and symbol extraction.
+- **Symbol extraction** — Tree-sitter-based extraction of functions, classes, interfaces, types, enums, consts, modules, and structs for TS/JS, Python, Go, and Ruby. Exposed via `find_symbol` MCP tool.
+- **Call-site edges** — TS/JS call-expression resolution linking caller symbols to callee symbols with confidence scoring. Exposed via `find_callers` and `find_callees` MCP tools.
+- **Changed-since tracking** — `list_changed_since` tool finds files modified after a timestamp or git SHA.
+- **Metadata search** — `search` tool queries across symbols, purpose, summaries, and paths with ranked results.
 - **Streaming directory scan** — `scanDirectory` converted to async generator using `fs.promises.opendir`. Eliminates full-tree memory buildup.
 - **`.filescopeignore` support** — Gitignore-syntax exclusion file loaded at startup, applied alongside `config.json` exclude patterns.
 - **Exclusion pattern persistence** — `exclude_and_remove` saves patterns to `config.json` (replaced legacy `FileScopeMCP-excludes.json`).
 - **Daemon mode** — Standalone `--daemon` operation with PID guard, graceful shutdown, and file-only logging.
 - **Coordinator config reload** — `init()` reloads `config.json` from disk each time, so runtime edits take effect without server restart.
 - **Ghost record purge** — `purgeRecordsOutsideRoot()` cleans database records from wrong project paths.
+- **Nexus dashboard** — Web UI at `localhost:1234` for visual codebase exploration across repos. File trees, dependency graphs, live broker activity, per-repo health.
 
 ---
 
@@ -80,22 +87,18 @@ Currently file watching is a global toggle. Per-directory enable/disable would a
 
 ---
 
-#### Richer language support
-Current import parsers are regex-based and miss some patterns:
-- **TypeScript/JavaScript:** dynamic `import()` with variables, barrel re-exports (`export * from`)
-- **Python:** relative imports (`from . import`), `importlib`
-- **Rust:** `mod` declarations resolving to `mod.rs` or same-name files
+#### Call-site edges for Python, Go, Ruby
+TS/JS call-site edge extraction is complete. Extending `find_callers` / `find_callees` to Python, Go, and Ruby requires per-language call-expression AST walkers and resolution logic.
 
 ---
 
 #### Performance: large codebase handling
-- Lazy-load file content in `read_file_content` — don't buffer entire files for large binaries
 - Benchmark and optimize for repos with 10k+ files
 
 ---
 
-### Code Quality
-
-- **Double `fs` import in `file-utils.ts`** — Both `import * as fs from 'fs'` and `import * as fsPromises from 'fs/promises'` are present. Consolidate to a single pattern.
-- **`console.error` routing** — `console.error` is used in `logger.ts` itself (two occurrences) but the rest of the codebase routes through `log()`. Ensure all error logging is consistent.
-- **`createFileTree` dead code** — Exported from `file-utils.ts` but never imported anywhere; remove or internalize.
+#### Richer language support
+Some edge cases remain:
+- **TypeScript/JavaScript:** dynamic `import()` with variable arguments
+- **Python:** `importlib` dynamic imports
+- **Rust:** complex `mod` path resolution in workspaces
