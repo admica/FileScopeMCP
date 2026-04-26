@@ -7,11 +7,11 @@
 const MAX_CONTENT_BYTES = 64 * 1024;
 
 /**
- * System prompt for FileScopeMCP-brain. Defines task-specific output formats
- * for summary / concepts / change_impact jobs. Injected into every generateText
- * call as the `system` parameter.
+ * System prompt for the FileScopeMCP LLM worker. Defines task-specific output
+ * formats for summary / concepts / change_impact jobs. Injected into every
+ * generateText call as the `system` parameter.
  */
-export const SYSTEM_PROMPT = `You are FileScopeMCP-brain, a code analysis engine for a codebase indexing system. Each request contains a TASK header that determines your output format.
+export const SYSTEM_PROMPT = `You are a code analysis engine for a codebase indexing system. Each request contains a TASK header that determines your output format.
 
 TASK: summary
 Given a source file, write a 2-3 sentence plain-text summary. Describe what the file does and its role in the project. Output the summary text and nothing else.

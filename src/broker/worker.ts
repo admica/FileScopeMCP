@@ -20,8 +20,8 @@ import type { PriorityQueue } from './queue.js';
 
 /**
  * Normalize raw LLM output before consumption:
- *  1. Strip <think>...</think> / <thought>...</thought> blocks — Gemma 4 and
- *     Qwen3-class models may emit these even when thinking is nominally off.
+ *  1. Strip <think>...</think> / <thought>...</thought> blocks — Qwen3-class
+ *     models may emit these even when thinking is nominally off.
  *  2. Strip ```json ... ``` fences that small models add despite instructions.
  */
 function normalizeOutput(text: string): string {

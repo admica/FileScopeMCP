@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-FileScopeMCP uses [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` as a local OpenAI-compatible LLM backend. The default model is Gemma 4 26B A4B MoE (Unsloth `unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S`, ~18GB on disk, ~3.8B active params per token via 8 routed + 1 shared expert out of 128). The model alias `FileScopeMCP-brain` is what the broker expects — pass `--alias FileScopeMCP-brain` on the llama-server command line.
+FileScopeMCP uses [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` as a local OpenAI-compatible LLM backend. The default model is Qwen3.6 35B A3B MoE (UD-Q4_K_XL quant, ~22GB on disk, ~3B active params per token). The model alias `llm-model` is what the broker expects — pass `--alias llm-model` on the llama-server command line.
 
 Without a running llama-server, FileScopeMCP still works for file tracking and dependency analysis — you just won't get auto-generated summaries, concepts, or change-impact assessments.
 
@@ -40,11 +40,15 @@ Or run the CUDA Docker image:
 
 ```bash
 docker run --gpus all -p 8880:8880 \
-  -v $HOME/.cache/llama.cpp:/root/.cache/llama.cpp \
+  -v $HOME/models:/models \
   ghcr.io/ggml-org/llama.cpp:server-cuda \
-  -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S \
-  --alias FileScopeMCP-brain -c 32768 -ngl 99 --n-cpu-moe 20 \
-  -b 2048 -ub 2048 -fa on --jinja --host 0.0.0.0 --port 8880
+  -m /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
+  --alias llm-model -c 110000 -n 32768 -ngl 99 --n-cpu-moe 22 \
+  -fa on --no-mmap --mlock -b 2048 -ub 512 \
+  --cache-type-k q8_0 --cache-type-v q8_0 --swa-full \
+  --no-context-shift --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 \
+  --cache-ram 8192 --jinja --reasoning-format deepseek --reasoning-budget 4096 \
+  --host 0.0.0.0 --port 8880
 ```
 
 Run `./setup-llm.sh --launch` to print the exact launch command for the native binary.
@@ -59,7 +63,7 @@ Metal is the default backend — no configuration needed. Launch with the same c
 
 ### First run
 
-On first launch, `llama-server -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S` auto-downloads the ~18GB GGUF into `$LLAMA_CACHE` (or `~/.cache/llama.cpp` if unset). llama-server does not accept HTTP traffic until the model is fully loaded — this can take 5-10 minutes on a fast connection.
+The GGUF file must already exist at the path specified by `-m`. Download it before launching. llama-server does not accept HTTP traffic until the model is fully loaded.
 
 Verify with:
 
@@ -77,24 +81,24 @@ This is the recommended setup for Windows users with a dedicated GPU. WSL2 doesn
 
 ### Step 1: Pick the Windows binary
 
-Download the llama.cpp Windows release from [github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases). Pick the zip that matches your GPU. The tuned values below were validated against **build b8794**; newer builds should work but are untested.
+Download the llama.cpp Windows release from [github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases). Pick the zip that matches your GPU.
 
 | GPU | File | Backend |
 |-----|------|---------|
-| **AMD RDNA2/RDNA3** (RX 6800 XT, RX 7900 XT, etc.) | `llama-b8794-bin-win-vulkan-x64.zip` | Vulkan |
-| **NVIDIA** | `llama-b8794-bin-win-cuda-12.X-x64.zip` | CUDA (no toolkit required for prebuilt) |
-| **Intel Arc** | `llama-b8794-bin-win-vulkan-x64.zip` | Vulkan |
+| **AMD RDNA2/RDNA3** (RX 6800 XT, RX 7900 XT, etc.) | `llama-*-bin-win-vulkan-x64.zip` | Vulkan |
+| **NVIDIA** | `llama-*-bin-win-cuda-12.X-x64.zip` | CUDA (no toolkit required for prebuilt) |
+| **Intel Arc** | `llama-*-bin-win-vulkan-x64.zip` | Vulkan |
 
 **For AMD: use Vulkan, NOT ROCm.** Two reasons:
 
 1. The ROCm backend is broken on Windows 11 since llama.cpp build b8152 (Issue #19943) — models load CPU-only.
-2. Vulkan is 0-50% faster than ROCm on RDNA2 in practice, and the gap widens for MoE models (which includes the default Gemma 4 26B A4B).
+2. Vulkan is 0-50% faster than ROCm on RDNA2 in practice, and the gap widens for MoE models.
 
 No HIP SDK, no Visual Studio, no ROCm SDK needed.
 
 ### Step 2: Extract the zip
 
-Right-click → Extract All → enter `C:\llama.cpp`. The zip may or may not create a nested subfolder like `C:\llama.cpp\llama-b8794-bin-win-vulkan-x64\`. Find the folder that actually contains `llama-server.exe`:
+Right-click → Extract All → enter `C:\llama.cpp`. The zip may or may not create a nested subfolder. Find the folder that actually contains `llama-server.exe`:
 
 ```powershell
 Get-ChildItem -Recurse -Filter llama-server.exe C:\llama.cpp
@@ -120,39 +124,55 @@ In PowerShell, from the folder that contains `llama-server.exe`:
 ```powershell
 cd C:\llama.cpp  # or the nested subfolder from Step 2
 .\llama-server.exe `
-  -hf unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S `
-  --alias FileScopeMCP-brain `
-  -c 32768 `
+  -m ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf `
+  --alias llm-model `
+  -c 110000 `
+  -n 32768 `
   -ngl 99 `
-  --n-cpu-moe 20 `
+  --n-cpu-moe 22 `
   -fa on `
-  -b 2048 -ub 2048 `
+  --no-mmap `
+  --mlock `
+  -b 2048 -ub 512 `
   --cache-type-k q8_0 --cache-type-v q8_0 `
+  --swa-full `
+  --no-context-shift `
+  --ctx-checkpoints 128 `
+  --checkpoint-every-n-tokens 4096 `
+  --cache-ram 8192 `
   --jinja `
-  --no-warmup `
+  --reasoning-format deepseek `
+  --reasoning-budget 4096 `
+  --chat-template-kwargs '{"preserve_thinking":true}' `
+  --temp 0.6 `
+  --top-p 0.95 `
+  --top-k 20 `
+  --min-p 0.0 `
+  --presence-penalty 0.0 `
+  --repeat-penalty 1.0 `
   --host 0.0.0.0 --port 8880 `
-  --metrics
+  --metrics `
+  -np 1
 ```
 
 Flag breakdown:
 
 - `-ngl 99` — offload all layers to GPU
-- `--n-cpu-moe 20` — keep routed expert FFNs on GPU for the first ~12 layers (tuned for 16GB VRAM). Raise to `99` if you hit OOM; lower for more speed if you have headroom.
+- `--n-cpu-moe 22` — keep routed expert FFNs in system RAM for 22 layers (tuned for 16GB VRAM). Raise to `99` if you hit OOM; lower for more speed if you have headroom.
 - `-fa on` — flash attention
-- `-b 2048 -ub 2048` — logical and physical batch size. Keeps compute buffer small on 16GB cards; raise to 4096 on ≥20GB VRAM for better prompt-eval throughput.
-- `--jinja` — enable the Gemma 4 chat template for `<|think|>` thinking-mode control
-- `--no-warmup` — skip the startup dummy inference. Warmup would force-touch every weight page, defeating `--n-cpu-moe`'s on-demand expert paging. (mmap is on by default — no need to specify `--mmap`.)
-- `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. At 32K context this costs ~3-4GB VRAM. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
-- `-c 32768` — 32K context. Gemma 4 small models support 128K native, so 32K is well inside the trained range. Bump to 65536/131072 if you need it and have VRAM headroom (each doubling adds ~3-4GB KV).
+- `--no-mmap --mlock` — disable memory mapping, lock model in RAM for consistent performance
+- `-b 2048 -ub 512` — logical and physical batch size
+- `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
+- `--swa-full` — full sliding window attention
+- `--no-context-shift --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096` — context management with periodic checkpoints
+- `--cache-ram 8192` — 8GB RAM cache for context checkpoints
+- `--jinja` — enable Jinja chat template
+- `--reasoning-format deepseek --reasoning-budget 4096` — enable reasoning mode with 4K token budget
+- `--chat-template-kwargs '{"preserve_thinking":true}'` — preserve thinking blocks in output
+- `-c 110000` — 110K context window
+- `-n 32768` — max tokens per generation
 
-**Verified config (build b8794, RX 7900 XT 16GB dedicated, ~24GB shared):**
-- VRAM under load: 13.3 / 16.0 GB dedicated (~2.7GB headroom)
-- Prompt eval: 305-420 t/s
-- Token gen: 18-19 t/s
-
-**RAM requirement:** `--n-cpu-moe` streams routed experts from system RAM for every offloaded layer. At `--n-cpu-moe 20`, keep ~12GB of system RAM free beyond what Windows itself uses; at `--n-cpu-moe 99`, keep ~20GB.
-
-**First run:** The `-hf` flag downloads the GGUF (~18GB) into `$env:LLAMA_CACHE` or the default llama.cpp cache dir. Expect 5-10 minutes on a fast connection. llama-server does NOT accept HTTP traffic until the model is fully loaded.
+**RAM requirement:** `--n-cpu-moe` streams routed experts from system RAM. At `--n-cpu-moe 22`, keep ~12GB of system RAM free beyond what Windows itself uses; at `--n-cpu-moe 99`, keep ~20GB. The `--cache-ram 8192` flag reserves an additional 8GB for context checkpoints.
 
 ### Step 5: Configure the broker in WSL
 
@@ -169,7 +189,7 @@ The `wsl-host` placeholder in `broker.windows-host.json` is auto-resolved by the
 curl http://$(ip route show default | awk '{print $3}'):8880/v1/models
 ```
 
-Expected: JSON with `data[].id` containing `FileScopeMCP-brain`.
+Expected: JSON with `data[].id` containing `llm-model`.
 
 ### Step 7: Restart Claude Code
 
@@ -187,7 +207,7 @@ Or call `status()` from an MCP tool in Claude Code.
 
 llama-server runs on a different machine on your network.
 
-**1. On the remote machine:** Launch llama-server with the full flag set from Step 4 above, ensuring `--host 0.0.0.0 --port 8880 --alias FileScopeMCP-brain` are present.
+**1. On the remote machine:** Launch llama-server with the full flag set from Step 4 above, ensuring `--host 0.0.0.0 --port 8880 --alias llm-model` are present.
 
 **2. In WSL / on the FileScopeMCP machine:**
 
@@ -202,7 +222,7 @@ cp ~/FileScopeMCP/broker.remote-lan.json ~/.filescope/broker.json
 {
   "llm": {
     "provider": "openai-compatible",
-    "model": "FileScopeMCP-brain",
+    "model": "llm-model",
     "baseURL": "http://YOUR_SERVER_IP:8880/v1",
     "maxTokensPerCall": 1024
   },

@@ -21,7 +21,7 @@ export const CONFIG_PATH = path.join(FILESCOPE_DIR, 'broker.json');
 
 const BrokerLLMSchema = z.object({
   provider: z.enum(['anthropic', 'openai-compatible']).default('openai-compatible'),
-  model: z.string().default('FileScopeMCP-brain'),
+  model: z.string().default('llm-model'),
   baseURL: z.string().optional(),
   apiKey: z.string().optional(),
   maxTokensPerCall: z.number().int().positive().default(1024),

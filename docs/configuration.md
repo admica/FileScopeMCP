@@ -50,7 +50,7 @@ Copy the matching template to `~/.filescope/broker.json` and edit as needed.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `llm.provider` | `"openai-compatible"` | `"anthropic"` or `"openai-compatible"` |
-| `llm.model` | `"FileScopeMCP-brain"` | Model identifier |
+| `llm.model` | `"llm-model"` | Model identifier (must match `--alias` on llama-server) |
 | `llm.baseURL` | — | API endpoint (required for `openai-compatible`) |
 | `llm.apiKey` | — | API key (optional; uses env vars if omitted) |
 | `llm.maxTokensPerCall` | `1024` | Maximum tokens per LLM call |

@@ -90,7 +90,7 @@ The broker and nexus modules must NOT cross-import.
 
 ### LLM Backend
 
-FileScopeMCP uses a local LLM via llama.cpp's llama-server for background summarization. The broker connects to it over HTTP (OpenAI-compatible `/v1/chat/completions`). Default: port 8880, model alias `FileScopeMCP-brain`.
+FileScopeMCP uses a local LLM via llama.cpp's llama-server for background summarization. The broker connects to it over HTTP (OpenAI-compatible `/v1/chat/completions`). Default: port 8880, model alias `llm-model`.
 
 On WSL2: llama-server runs on Windows (native GPU access), broker bridges via `broker.windows-host.json` which auto-resolves the Windows host IP.
 

@@ -1,7 +1,7 @@
 {
   "llm": {
     "provider": "openai-compatible",
-    "model": "FileScopeMCP-brain",
+    "model": "llm-model",
     "baseURL": "http://wsl-host:8880/v1",
     "maxTokensPerCall": 1024
   },

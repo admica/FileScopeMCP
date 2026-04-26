@@ -2,36 +2,31 @@
 # PATH: ./setup-llm.sh
 # Configures llama.cpp's llama-server as FileScopeMCP's local LLM backend.
 #
-# Default model: Gemma 4 26B A4B MoE (Unsloth UD-Q5_K_S, ~18GB on disk).
+# Default model: Qwen3.6 35B A3B MoE (UD-Q4_K_XL quant, ~22GB on disk).
 # Uses llama.cpp's expert offloading (--n-cpu-moe) to keep attention +
-# shared-expert weights on GPU while routed expert FFNs live in system RAM /
-# mmap'd from the GGUF file on disk. This lets the 26B MoE run on 16GB VRAM,
-# paying the cost only for the ~3.8B active parameters per token (8 routed +
-# 1 shared expert of 128 total). Default --n-cpu-moe 20 is tuned for 16GB
-# VRAM (RX 7900 XT: ~13.3/16.0 GB used, 305-420 t/s prompt eval,
-# 18-19 t/s gen). Raise to 99 if OOM; lower for more speed with VRAM headroom.
+# shared-expert weights on GPU while routed expert FFNs live in system RAM.
+# This lets the 35B MoE run on 16GB VRAM, paying the cost only for the
+# ~3B active parameters per token. Default --n-cpu-moe 22 is tuned for
+# 16GB VRAM. Raise to 99 if OOM; lower for more speed with VRAM headroom.
 #
 # Usage:
 #   ./setup-llm.sh                     # Print setup guide for your platform
 #   ./setup-llm.sh --launch            # Print the exact llama-server launch command
-#   ./setup-llm.sh --model <hf-ref>    # Override model HF reference
+#   ./setup-llm.sh --model <path>      # Override model file path
 #   ./setup-llm.sh --status            # Check current setup state
 #   ./setup-llm.sh --help              # Show usage
-#
-# Known-good alternative model (if Gemma 4 throughput is insufficient):
-#   --model unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:UD-Q4_K_XL
 
 set -e
 
 # --- Configuration ---
-MODEL_HF_REF_DEFAULT="unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S"
-MODEL_ALIAS="FileScopeMCP-brain"    # matches broker.*.json model field
+MODEL_PATH_DEFAULT="$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+MODEL_ALIAS="llm-model"             # matches broker.*.json model field
 LLM_PORT=8880
-CONTEXT_SIZE=32768                   # 32K — fits in ~3-4GB q8_0 KV cache with --n-cpu-moe freeing VRAM
+CONTEXT_SIZE=110000                  # 110K context with SWA + checkpointing
 VRAM_SOFT_MIN_MB=8192                # warn if VRAM < 8GB (not a hard gate)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-MODEL_HF_REF="$MODEL_HF_REF_DEFAULT"
+MODEL_PATH="$MODEL_PATH_DEFAULT"
 VRAM_MB=0
 VRAM_SOURCE=""
 GPU_NAME=""
@@ -65,9 +60,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --model)
             if [[ -z "${2:-}" ]]; then
-                die "--model requires a HuggingFace reference (e.g. unsloth/gemma-4-26B-A4B-it-GGUF:UD-Q5_K_S)"
+                die "--model requires a path to a GGUF file (e.g. ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf)"
             fi
-            MODEL_HF_REF="$2"
+            MODEL_PATH="$2"
             shift 2
             ;;
         --help|-h)
@@ -77,22 +72,18 @@ Usage: ./setup-llm.sh [OPTIONS]
 
 Options:
   --launch          Print the exact llama-server launch command to stdout
-  --model <ref>     Override the HuggingFace GGUF reference
-                    Default: $MODEL_HF_REF_DEFAULT
-                    Alternative: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:UD-Q4_K_XL
+  --model <path>    Override the GGUF model file path
+                    Default: $MODEL_PATH_DEFAULT
   --status          Check llama-server reachability and broker config
   --help, -h        Show this help
 
 Architecture:
-  - Default model is Gemma 4 26B A4B: 26B total params, ~3.8B active per token
-    (8 routed + 1 shared expert out of 128), ideal for 16GB VRAM via expert
-    offloading to CPU RAM.
-  - llama.cpp's -hf flag auto-downloads the GGUF on first run into \$LLAMA_CACHE.
-  - --n-cpu-moe N keeps routed experts of N layers in system RAM (default 20 tuned
-    for 16GB VRAM; raise to 99 on lower-VRAM GPUs); --no-warmup skips the
-    startup dummy inference so cold experts stay paged-out (mmap is on by default)
-    until they're actually routed to.
+  - Default model is Qwen3.6 35B A3B MoE: 35B total params, ~3B active per token.
+  - Uses a local GGUF file via -m (not HuggingFace download).
+  - --n-cpu-moe N keeps routed experts of N layers in system RAM (default 22 tuned
+    for 16GB VRAM; raise to 99 on lower-VRAM GPUs).
   - --alias $MODEL_ALIAS makes the broker config (broker.*.json) work unchanged.
+  - Reasoning mode enabled via --reasoning-format deepseek with 4096 token budget.
 
 On WSL2: this script prints Windows-side setup instructions, since llama-server
 needs native GPU access and the broker already bridges to a Windows host via
@@ -299,17 +290,32 @@ detect_vram() {
 print_launch_command() {
     cat <<EOF
 llama-server \\
-  -hf $MODEL_HF_REF \\
+  -m $MODEL_PATH \\
   --alias $MODEL_ALIAS \\
   -c $CONTEXT_SIZE \\
+  -n 32768 \\
   -ngl 99 \\
-  --n-cpu-moe 20 \\
+  --n-cpu-moe 22 \\
   -fa on \\
-  -no-mmap \\
-  -b 2048 -ub 768 \\
+  --no-mmap \\
+  --mlock \\
+  -b 2048 -ub 512 \\
   --cache-type-k q8_0 --cache-type-v q8_0 \\
+  --swa-full \\
+  --no-context-shift \\
+  --ctx-checkpoints 128 \\
+  --checkpoint-every-n-tokens 4096 \\
+  --cache-ram 8192 \\
   --jinja \\
-  --no-warmup \\
+  --reasoning-format deepseek \\
+  --reasoning-budget 4096 \\
+  --chat-template-kwargs '{"preserve_thinking":true}' \\
+  --temp 0.6 \\
+  --top-p 0.95 \\
+  --top-k 20 \\
+  --min-p 0.0 \\
+  --presence-penalty 0.0 \\
+  --repeat-penalty 1.0 \\
   --host 0.0.0.0 --port $LLM_PORT \\
   --metrics \\
   -np 1
@@ -411,21 +417,38 @@ wsl_guide() {
     echo -e "     ${CYAN}cd C:\\llama.cpp${NC}   ${YELLOW}# or the nested subfolder from step 2${NC}"
     echo ""
     echo -e "     ${CYAN}.\\llama-server.exe \`"
-    echo -e "         -hf $MODEL_HF_REF \`"
+    echo -e "         -m $MODEL_PATH \`"
     echo -e "         --alias $MODEL_ALIAS \`"
     echo -e "         -c $CONTEXT_SIZE \`"
+    echo -e "         -n 32768 \`"
     echo -e "         -ngl 99 \`"
-    echo -e "         --n-cpu-moe 20 \`"
+    echo -e "         --n-cpu-moe 22 \`"
     echo -e "         -fa on \`"
-    echo -e "         -b 2048 -ub 2048 \`"
+    echo -e "         --no-mmap \`"
+    echo -e "         --mlock \`"
+    echo -e "         -b 2048 -ub 512 \`"
     echo -e "         --cache-type-k q8_0 --cache-type-v q8_0 \`"
+    echo -e "         --swa-full \`"
+    echo -e "         --no-context-shift \`"
+    echo -e "         --ctx-checkpoints 128 \`"
+    echo -e "         --checkpoint-every-n-tokens 4096 \`"
+    echo -e "         --cache-ram 8192 \`"
     echo -e "         --jinja \`"
-    echo -e "         --no-warmup \`"
+    echo -e "         --reasoning-format deepseek \`"
+    echo -e "         --reasoning-budget 4096 \`"
+    echo -e "         --chat-template-kwargs '{\"preserve_thinking\":true}' \`"
+    echo -e "         --temp 0.6 \`"
+    echo -e "         --top-p 0.95 \`"
+    echo -e "         --top-k 20 \`"
+    echo -e "         --min-p 0.0 \`"
+    echo -e "         --presence-penalty 0.0 \`"
+    echo -e "         --repeat-penalty 1.0 \`"
     echo -e "         --host 0.0.0.0 --port $LLM_PORT \`"
-    echo -e "         --metrics${NC}"
+    echo -e "         --metrics \`"
+    echo -e "         -np 1${NC}"
     echo ""
-    echo -e "     First run downloads the GGUF (~18GB) into ${CYAN}\$env:LLAMA_CACHE${NC}"
-    echo -e "     or the default llama.cpp cache dir. Subsequent runs start instantly."
+    echo -e "     The GGUF file must already exist at the path specified by ${CYAN}-m${NC}."
+    echo -e "     Download it first if you haven't already."
     echo ""
     echo -e "     If PowerShell reports ${RED}'llama-server.exe is not recognized'${NC},"
     echo -e "     you are not in the right folder. Re-run step 2's Get-ChildItem"
@@ -496,11 +519,15 @@ linux_guide() {
     echo ""
     echo -e "  ${CYAN}Option B: Docker (CUDA)${NC}"
     echo -e "    ${CYAN}docker run --gpus all -p ${LLM_PORT}:${LLM_PORT} \\${NC}"
-    echo -e "    ${CYAN}  -v \$HOME/.cache/llama.cpp:/root/.cache/llama.cpp \\${NC}"
+    echo -e "    ${CYAN}  -v \$HOME/models:/models \\${NC}"
     echo -e "    ${CYAN}  ghcr.io/ggml-org/llama.cpp:server-cuda \\${NC}"
-    echo -e "    ${CYAN}  -hf $MODEL_HF_REF \\${NC}"
-    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 20 \\${NC}"
-    echo -e "    ${CYAN}  -b 2048 -ub 2048 -fa on --jinja --host 0.0.0.0 --port $LLM_PORT${NC}"
+    echo -e "    ${CYAN}  -m /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \\${NC}"
+    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 22 \\${NC}"
+    echo -e "    ${CYAN}  -fa on --no-mmap --mlock -b 2048 -ub 512 \\${NC}"
+    echo -e "    ${CYAN}  --cache-type-k q8_0 --cache-type-v q8_0 --swa-full \\${NC}"
+    echo -e "    ${CYAN}  --no-context-shift --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 \\${NC}"
+    echo -e "    ${CYAN}  --cache-ram 8192 --jinja --reasoning-format deepseek --reasoning-budget 4096 \\${NC}"
+    echo -e "    ${CYAN}  --host 0.0.0.0 --port $LLM_PORT${NC}"
     echo ""
     echo -e "  ${GREEN}Launch llama-server (same command for both options):${NC}"
     echo ""
@@ -528,13 +555,15 @@ linux_guide() {
     User=$USER
     Environment="CUDA_VISIBLE_DEVICES=0"
     ExecStart=/path/to/llama-server \\
-      -hf $MODEL_HF_REF \\
+      -m $MODEL_PATH \\
       --alias $MODEL_ALIAS \\
-      -c $CONTEXT_SIZE -ngl 99 --n-cpu-moe 20 -fa on \\
-      -b 2048 -ub 2048 \\
+      -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 22 -fa on \\
+      --no-mmap --mlock -b 2048 -ub 512 \\
       --cache-type-k q8_0 --cache-type-v q8_0 \\
-      --jinja --no-warmup \\
-      --host 0.0.0.0 --port $LLM_PORT --metrics
+      --swa-full --no-context-shift \\
+      --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 --cache-ram 8192 \\
+      --jinja --reasoning-format deepseek --reasoning-budget 4096 \\
+      --host 0.0.0.0 --port $LLM_PORT --metrics -np 1
     Restart=on-failure
     RestartSec=5s
 
@@ -666,7 +695,7 @@ show_status() {
 
     echo ""
     info "Model (for --alias): $MODEL_ALIAS"
-    info "HF reference:        $MODEL_HF_REF"
+    info "Model path:          $MODEL_PATH"
     echo ""
 }
 
