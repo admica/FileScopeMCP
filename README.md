@@ -9,7 +9,7 @@
 
 FileScopeMCP watches your code, ranks every file by importance, maps all dependencies, and keeps AI-generated summaries fresh in the background. When your LLM asks "what does this file do?" — it gets a real answer without reading the source.
 
-Works with **Claude Code**, **Cursor AI**, or as a standalone daemon. Supports TypeScript, JavaScript, Python, C, C++, Rust, Go, Ruby, Lua, Zig, PHP, C#, and Java.
+Works with **Claude Code**, **Hermes Agent**, **Codex**, **OpenClaw**, **Cursor AI**, or as a standalone daemon. Supports TypeScript, JavaScript, Python, C, C++, Rust, Go, Ruby, Lua, Zig, PHP, C#, and Java.
 
 ## Key Features
 
@@ -41,16 +41,33 @@ cd FileScopeMCP
 ./build.sh          # installs deps, compiles, registers with Claude Code
 ```
 
-`./build.sh` registers FileScopeMCP globally via `claude mcp add --scope user` (idempotent; re-run with `npm run register-mcp`). If the `claude` CLI is missing, the build still succeeds — see [docs/mcp-clients.md](docs/mcp-clients.md) for Cursor AI and other MCP clients.
+`./build.sh` registers FileScopeMCP globally via `claude mcp add --scope user` (idempotent; re-run with `npm run register-mcp`). If the `claude` CLI is missing, the build still succeeds — see [docs/mcp-clients.md](docs/mcp-clients.md) for other MCP clients.
 
-That's it. Open a Claude Code session in any project and FileScopeMCP auto-initializes. The MCP tools appear automatically — your AI can call them directly during conversation:
+Open a Claude Code session in any project and FileScopeMCP auto-initializes. The MCP tools appear automatically — your AI can call them directly during conversation:
 
 ```
 find_important_files(limit: 5)
 status()
 ```
 
-**Want AI summaries?** Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. Without it, everything else still works (file tracking, dependencies, symbols, call graphs — just no LLM-generated summaries).
+### Agent Runtimes (Hermes, Codex, OpenClaw)
+
+Agent runtimes discover FileScopeMCP via the repo's `AGENTS.md`, which includes MCP registration config, broker/LLM setup, and a pointer to the portable skill file at `skills/filescope-mcp/SKILL.md`.
+
+**Hermes** — add to `~/.hermes/config.yaml`:
+```yaml
+mcp_servers:
+  filescope:
+    command: "node"
+    args: ["/path/to/FileScopeMCP/dist/mcp-server.js"]
+    timeout: 120
+```
+
+**Already have a local LLM running?** Point the broker at it — edit `~/.filescope/broker.json` and set `baseURL` to your LLM's endpoint. See `AGENTS.md` for details.
+
+### LLM Summaries (Optional)
+
+Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. Without it, everything else still works (file tracking, dependencies, symbols, call graphs — just no LLM-generated summaries). If your agent runtime already has a local LLM, configure the broker to reuse it instead.
 
 Add to your project's `.gitignore`:
 ```
@@ -116,6 +133,8 @@ Everything lives in `.filescope/data.db` (SQLite, WAL mode) per project. The bro
 
 | Doc | What's in it |
 |-----|-------------|
+| [AGENTS.md](AGENTS.md) | Cross-agent context file — MCP registration, broker config, architecture (read by Hermes, Codex, OpenClaw) |
+| [FileScopeMCP Skill](skills/filescope-mcp/SKILL.md) | Portable skill file — tool reference, workflows, tips for agents using FileScopeMCP |
 | [LLM Setup](docs/llm-setup.md) | llama.cpp / llama-server installation — local, WSL2+Windows, or remote |
 | [Configuration](docs/configuration.md) | Per-project config, broker config, ignore patterns |
 | [MCP Clients](docs/mcp-clients.md) | Setup for Claude Code, Cursor AI, daemon mode |
