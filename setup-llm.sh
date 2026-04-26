@@ -2,11 +2,11 @@
 # PATH: ./setup-llm.sh
 # Configures llama.cpp's llama-server as FileScopeMCP's local LLM backend.
 #
-# Default model: Qwen3.6 35B A3B MoE (UD-Q4_K_XL quant, ~22GB on disk).
+# Default model: Qwen3.6 35B A3B MoE (UD-IQ4_XS quant).
 # Uses llama.cpp's expert offloading (--n-cpu-moe) to keep attention +
 # shared-expert weights on GPU while routed expert FFNs live in system RAM.
 # This lets the 35B MoE run on 16GB VRAM, paying the cost only for the
-# ~3B active parameters per token. Default --n-cpu-moe 22 is tuned for
+# ~3B active parameters per token. Default --n-cpu-moe 14 is tuned for
 # 16GB VRAM. Raise to 99 if OOM; lower for more speed with VRAM headroom.
 #
 # Usage:
@@ -19,10 +19,10 @@
 set -e
 
 # --- Configuration ---
-MODEL_PATH_DEFAULT="$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+MODEL_PATH_DEFAULT="$HOME/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"
 MODEL_ALIAS="llm-model"             # matches broker.*.json model field
 LLM_PORT=8880
-CONTEXT_SIZE=110000                  # 110K context with SWA + checkpointing
+CONTEXT_SIZE=98304                   # 96K context with SWA + checkpointing
 VRAM_SOFT_MIN_MB=8192                # warn if VRAM < 8GB (not a hard gate)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --model)
             if [[ -z "${2:-}" ]]; then
-                die "--model requires a path to a GGUF file (e.g. ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf)"
+                die "--model requires a path to a GGUF file (e.g. ~/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf)"
             fi
             MODEL_PATH="$2"
             shift 2
@@ -80,7 +80,7 @@ Options:
 Architecture:
   - Default model is Qwen3.6 35B A3B MoE: 35B total params, ~3B active per token.
   - Uses a local GGUF file via -m (not HuggingFace download).
-  - --n-cpu-moe N keeps routed experts of N layers in system RAM (default 22 tuned
+  - --n-cpu-moe N keeps routed experts of N layers in system RAM (default 14 tuned
     for 16GB VRAM; raise to 99 on lower-VRAM GPUs).
   - --alias $MODEL_ALIAS makes the broker config (broker.*.json) work unchanged.
   - Reasoning mode enabled via --reasoning-format deepseek with 4096 token budget.
@@ -295,7 +295,7 @@ llama-server \\
   -c $CONTEXT_SIZE \\
   -n 32768 \\
   -ngl 99 \\
-  --n-cpu-moe 22 \\
+  --n-cpu-moe 14 \\
   -fa on \\
   --no-mmap \\
   --mlock \\
@@ -305,7 +305,7 @@ llama-server \\
   --no-context-shift \\
   --ctx-checkpoints 128 \\
   --checkpoint-every-n-tokens 4096 \\
-  --cache-ram 8192 \\
+  --cache-ram 4096 \\
   --jinja \\
   --reasoning-format deepseek \\
   --reasoning-budget 4096 \\
@@ -422,7 +422,7 @@ wsl_guide() {
     echo -e "         -c $CONTEXT_SIZE \`"
     echo -e "         -n 32768 \`"
     echo -e "         -ngl 99 \`"
-    echo -e "         --n-cpu-moe 22 \`"
+    echo -e "         --n-cpu-moe 14 \`"
     echo -e "         -fa on \`"
     echo -e "         --no-mmap \`"
     echo -e "         --mlock \`"
@@ -432,7 +432,7 @@ wsl_guide() {
     echo -e "         --no-context-shift \`"
     echo -e "         --ctx-checkpoints 128 \`"
     echo -e "         --checkpoint-every-n-tokens 4096 \`"
-    echo -e "         --cache-ram 8192 \`"
+    echo -e "         --cache-ram 4096 \`"
     echo -e "         --jinja \`"
     echo -e "         --reasoning-format deepseek \`"
     echo -e "         --reasoning-budget 4096 \`"
@@ -521,12 +521,12 @@ linux_guide() {
     echo -e "    ${CYAN}docker run --gpus all -p ${LLM_PORT}:${LLM_PORT} \\${NC}"
     echo -e "    ${CYAN}  -v \$HOME/models:/models \\${NC}"
     echo -e "    ${CYAN}  ghcr.io/ggml-org/llama.cpp:server-cuda \\${NC}"
-    echo -e "    ${CYAN}  -m /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \\${NC}"
-    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 22 \\${NC}"
+    echo -e "    ${CYAN}  -m /models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf \\${NC}"
+    echo -e "    ${CYAN}  --alias $MODEL_ALIAS -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 14 \\${NC}"
     echo -e "    ${CYAN}  -fa on --no-mmap --mlock -b 2048 -ub 512 \\${NC}"
     echo -e "    ${CYAN}  --cache-type-k q8_0 --cache-type-v q8_0 --swa-full \\${NC}"
     echo -e "    ${CYAN}  --no-context-shift --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 \\${NC}"
-    echo -e "    ${CYAN}  --cache-ram 8192 --jinja --reasoning-format deepseek --reasoning-budget 4096 \\${NC}"
+    echo -e "    ${CYAN}  --cache-ram 4096 --jinja --reasoning-format deepseek --reasoning-budget 4096 \\${NC}"
     echo -e "    ${CYAN}  --host 0.0.0.0 --port $LLM_PORT${NC}"
     echo ""
     echo -e "  ${GREEN}Launch llama-server (same command for both options):${NC}"
@@ -557,11 +557,11 @@ linux_guide() {
     ExecStart=/path/to/llama-server \\
       -m $MODEL_PATH \\
       --alias $MODEL_ALIAS \\
-      -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 22 -fa on \\
+      -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 14 -fa on \\
       --no-mmap --mlock -b 2048 -ub 512 \\
       --cache-type-k q8_0 --cache-type-v q8_0 \\
       --swa-full --no-context-shift \\
-      --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 --cache-ram 8192 \\
+      --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 --cache-ram 4096 \\
       --jinja --reasoning-format deepseek --reasoning-budget 4096 \\
       --host 0.0.0.0 --port $LLM_PORT --metrics -np 1
     Restart=on-failure

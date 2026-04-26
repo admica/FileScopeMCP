@@ -2,7 +2,7 @@
 
 [Back to README](../README.md)
 
-FileScopeMCP uses [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` as a local OpenAI-compatible LLM backend. The default model is Qwen3.6 35B A3B MoE (UD-Q4_K_XL quant, ~22GB on disk, ~3B active params per token). The model alias `llm-model` is what the broker expects — pass `--alias llm-model` on the llama-server command line.
+FileScopeMCP uses [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` as a local OpenAI-compatible LLM backend. The default model is Qwen3.6 35B A3B MoE (UD-IQ4_XS quant, ~3B active params per token). The model alias `llm-model` is what the broker expects — pass `--alias llm-model` on the llama-server command line.
 
 Without a running llama-server, FileScopeMCP still works for file tracking and dependency analysis — you just won't get auto-generated summaries, concepts, or change-impact assessments.
 
@@ -42,12 +42,12 @@ Or run the CUDA Docker image:
 docker run --gpus all -p 8880:8880 \
   -v $HOME/models:/models \
   ghcr.io/ggml-org/llama.cpp:server-cuda \
-  -m /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
-  --alias llm-model -c 110000 -n 32768 -ngl 99 --n-cpu-moe 22 \
+  -m /models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf \
+  --alias llm-model -c 98304 -n 32768 -ngl 99 --n-cpu-moe 14 \
   -fa on --no-mmap --mlock -b 2048 -ub 512 \
   --cache-type-k q8_0 --cache-type-v q8_0 --swa-full \
   --no-context-shift --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 \
-  --cache-ram 8192 --jinja --reasoning-format deepseek --reasoning-budget 4096 \
+  --cache-ram 4096 --jinja --reasoning-format deepseek --reasoning-budget 4096 \
   --host 0.0.0.0 --port 8880
 ```
 
@@ -124,12 +124,12 @@ In PowerShell, from the folder that contains `llama-server.exe`:
 ```powershell
 cd C:\llama.cpp  # or the nested subfolder from Step 2
 .\llama-server.exe `
-  -m ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf `
+  -m ~/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf `
   --alias llm-model `
-  -c 110000 `
+  -c 98304 `
   -n 32768 `
   -ngl 99 `
-  --n-cpu-moe 22 `
+  --n-cpu-moe 14 `
   -fa on `
   --no-mmap `
   --mlock `
@@ -139,7 +139,7 @@ cd C:\llama.cpp  # or the nested subfolder from Step 2
   --no-context-shift `
   --ctx-checkpoints 128 `
   --checkpoint-every-n-tokens 4096 `
-  --cache-ram 8192 `
+  --cache-ram 4096 `
   --jinja `
   --reasoning-format deepseek `
   --reasoning-budget 4096 `
@@ -158,21 +158,21 @@ cd C:\llama.cpp  # or the nested subfolder from Step 2
 Flag breakdown:
 
 - `-ngl 99` — offload all layers to GPU
-- `--n-cpu-moe 22` — keep routed expert FFNs in system RAM for 22 layers (tuned for 16GB VRAM). Raise to `99` if you hit OOM; lower for more speed if you have headroom.
+- `--n-cpu-moe 14` — keep routed expert FFNs in system RAM for 14 layers (tuned for 16GB VRAM). Raise to `99` if you hit OOM; lower for more speed if you have headroom.
 - `-fa on` — flash attention
 - `--no-mmap --mlock` — disable memory mapping, lock model in RAM for consistent performance
 - `-b 2048 -ub 512` — logical and physical batch size
 - `--cache-type-k q8_0 --cache-type-v q8_0` — KV cache in int8. **Do NOT use `q4_0` on gfx1030** — known segfault (Issue #15107).
 - `--swa-full` — full sliding window attention
 - `--no-context-shift --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096` — context management with periodic checkpoints
-- `--cache-ram 8192` — 8GB RAM cache for context checkpoints
+- `--cache-ram 4096` — 4GB RAM cache for context checkpoints
 - `--jinja` — enable Jinja chat template
 - `--reasoning-format deepseek --reasoning-budget 4096` — enable reasoning mode with 4K token budget
 - `--chat-template-kwargs '{"preserve_thinking":true}'` — preserve thinking blocks in output
-- `-c 110000` — 110K context window
+- `-c 98304` — 96K context window
 - `-n 32768` — max tokens per generation
 
-**RAM requirement:** `--n-cpu-moe` streams routed experts from system RAM. At `--n-cpu-moe 22`, keep ~12GB of system RAM free beyond what Windows itself uses; at `--n-cpu-moe 99`, keep ~20GB. The `--cache-ram 8192` flag reserves an additional 8GB for context checkpoints.
+**RAM requirement:** `--n-cpu-moe` streams routed experts from system RAM. At `--n-cpu-moe 14`, keep ~12GB of system RAM free beyond what Windows itself uses; at `--n-cpu-moe 99`, keep ~20GB. The `--cache-ram 4096` flag reserves an additional 4GB for context checkpoints.
 
 ### Step 5: Configure the broker in WSL
 
