@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
-import { upsertFile, upsertSymbols, setEdgesAndSymbols } from './db/repository.js';
+import { upsertFile, upsertSymbols, setEdgesAndSymbols, setRepoProjectRoot, clearRepoProjectRoot } from './db/repository.js';
 import type { FileNode } from './types.js';
 import { extractTsJsFileParse } from './language-config.js';
 
@@ -44,10 +44,15 @@ beforeEach(async () => {
   projectRoot = path.join(tmpDir, 'project');
   await fsp.mkdir(projectRoot, { recursive: true });
   openDatabase(path.join(tmpDir, 'test.db'));
+  // extractTsJsFileParse's batch symbol-resolution query queries against the
+  // repo's relative-paths storage layout. Bind the repo's translator to the
+  // same projectRoot the extractor uses so storage and query agree.
+  setRepoProjectRoot(projectRoot);
 });
 
 afterEach(() => {
   try { closeDatabase(); } catch { /* ignore */ }
+  clearRepoProjectRoot();
   if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ } }
 });
 

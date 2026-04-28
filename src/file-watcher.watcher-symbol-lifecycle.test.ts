@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
-import { upsertFile, setEdgesAndSymbols, deleteFile } from './db/repository.js';
+import { upsertFile, setEdgesAndSymbols, deleteFile, setRepoProjectRoot, clearRepoProjectRoot } from './db/repository.js';
 import { extractTsJsFileParse } from './language-config.js';
 import type { FileNode } from './types.js';
 
@@ -36,10 +36,14 @@ beforeEach(async () => {
   projectRoot = path.join(tmpDir, 'project');
   await fsp.mkdir(projectRoot, { recursive: true });
   openDatabase(path.join(tmpDir, 'test.db'));
+  // extractTsJsFileParse and the repo's relative-paths layout must agree on
+  // projectRoot for cross-file symbol resolution to find rows.
+  setRepoProjectRoot(projectRoot);
 });
 
 afterEach(() => {
   try { closeDatabase(); } catch { /* ignore */ }
+  clearRepoProjectRoot();
   if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ } }
 });
 
@@ -115,14 +119,16 @@ describe('watcher-symbol-lifecycle — change (caller-side clear) (D-24)', () =>
     parsed = (await extractTsJsFileParse(fx, await fsp.readFile(fx, 'utf-8'), projectRoot))!;
     setEdgesAndSymbols(fx, parsed.edges, parsed.symbols, parsed.importMeta, parsed.callSiteEdges);
 
-    // Only the new edge should remain
+    // Only the new edge should remain. Repo stores paths relative to
+    // projectRoot; the raw query bypasses translation so the WHERE clause
+    // must match the stored relative form.
     const rows = getSqlite()
       .prepare(`SELECT s1.name AS caller, s2.name AS callee
                 FROM symbol_dependencies sd
                 JOIN symbols s1 ON s1.id = sd.caller_symbol_id
                 JOIN symbols s2 ON s2.id = sd.callee_symbol_id
                 WHERE s1.path = ?`)
-      .all(fx) as Array<{ caller: string; callee: string }>;
+      .all(path.relative(projectRoot, fx)) as Array<{ caller: string; callee: string }>;
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual({ caller: 'a', callee: 'z' });
   });

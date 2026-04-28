@@ -65,7 +65,9 @@ afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-// Helper: insert a file row into the DB
+// Helper: insert a file row into the DB.
+// Bypasses the repository layer (raw SQL) so tests can set columns the public
+// upsertFile contract doesn't expose (concepts, change_impact, *_stale_since).
 function insertFile(filePath: string, opts?: {
   summary?: string;
   importance?: number;

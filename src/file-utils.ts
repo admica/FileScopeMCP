@@ -99,8 +99,13 @@ export function tryRelativizePath(absPath: string, projectRoot: string): string 
   // Cosmetic-normalize both inputs first so the comparison and the relative()
   // call see consistent separators. Without this, mixed-separator inputs on
   // Windows could escape the prefix check.
+  //
+  // canonicalizePath('/') returns '' (existing contract — see file-utils.test
+  // line 44). Restore '/' before handing to path.relative, otherwise an empty
+  // base makes path.relative('', '/foo') return '/foo' (absolute), which our
+  // is-absolute check then rejects.
   const normAbs  = canonicalizePath(absPath);
-  const normRoot = canonicalizePath(projectRoot);
+  const normRoot = canonicalizePath(projectRoot) || '/';
 
   // path.relative returns '' for identical inputs (root case), 'sub/file' for
   // descendants, '../sibling' for paths above/outside, and 'C:/foo' (absolute)

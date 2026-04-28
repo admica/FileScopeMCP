@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { openDatabase, closeDatabase } from './db.js';
+import { openDatabase, closeDatabase, getSqlite } from './db.js';
 import {
   getFile,
   upsertFile,
@@ -14,9 +14,10 @@ import {
   getAllFiles,
   getAllLocalImportEdges,
   purgeRecordsMatching,
-  purgeRecordsOutsideRoot,
   upsertSymbols,
   getSymbolsForFile,
+  setRepoProjectRoot,
+  clearRepoProjectRoot,
 } from './repository.js';
 import type { FileNode, PackageDependency } from '../types.js';
 
@@ -46,6 +47,10 @@ beforeEach(() => {
 
 afterEach(() => {
   try { closeDatabase(); } catch { /* ignore */ }
+  // Reset the abs<->rel translator to identity-passthrough so individual
+  // describe blocks that explicitly set a project root don't leak into
+  // tests that expect the default (no translation).
+  clearRepoProjectRoot();
   if (tmpDir) {
     try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
   }
@@ -323,72 +328,63 @@ describe('purgeRecordsMatching', () => {
   });
 });
 
-describe('purgeRecordsOutsideRoot', () => {
-  it('purges records from a sibling directory that shares a prefix with the project root', () => {
-    // Root /home/foo/bar and sibling /home/foo/bar-sibling both begin with
-    // /home/foo/bar. A naive LIKE pattern `projectRoot + '%'` would wrongly
-    // match the sibling and leave its records in the DB.
+describe('relative-paths storage layout', () => {
+  // Cross-host portability is now intrinsic: paths in the DB are stored
+  // relative to projectRoot, so a rsync'd .filescope/ never holds rows from
+  // a foreign root. The previous purgeRecordsOutsideRoot tests covered the
+  // band-aid mechanic that's no longer needed; these replacement tests
+  // cover the new contract directly.
+
+  it('stores file rows with relative paths but exposes absolute via getFile', () => {
+    setRepoProjectRoot('/home/foo/bar');
     upsertFile(makeFile({ path: '/home/foo/bar/src/keep.ts', name: 'keep.ts' }));
-    upsertFile(makeFile({ path: '/home/foo/bar-sibling/intruder.ts', name: 'intruder.ts' }));
-    upsertFile(makeFile({ path: '/home/foo/bar-other/another.ts', name: 'another.ts' }));
 
-    const result = purgeRecordsOutsideRoot('/home/foo/bar');
+    // Public API contract: caller-supplied absolute path round-trips.
+    const node = getFile('/home/foo/bar/src/keep.ts');
+    expect(node).not.toBeNull();
+    expect(node!.path).toBe('/home/foo/bar/src/keep.ts');
 
-    expect(getFile('/home/foo/bar/src/keep.ts')).not.toBeNull();
-    expect(getFile('/home/foo/bar-sibling/intruder.ts')).toBeNull();
-    expect(getFile('/home/foo/bar-other/another.ts')).toBeNull();
-    expect(result.files).toBe(2);
+    // Storage check: raw row holds the relative form, not the absolute.
+    const raw = getSqlite()
+      .prepare('SELECT path FROM files WHERE name = ?')
+      .get('keep.ts') as { path: string } | undefined;
+    expect(raw).toBeDefined();
+    expect(raw!.path).toBe('src/keep.ts');
   });
 
-  it('keeps files exactly under the project root (trailing-separator boundary)', () => {
+  it('survives a host-root change at read time (proves storage portability)', () => {
+    // Simulate writing on host A, then reading after rsync to host B with a
+    // different absolute root. The DB rows stay valid; reads project them
+    // against whatever root is set at query time.
+    setRepoProjectRoot('/home/alice/dev/proj');
+    upsertFile(makeFile({ path: '/home/alice/dev/proj/src/x.ts', name: 'x.ts' }));
+    setDependencies('/home/alice/dev/proj/src/x.ts', ['/home/alice/dev/proj/src/y.ts'], []);
+
+    setRepoProjectRoot('/home/bob/work/proj');
+    const node = getFile('/home/bob/work/proj/src/x.ts');
+    expect(node).not.toBeNull();
+    expect(node!.path).toBe('/home/bob/work/proj/src/x.ts');
+    expect(getDependencies('/home/bob/work/proj/src/x.ts')).toEqual(['/home/bob/work/proj/src/y.ts']);
+  });
+
+  it('drops cross-project edges silently (relInOrNull guard)', () => {
+    setRepoProjectRoot('/home/foo/bar');
     upsertFile(makeFile({ path: '/home/foo/bar/a.ts', name: 'a.ts' }));
-    upsertFile(makeFile({ path: '/home/foo/bar/nested/deep.ts', name: 'deep.ts' }));
-
-    const result = purgeRecordsOutsideRoot('/home/foo/bar');
-
-    expect(getFile('/home/foo/bar/a.ts')).not.toBeNull();
-    expect(getFile('/home/foo/bar/nested/deep.ts')).not.toBeNull();
-    expect(result.files).toBe(0);
-  });
-
-  it('escapes LIKE metacharacters in the project root', () => {
-    // If the project root contains % or _, a raw LIKE treats them as wildcards.
-    // /tmp/a_b should NOT match /tmp/aXb or /tmp/a/b.
-    upsertFile(makeFile({ path: '/tmp/a_b/src/keep.ts', name: 'keep.ts' }));
-    upsertFile(makeFile({ path: '/tmp/aXb/intruder.ts', name: 'intruder.ts' }));
-
-    const result = purgeRecordsOutsideRoot('/tmp/a_b');
-
-    expect(getFile('/tmp/a_b/src/keep.ts')).not.toBeNull();
-    expect(getFile('/tmp/aXb/intruder.ts')).toBeNull();
-    expect(result.files).toBe(1);
-  });
-
-  it('purges matching dependency edges', () => {
-    upsertFile(makeFile({ path: '/home/foo/bar/a.ts', name: 'a.ts' }));
-    upsertFile(makeFile({ path: '/home/foo/bar-sibling/b.ts', name: 'b.ts' }));
-    setDependencies('/home/foo/bar/a.ts', ['/home/foo/bar-sibling/b.ts'], []);
-
-    purgeRecordsOutsideRoot('/home/foo/bar');
-
+    // Dependency target outside the root — should be dropped at write time
+    // rather than stored as '..'-relative (which would break portability).
+    setDependencies('/home/foo/bar/a.ts', ['/home/elsewhere/b.ts'], []);
     expect(getDependencies('/home/foo/bar/a.ts')).toHaveLength(0);
   });
 
-  it('purges symbols whose path lies outside the project root', () => {
-    // Regression: rsync'ing a repo across hosts left stale `symbols` rows
-    // referencing the previous host's absolute paths. purgeRecordsOutsideRoot
-    // originally only cleaned `files` and `file_dependencies`.
-    upsertSymbols('/home/foo/bar/keep.ts', [
-      { name: 'kept', kind: 'function', startLine: 1, endLine: 2, isExport: false },
-    ]);
-    upsertSymbols('/home/other-host/intruder.ts', [
-      { name: 'gone', kind: 'function', startLine: 1, endLine: 2, isExport: false },
-    ]);
-
-    const result = purgeRecordsOutsideRoot('/home/foo/bar');
-
-    expect(getSymbolsForFile('/home/foo/bar/keep.ts')).toHaveLength(1);
-    expect(getSymbolsForFile('/home/other-host/intruder.ts')).toHaveLength(0);
-    expect(result.symbols).toBe(1);
+  it('default (no root set) is identity passthrough — no translation', () => {
+    // Without setRepoProjectRoot, paths flow through the repo unchanged. This
+    // is the test-mode default; production must call setRepoProjectRoot in
+    // coordinator.init() to enable the host-portable relative-paths layout.
+    upsertFile(makeFile({ path: '/some/abs/p.ts', name: 'p.ts' }));
+    expect(getFile('/some/abs/p.ts')).not.toBeNull();
+    const raw = getSqlite()
+      .prepare('SELECT path FROM files WHERE name = ?')
+      .get('p.ts') as { path: string } | undefined;
+    expect(raw!.path).toBe('/some/abs/p.ts');  // stored as-is, no relativization
   });
 });

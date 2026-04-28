@@ -19,7 +19,7 @@ import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
 import { runMultilangSymbolsBulkExtractionIfNeeded } from './migrate/bulk-multilang-symbol-extract.js';
 import { runCallSiteEdgesBulkExtractionIfNeeded } from './migrate/bulk-call-site-extract.js';
-import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsOutsideRoot, purgeRecordsMatching } from './db/repository.js';
+import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsMatching, setRepoProjectRoot } from './db/repository.js';
 import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
 import type { Symbol as SymbolRow } from './db/symbol-types.js';
@@ -277,12 +277,15 @@ export class ServerCoordinator {
     openDatabase(dbPath);
     log(`Opened SQLite database at: ${dbPath}`);
 
-    // Purge any records left from a different project root (e.g. DB copied from
-    // another machine or directory). Must run before migration and tree build.
-    const purged = purgeRecordsOutsideRoot(projectRoot);
-    if (purged.files > 0 || purged.deps > 0 || purged.symbols > 0 || purged.symbolDeps > 0) {
-      log(`Purged ${purged.files} stale file records, ${purged.deps} dependency edges, ${purged.symbols} symbols, ${purged.symbolDeps} symbol-dep edges outside ${projectRoot}`);
-    }
+    // Bind repository's path-translation layer to this project root. All
+    // path-bearing SQL in repository.ts relativizes inputs and absolutifies
+    // outputs against this root — DB stores host-portable relative paths.
+    setRepoProjectRoot(projectRoot);
+
+    // (Cross-host portability is now intrinsic: paths are stored relative to
+    // projectRoot, so a rsync'd .filescope/ no longer holds rows from a foreign
+    // root. The previous purgeRecordsOutsideRoot band-aid was removed when the
+    // relative-paths storage layout shipped.)
 
     // Purge records that now match the current exclude patterns. Handles the case
     // where paths (e.g. .claude/worktrees/) were indexed before being excluded, so

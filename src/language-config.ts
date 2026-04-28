@@ -23,6 +23,7 @@ import { log } from './logger.js';
 import { EXTRACTED, INFERRED, CONFIDENCE_SOURCE_EXTRACTED, CONFIDENCE_SOURCE_INFERRED } from './confidence.js';
 import type { ConfidenceSource } from './confidence.js';
 import { extractRicherEdges } from './change-detector/ast-parser.js';
+import { relativizePath, absolutifyPath } from './file-utils.js';
 import type { CallSiteEdge } from './change-detector/types.js';
 
 const _require = createRequire(import.meta.url);
@@ -724,19 +725,25 @@ export async function extractTsJsFileParse(
   const targetPaths = Array.from(targetPathsSet);
 
   // 3e. Single batch query — chunked at 500 per getFilesByPaths precedent.
+  // The symbols table stores paths relative to projectRoot (host portability);
+  // translate the absolute targetPaths down for the query, then absolutify the
+  // returned rows so the downstream comparison `r.path === targetPath` matches.
   type SymbolRow = { id: number; name: string; path: string };
   const allSymbolRows: SymbolRow[] = [];
   if (targetPaths.length > 0) {
     const { getSqlite } = await import('./db/db.js');
     const sqlite = getSqlite();
     const CHUNK = 500;
-    for (let i = 0; i < targetPaths.length; i += CHUNK) {
-      const chunk = targetPaths.slice(i, i + CHUNK);
+    const relTargetPaths = targetPaths.map(p => relativizePath(p, projectRoot));
+    for (let i = 0; i < relTargetPaths.length; i += CHUNK) {
+      const chunk = relTargetPaths.slice(i, i + CHUNK);
       const placeholders = chunk.map(() => '?').join(', ');
       const rows = sqlite
         .prepare(`SELECT id, name, path FROM symbols WHERE path IN (${placeholders})`)
         .all(...chunk) as SymbolRow[];
-      allSymbolRows.push(...rows);
+      for (const r of rows) {
+        allSymbolRows.push({ ...r, path: absolutifyPath(r.path, projectRoot) });
+      }
     }
   }
 

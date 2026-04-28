@@ -22,36 +22,33 @@ import type { ImportMeta } from '../change-detector/ast-parser.js';
 // Named distinctly from global-state.setProjectRoot() (which resets exclude
 // caches as a side effect) — that module owns its own root for unrelated
 // concerns. This one is purely the abs↔rel translation chokepoint.
-let _projectRoot: string | null = null;
+//
+// Default '' (empty) is identity-passthrough: no translation, paths stored as
+// given. This keeps test fixtures that use absolute paths working without
+// any special setup. Production wiring in coordinator.init() must call
+// setRepoProjectRoot() with the real root for portability to take effect.
+let _projectRoot: string = '';
 
 export function setRepoProjectRoot(root: string): void {
   _projectRoot = root;
 }
 
 /**
- * For tests and shutdown only. Production code should not call this — leaving
- * the root set across DB lifecycles is fine because openDatabase() is paired
- * with setRepoProjectRoot() in coordinator.init().
+ * For tests and shutdown only. Resets to identity-passthrough mode.
  */
 export function clearRepoProjectRoot(): void {
-  _projectRoot = null;
-}
-
-function rootOrThrow(): string {
-  if (_projectRoot === null) {
-    throw new Error('repository: setRepoProjectRoot() must be called before any path-bearing query');
-  }
-  return _projectRoot;
+  _projectRoot = '';
 }
 
 /**
  * Internal: translate an inbound absolute path to its DB-stored relative form.
- * Throws if the path is not under projectRoot — use `relInOrNull` when an
- * out-of-root input is expected and should be skipped silently (extracted
- * cross-project edges).
+ * Empty root → identity passthrough (test mode). Throws if the path is not
+ * under projectRoot — use `relInOrNull` when an out-of-root input is expected
+ * and should be skipped silently (extracted cross-project edges).
  */
 function relIn(absPath: string): string {
-  return relativizePath(absPath, rootOrThrow());
+  if (_projectRoot === '') return absPath;
+  return relativizePath(absPath, _projectRoot);
 }
 
 /**
@@ -59,16 +56,17 @@ function relIn(absPath: string): string {
  * Use at write sites where extractor output may include cross-project refs.
  */
 function relInOrNull(absPath: string): string | null {
-  return tryRelativizePath(absPath, rootOrThrow());
+  if (_projectRoot === '') return absPath;
+  return tryRelativizePath(absPath, _projectRoot);
 }
 
 /**
  * Internal: translate an outbound DB-stored relative path back to absolute.
- * Used when projecting query results back to callers, who all deal in absolute
- * paths (MCP tool boundary contract).
+ * Empty root → identity passthrough.
  */
 function absOut(relPath: string): string {
-  return absolutifyPath(relPath, rootOrThrow());
+  if (_projectRoot === '') return relPath;
+  return absolutifyPath(relPath, _projectRoot);
 }
 
 // ─── Community dirty flag ──────────────────────────────────────────────────────
@@ -97,10 +95,14 @@ type DepRow = typeof file_dependencies.$inferSelect;
  * Convert a DB files row to a FileNode.
  * By default does NOT populate dependencies/dependents/packageDependencies
  * (expensive join queries). Pass `withDeps: true` to populate them.
+ *
+ * Path translation: row.path is the DB-stored relative form; the FileNode
+ * exposed to callers carries the absolute form (MCP client contract).
  */
 function rowToFileNode(row: FileRow, withDeps = false): FileNode {
+  const absPath = absOut(row.path);
   const node: FileNode = {
-    path: row.path,
+    path: absPath,
     name: row.name,
     isDirectory: Boolean(row.is_directory),
     importance: row.importance ?? 0,
@@ -109,9 +111,11 @@ function rowToFileNode(row: FileRow, withDeps = false): FileNode {
   };
 
   if (withDeps) {
-    node.dependencies = getDependencies(row.path);
-    node.dependents = getDependents(row.path);
-    node.packageDependencies = getPackageDependencies(row.path);
+    // Pass the absolute path through — these are public API functions that
+    // accept absolute and re-relativize internally.
+    node.dependencies = getDependencies(absPath);
+    node.dependents = getDependents(absPath);
+    node.packageDependencies = getPackageDependencies(absPath);
   }
 
   return node;
@@ -119,10 +123,11 @@ function rowToFileNode(row: FileRow, withDeps = false): FileNode {
 
 /**
  * Convert a FileNode to a DB files row insert object.
+ * Caller-supplied absolute path is relativized against projectRoot for storage.
  */
 function fileNodeToRow(node: FileNode): typeof files.$inferInsert {
   return {
-    path: node.path,
+    path: relIn(node.path),
     name: node.name,
     is_directory: node.isDirectory,
     importance: node.importance ?? 0,
@@ -138,14 +143,16 @@ function fileNodeToRow(node: FileNode): typeof files.$inferInsert {
 /**
  * Fetch package dependencies for a given file path.
  * Used internally by rowToFileNode (withDeps=true).
+ * Public callers pass an absolute filePath; internal SQL uses relative form.
  */
 function getPackageDependencies(filePath: string): PackageDependency[] {
   const db = getDb();
+  const relSource = relIn(filePath);
   const rows = db
     .select()
     .from(file_dependencies)
     .where(
-      eq(file_dependencies.source_path, filePath)
+      eq(file_dependencies.source_path, relSource)
     )
     .all()
     .filter((r: DepRow) => r.dependency_type === 'package_import');
@@ -154,7 +161,10 @@ function getPackageDependencies(filePath: string): PackageDependency[] {
     const pkg = {
       name: r.package_name ?? '',
       version: r.package_version ?? undefined,
-      path: r.target_path,
+      // Package targets stored relative when in-tree (e.g. node_modules/...);
+      // absOut rehydrates uniformly. Out-of-tree package edges were rejected
+      // at write time and will never appear in this result set.
+      path: absOut(r.target_path),
       scope: undefined as string | undefined,
       isDevDependency: r.is_dev_dependency ?? undefined,
     };
@@ -175,7 +185,7 @@ function getPackageDependencies(filePath: string): PackageDependency[] {
  */
 export function getFile(filePath: string): FileNode | null {
   const db = getDb();
-  const row = db.select().from(files).where(eq(files.path, filePath)).get();
+  const row = db.select().from(files).where(eq(files.path, relIn(filePath))).get();
   if (!row) return null;
   return rowToFileNode(row, true); // withDeps=true for full FileNode compat
 }
@@ -222,6 +232,7 @@ export function upsertFile(node: FileNode): void {
 export function deleteFile(filePath: string): void {
   const sqlite = getSqlite();
   const db = getDb();
+  const relPath = relIn(filePath);
   const tx = sqlite.transaction(() => {
     // Phase 37 CSE-05 — five-step cascade. Ordering is load-bearing:
     // Step 1 MUST materialize IDs BEFORE Step 4 deletes symbols (D-21).
@@ -229,7 +240,7 @@ export function deleteFile(filePath: string): void {
     // Step 1: materialize symbol IDs before the symbols row is deleted.
     const symbolIds = (sqlite
       .prepare('SELECT id FROM symbols WHERE path = ?')
-      .all(filePath) as Array<{ id: number }>)
+      .all(relPath) as Array<{ id: number }>)
       .map(r => r.id);
 
     // Step 2: both-sides DELETE on symbol_dependencies.
@@ -252,17 +263,17 @@ export function deleteFile(filePath: string): void {
     db.delete(file_dependencies)
       .where(
         or(
-          eq(file_dependencies.source_path, filePath),
-          eq(file_dependencies.target_path, filePath)
+          eq(file_dependencies.source_path, relPath),
+          eq(file_dependencies.target_path, relPath)
         )
       )
       .run();
 
     // Step 4: symbols — existing, unchanged.
-    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(relPath);
 
     // Step 5: files — existing, unchanged.
-    db.delete(files).where(eq(files.path, filePath)).run();
+    db.delete(files).where(eq(files.path, relPath)).run();
   });
   tx();
 }
@@ -274,17 +285,22 @@ export function deleteFile(filePath: string): void {
  */
 export function getChildren(dirPath: string): FileNode[] {
   const db = getDb();
-  const prefix = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+  // Translate to relative form for SQL match, then build a prefix that selects
+  // descendants. Special-case the root directory: relIn(projectRoot) === '',
+  // so the prefix is just '%' and remainder == r.path (still relative).
+  const relDir = relIn(dirPath);
+  const prefix = relDir === '' ? '' : (relDir.endsWith('/') ? relDir : `${relDir}/`);
+  const likePattern = prefix === '' ? '%' : `${prefix}%`;
   const rows = db
     .select()
     .from(files)
-    .where(like(files.path, `${prefix}%`))
+    .where(like(files.path, likePattern))
     .orderBy(asc(files.path))
     .all();
 
   return rows
     .filter((r: FileRow) => {
-      const remainder = r.path.slice(prefix.length);
+      const remainder = prefix === '' ? r.path : r.path.slice(prefix.length);
       // Immediate child: no further '/' in the remainder
       return remainder.length > 0 && !remainder.includes('/');
     })
@@ -299,10 +315,10 @@ export function getDependencies(filePath: string): string[] {
   return db
     .select()
     .from(file_dependencies)
-    .where(eq(file_dependencies.source_path, filePath))
+    .where(eq(file_dependencies.source_path, relIn(filePath)))
     .all()
     .filter((r: DepRow) => r.dependency_type === 'local_import')
-    .map((r: DepRow) => r.target_path);
+    .map((r: DepRow) => absOut(r.target_path));
 }
 
 /**
@@ -317,11 +333,12 @@ export function getDependenciesWithEdgeMetadata(filePath: string): Array<{
   confidence: number;
 }> {
   const sqlite = getSqlite();
-  return sqlite
+  const rows = sqlite
     .prepare(
       "SELECT target_path, edge_type, confidence FROM file_dependencies WHERE source_path = ? AND dependency_type = 'local_import'"
     )
-    .all(filePath) as Array<{ target_path: string; edge_type: string; confidence: number }>;
+    .all(relIn(filePath)) as Array<{ target_path: string; edge_type: string; confidence: number }>;
+  return rows.map(r => ({ ...r, target_path: absOut(r.target_path) }));
 }
 
 /**
@@ -334,9 +351,9 @@ export function getDependents(filePath: string): string[] {
   return db
     .select({ source: file_dependencies.source_path })
     .from(file_dependencies)
-    .where(eq(file_dependencies.target_path, filePath))
+    .where(eq(file_dependencies.target_path, relIn(filePath)))
     .all()
-    .map((r: { source: string }) => r.source);
+    .map((r: { source: string }) => absOut(r.source));
 }
 
 /**
@@ -360,7 +377,7 @@ export function getDependentsWithImports(targetPath: string): Array<{
        FROM file_dependencies
        WHERE target_path = ? AND dependency_type = 'local_import'`
     )
-    .all(targetPath) as Array<{
+    .all(relIn(targetPath)) as Array<{
       source_path: string;
       imported_names: string | null;
       import_line: number | null;
@@ -391,7 +408,7 @@ export function getDependentsWithImports(targetPath: string): Array<{
 
   return Array.from(bySource.entries())
     .map(([path, { names, lines }]) => ({
-      path,
+      path: absOut(path),
       importedNames: Array.from(names).sort(),          // alphabetical (stable diffs, CONTEXT Specifics §)
       importLines: lines.slice().sort((a, b) => a - b), // ascending per D-13
     }))
@@ -405,11 +422,12 @@ export function getDependentsWithImports(targetPath: string): Array<{
  */
 export function getAllLocalImportEdges(): Array<{ source_path: string; target_path: string }> {
   const sqlite = getSqlite();
-  return sqlite
+  const rows = sqlite
     .prepare(
       "SELECT source_path, target_path FROM file_dependencies WHERE dependency_type = 'local_import'"
     )
     .all() as Array<{ source_path: string; target_path: string }>;
+  return rows.map(r => ({ source_path: absOut(r.source_path), target_path: absOut(r.target_path) }));
 }
 
 /**
@@ -422,11 +440,12 @@ export function getAllLocalImportEdgesWithWeights(): Array<{
   weight: number;
 }> {
   const sqlite = getSqlite();
-  return sqlite
+  const rows = sqlite
     .prepare(
       "SELECT source_path, target_path, weight FROM file_dependencies WHERE dependency_type = 'local_import'"
     )
     .all() as Array<{ source_path: string; target_path: string; weight: number }>;
+  return rows.map(r => ({ ...r, source_path: absOut(r.source_path), target_path: absOut(r.target_path) }));
 }
 
 /**
@@ -441,18 +460,23 @@ export function setDependencies(
   packageDeps: PackageDependency[]
 ): void {
   const db = getDb();
+  const relSource = relIn(sourcePath);
 
   // Delete all existing dependency rows for this source
   db.delete(file_dependencies)
-    .where(eq(file_dependencies.source_path, sourcePath))
+    .where(eq(file_dependencies.source_path, relSource))
     .run();
 
-  // Insert local imports
+  // Insert local imports — drop edges to cross-project files (extractor output
+  // can include resolved targets outside projectRoot, e.g. ../sibling-pkg).
+  // Equivalent to today's purge-on-init behavior, just enforced at write time.
   for (const targetPath of localDeps) {
+    const relTarget = relInOrNull(targetPath);
+    if (relTarget === null) continue;
     db.insert(file_dependencies)
       .values({
-        source_path: sourcePath,
-        target_path: targetPath,
+        source_path: relSource,
+        target_path: relTarget,
         dependency_type: 'local_import',
         package_name: null,
         package_version: null,
@@ -461,12 +485,14 @@ export function setDependencies(
       .run();
   }
 
-  // Insert package imports with metadata
+  // Insert package imports with metadata — same out-of-root drop policy.
   for (const pkg of packageDeps) {
+    const relPkgTarget = relInOrNull(pkg.path);
+    if (relPkgTarget === null) continue;
     db.insert(file_dependencies)
       .values({
-        source_path: sourcePath,
-        target_path: pkg.path,
+        source_path: relSource,
+        target_path: relPkgTarget,
         dependency_type: 'package_import',
         package_name: pkg.name || null,
         package_version: pkg.version || null,
@@ -495,10 +521,11 @@ export function setEdges(
   importMeta?: ImportMeta[]
 ): void {
   const db = getDb();
+  const relSource = relIn(sourcePath);
 
   // Delete all existing dependency rows for this source
   db.delete(file_dependencies)
-    .where(eq(file_dependencies.source_path, sourcePath))
+    .where(eq(file_dependencies.source_path, relSource))
     .run();
 
   // Group metas by specifier — when two imports share the same specifier (D-08),
@@ -513,6 +540,12 @@ export function setEdges(
   }
 
   for (const edge of edges) {
+    // Drop edges whose target lies outside projectRoot — they would store as
+    // '..'-relative paths, breaking host portability. The metadata consume-
+    // pointer must still advance for the discarded edge so subsequent edges
+    // sharing a specifier get the correct line (D-08 invariant).
+    const relTarget = relInOrNull(edge.target);
+
     let importedNamesJson: string | null = null;
     let importLineVal:    number | null = null;
     const spec = edge.originalSpecifier;
@@ -525,9 +558,11 @@ export function setEdges(
       }
     }
 
+    if (relTarget === null) continue;
+
     db.insert(file_dependencies).values({
-      source_path:       sourcePath,
-      target_path:       edge.target,
+      source_path:       relSource,
+      target_path:       relTarget,
       dependency_type:   edge.isPackage ? 'package_import' : 'local_import',
       package_name:      edge.packageName ?? null,
       package_version:   edge.packageVersion ?? null,
@@ -560,75 +595,33 @@ export function getAllFiles(): FileNode[] {
 // ─── Purge stale records ─────────────────────────────────────────────────────
 
 /**
- * Deletes all file and dependency records whose paths are NOT under the given
- * project root. Called during init() to clean up ghost records left from a
- * previous project root (e.g. different machine or moved directory).
+ * Deletes files, dependency edges, symbols, and symbol_dependencies whose
+ * paths satisfy the provided predicate.
  *
- * Matches rows whose path equals `projectRoot` exactly OR begins with
- * `projectRoot + '/'`. The trailing separator is critical: without it, a root
- * of `/foo/bar` would wrongly keep records under `/foo/bar-sibling/...`. LIKE
- * metacharacters in the root itself are escaped via a custom ESCAPE clause.
- */
-export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; deps: number; symbols: number; symbolDeps: number } {
-  const sqlite = getSqlite();
-  // Escape SQL LIKE metacharacters so roots containing `%`, `_`, or `\` match literally.
-  const escapedRoot = projectRoot.replace(/[\\%_]/g, (c) => '\\' + c);
-  const childPattern = escapedRoot + '/%';
-
-  const depResult = sqlite.prepare(
-    `DELETE FROM file_dependencies
-     WHERE NOT (
-       (source_path = ? OR source_path LIKE ? ESCAPE '\\')
-       AND (target_path = ? OR target_path LIKE ? ESCAPE '\\')
-     )`,
-  ).run(projectRoot, childPattern, projectRoot, childPattern);
-
-  // symbol_dependencies references symbols by id, not path — must purge before
-  // removing the parent symbol rows or we'd leave dangling caller/callee ids.
-  const symDepResult = sqlite.prepare(
-    `DELETE FROM symbol_dependencies
-     WHERE caller_symbol_id IN (
-       SELECT id FROM symbols WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')
-     )
-     OR callee_symbol_id IN (
-       SELECT id FROM symbols WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')
-     )`,
-  ).run(projectRoot, childPattern, projectRoot, childPattern);
-
-  const symResult = sqlite.prepare(
-    `DELETE FROM symbols
-     WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')`,
-  ).run(projectRoot, childPattern);
-
-  const fileResult = sqlite.prepare(
-    `DELETE FROM files
-     WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')`,
-  ).run(projectRoot, childPattern);
-
-  return {
-    files: fileResult.changes,
-    deps: depResult.changes,
-    symbols: symResult.changes,
-    symbolDeps: symDepResult.changes,
-  };
-}
-
-/**
- * Deletes files and dependency edges whose paths satisfy the provided predicate.
- * Used to clean up records whose paths now match an exclude pattern (e.g. when
- * .claude/worktrees/ is added to excludes but the DB still has entries from
- * earlier scans). Caller supplies the predicate so this module stays independent
- * of the file-utils glob machinery (avoiding an import cycle).
+ * Used to clean up records whose paths now match a newly-added exclude pattern
+ * (e.g. when `.claude/worktrees/` is added to excludes but the DB still has
+ * entries from earlier scans). Caller supplies the predicate so this module
+ * stays independent of the file-utils glob machinery (avoiding an import cycle).
+ *
+ * Predicate contract: receives ABSOLUTE paths (matching how isExcluded() and
+ * other glob-based predicates think). Internal SQL operates on the relative
+ * stored form; absOut() rehydrates each row's path before predicate eval, and
+ * the relative form is fed back into the DELETEs.
  */
 export function purgeRecordsMatching(
   shouldPurge: (filePath: string) => boolean,
 ): { files: number; deps: number; symbols: number; symbolDeps: number } {
   const sqlite = getSqlite();
-  const filePaths = sqlite.prepare('SELECT path FROM files').all() as Array<{ path: string }>;
-  const symbolPaths = sqlite.prepare('SELECT DISTINCT path FROM symbols').all() as Array<{ path: string }>;
+  const filePathRows = sqlite.prepare('SELECT path FROM files').all() as Array<{ path: string }>;
+  const symbolPathRows = sqlite.prepare('SELECT DISTINCT path FROM symbols').all() as Array<{ path: string }>;
 
-  const filesToDelete = filePaths.map(r => r.path).filter(shouldPurge);
-  const symbolPathsToDelete = symbolPaths.map(r => r.path).filter(shouldPurge);
+  // Predicate runs against absolute form; collected rel paths feed the DELETEs.
+  const filesToDelete: string[] = filePathRows
+    .filter(r => shouldPurge(absOut(r.path)))
+    .map(r => r.path);
+  const symbolPathsToDelete: string[] = symbolPathRows
+    .filter(r => shouldPurge(absOut(r.path)))
+    .map(r => r.path);
 
   if (filesToDelete.length === 0 && symbolPathsToDelete.length === 0) {
     return { files: 0, deps: 0, symbols: 0, symbolDeps: 0 };
@@ -678,7 +671,7 @@ export function getExportsSnapshot(filePath: string): ExportSnapshot | null {
   const sqlite = getSqlite();
   const row = sqlite
     .prepare('SELECT exports_snapshot FROM files WHERE path = ?')
-    .get(filePath) as { exports_snapshot: string | null } | undefined;
+    .get(relIn(filePath)) as { exports_snapshot: string | null } | undefined;
 
   if (!row || row.exports_snapshot === null || row.exports_snapshot === undefined) {
     return null;
@@ -701,21 +694,24 @@ export function getExportsSnapshot(filePath: string): ExportSnapshot | null {
 export function setExportsSnapshot(filePath: string, snapshot: ExportSnapshot): void {
   const sqlite = getSqlite();
   const json = JSON.stringify(snapshot);
+  const relPath = relIn(filePath);
 
   // Try update first; if no row exists, insert a minimal row with the snapshot.
   // The files table requires path and name to be NOT NULL.
   const updated = sqlite
     .prepare('UPDATE files SET exports_snapshot = ? WHERE path = ?')
-    .run(json, filePath);
+    .run(json, relPath);
 
   if (updated.changes === 0) {
-    // Row doesn't exist — insert with minimal required fields
+    // Row doesn't exist — insert with minimal required fields. Derive `name`
+    // from the original absolute path (filePath), not relPath, to preserve
+    // basename behavior when relPath is the root '' (empty).
     const name = filePath.split('/').pop() ?? filePath;
     sqlite
       .prepare(
         'INSERT INTO files (path, name, is_directory, exports_snapshot) VALUES (?, ?, 0, ?)'
       )
-      .run(filePath, name, json);
+      .run(relPath, name, json);
   }
 }
 
@@ -737,7 +733,7 @@ export function getStaleness(filePath: string): {
     .prepare(
       'SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?'
     )
-    .get(filePath) as {
+    .get(relIn(filePath)) as {
       summary_stale_since: number | null;
       concepts_stale_since: number | null;
       change_impact_stale_since: number | null;
@@ -852,7 +848,7 @@ export function searchFiles(query: string, maxItems: number = 10): {
 
   return {
     results: resultRows.map(r => ({
-      path: r.path,
+      path: absOut(r.path),
       importance: r.importance ?? 0,
       purpose: r.purpose ?? null,
       matchRank: r.match_rank,
@@ -876,7 +872,7 @@ export function markStale(filePaths: string[], timestamp: number): void {
   );
   const tx = sqlite.transaction(() => {
     for (const p of filePaths) {
-      stmt.run(timestamp, timestamp, timestamp, p);
+      stmt.run(timestamp, timestamp, timestamp, relIn(p));
     }
   });
   tx();
@@ -933,7 +929,7 @@ export function writeLlmResult(filePath: string, jobType: string, result: string
   }
   sqlite
     .prepare(`UPDATE files SET ${column} = ? WHERE path = ?`)
-    .run(result, filePath);
+    .run(result, relIn(filePath));
 }
 
 /**
@@ -959,7 +955,7 @@ export function clearStaleness(filePath: string, jobType: string): void {
   }
   sqlite
     .prepare(`UPDATE files SET ${column} = NULL WHERE path = ?`)
-    .run(filePath);
+    .run(relIn(filePath));
 }
 
 // ─── Community persistence ─────────────────────────────────────────────────────
@@ -978,7 +974,7 @@ export function setCommunities(communities: CommunityResult[]): void {
     );
     for (const c of communities) {
       for (const filePath of c.members) {
-        stmt.run(c.communityId, filePath);
+        stmt.run(c.communityId, relIn(filePath));
       }
     }
   });
@@ -998,14 +994,15 @@ export function getCommunities(): CommunityResult[] {
 
   if (rows.length === 0) return [];
 
-  // Group by community_id
+  // Group by community_id — keep paths in stored (relative) form throughout
+  // the importance lookup against allFiles (which already returns absolute via
+  // rowToFileNode). Absolutify members at the boundary before returning.
   const groups = new Map<number, string[]>();
   for (const row of rows) {
     if (!groups.has(row.community_id)) groups.set(row.community_id, []);
-    groups.get(row.community_id)!.push(row.file_path);
+    groups.get(row.community_id)!.push(absOut(row.file_path));
   }
 
-  // Build CommunityResult[] — need importance scores for representative selection
   const allFiles = getAllFiles();
   const importances = new Map(allFiles.map(f => [f.path, f.importance ?? 0]));
 
@@ -1030,16 +1027,15 @@ export function getCommunityForFile(filePath: string): CommunityResult | null {
   const sqlite = getSqlite();
   const row = sqlite.prepare(
     'SELECT community_id FROM file_communities WHERE file_path = ?'
-  ).get(filePath) as { community_id: number } | undefined;
+  ).get(relIn(filePath)) as { community_id: number } | undefined;
   if (!row) return null;
 
-  // Fetch all members of that community
+  // Fetch all members of that community — stored relative, return absolute.
   const memberRows = sqlite.prepare(
     'SELECT file_path FROM file_communities WHERE community_id = ?'
   ).all(row.community_id) as Array<{ file_path: string }>;
-  const members = memberRows.map(r => r.file_path);
+  const members = memberRows.map(r => absOut(r.file_path));
 
-  // Determine representative
   const allFiles = getAllFiles();
   const importances = new Map(allFiles.map(f => [f.path, f.importance ?? 0]));
   const representative = members.reduce((best, path) => {
@@ -1063,14 +1059,15 @@ export function getCommunityForFile(filePath: string): CommunityResult | null {
  */
 export function upsertSymbols(filePath: string, syms: SymbolRow[]): void {
   const sqlite = getSqlite();
+  const relPath = relIn(filePath);
   const tx = sqlite.transaction(() => {
-    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(relPath);
     if (syms.length === 0) return;
     const stmt = sqlite.prepare(
       'INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)'
     );
     for (const s of syms) {
-      stmt.run(filePath, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
+      stmt.run(relPath, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
     }
   });
   tx();
@@ -1087,7 +1084,7 @@ interface SymbolDbRow {
 
 function rowToSymbol(r: SymbolDbRow): SymbolRow & { path: string } {
   return {
-    path:      r.path,
+    path:      absOut(r.path),
     name:      r.name,
     kind:      r.kind as SymbolKind,
     startLine: r.start_line,
@@ -1200,7 +1197,7 @@ export function getCallers(
 
   // Step 1: resolve target (callee) symbol IDs
   const targetRows = filePath
-    ? sqlite.prepare('SELECT id FROM symbols WHERE name = ? AND path = ?').all(name, filePath) as Array<{ id: number }>
+    ? sqlite.prepare('SELECT id FROM symbols WHERE name = ? AND path = ?').all(name, relIn(filePath)) as Array<{ id: number }>
     : sqlite.prepare('SELECT id FROM symbols WHERE name = ?').all(name) as Array<{ id: number }>;
 
   if (targetRows.length === 0) return { items: [], total: 0, unresolvedCount: 0 };
@@ -1234,7 +1231,7 @@ export function getCallers(
   ).get(...ids) as { n: number }).n;
 
   return {
-    items: rows.map(r => ({ path: r.path, name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
+    items: rows.map(r => ({ path: absOut(r.path), name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
     total,
     unresolvedCount,
   };
@@ -1258,7 +1255,7 @@ export function getCallees(
 
   // Step 1: resolve source (caller) symbol IDs
   const callerRows = filePath
-    ? sqlite.prepare('SELECT id FROM symbols WHERE name = ? AND path = ?').all(name, filePath) as Array<{ id: number }>
+    ? sqlite.prepare('SELECT id FROM symbols WHERE name = ? AND path = ?').all(name, relIn(filePath)) as Array<{ id: number }>
     : sqlite.prepare('SELECT id FROM symbols WHERE name = ?').all(name) as Array<{ id: number }>;
 
   if (callerRows.length === 0) return { items: [], total: 0, unresolvedCount: 0 };
@@ -1292,7 +1289,7 @@ export function getCallees(
   ).get(...ids) as { n: number }).n;
 
   return {
-    items: rows.map(r => ({ path: r.path, name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
+    items: rows.map(r => ({ path: absOut(r.path), name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
     total,
     unresolvedCount,
   };
@@ -1305,7 +1302,7 @@ export function getSymbolsForFile(filePath: string): Array<SymbolRow & { path: s
   const sqlite = getSqlite();
   const rows = sqlite
     .prepare('SELECT path, name, kind, start_line, end_line, is_export FROM symbols WHERE path = ? ORDER BY start_line')
-    .all(filePath) as SymbolDbRow[];
+    .all(relIn(filePath)) as SymbolDbRow[];
   return rows.map(rowToSymbol);
 }
 
@@ -1315,7 +1312,7 @@ export function getSymbolsForFile(filePath: string): Array<SymbolRow & { path: s
  */
 export function deleteSymbolsForFile(filePath: string): void {
   const sqlite = getSqlite();
-  sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(filePath);
+  sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(relIn(filePath));
 }
 
 // ─── kv_state generic key/value (Phase 33 D-11) ────────────────────────
@@ -1355,13 +1352,14 @@ export function setEdgesAndSymbols(
   callSiteEdges?: import('../change-detector/types.js').CallSiteEdge[]
 ): void {
   const sqlite = getSqlite();
+  const relSource = relIn(sourcePath);
   const tx = sqlite.transaction(() => {
     // Inline the setEdges body so the whole write participates in the same transaction.
     // (Calling setEdges() from here would still work because better-sqlite3 nests transactions,
     // but inlining keeps the single-transaction guarantee explicit.)
     const db = getDb();
     db.delete(file_dependencies)
-      .where(eq(file_dependencies.source_path, sourcePath))
+      .where(eq(file_dependencies.source_path, relSource))
       .run();
 
     const metaBySpec = new Map<string, ImportMeta[]>();
@@ -1373,6 +1371,8 @@ export function setEdgesAndSymbols(
       }
     }
     for (const edge of edges) {
+      const relTarget = relInOrNull(edge.target);
+
       let importedNamesJson: string | null = null;
       let importLineVal:    number | null = null;
       const spec = edge.originalSpecifier;
@@ -1384,9 +1384,14 @@ export function setEdgesAndSymbols(
           importLineVal     = meta.line;
         }
       }
+
+      // Drop cross-project edges; the meta consume above still advances so
+      // duplicate-specifier ordering (D-08) holds for surviving edges.
+      if (relTarget === null) continue;
+
       db.insert(file_dependencies).values({
-        source_path:       sourcePath,
-        target_path:       edge.target,
+        source_path:       relSource,
+        target_path:       relTarget,
         dependency_type:   edge.isPackage ? 'package_import' : 'local_import',
         package_name:      edge.packageName ?? null,
         package_version:   edge.packageVersion ?? null,
@@ -1404,33 +1409,26 @@ export function setEdgesAndSymbols(
     // Must run BEFORE the symbols DELETE below so the subquery still resolves the
     // OLD symbol IDs (FLAG-02: after DELETE+INSERT, old IDs are gone and the
     // subquery would return the NEW IDs, missing the stale rows entirely).
-    // When callSiteEdges is undefined, this whole block is skipped — preserves Phase 36
-    // backward compat (D-15). When provided (even empty), always clear caller-side so
-    // stale edges are removed when a re-scan yields zero resolvable calls.
     if (callSiteEdges !== undefined) {
-      // Clear caller-side BEFORE symbols DELETE so old IDs are still queryable.
       sqlite.prepare(
         `DELETE FROM symbol_dependencies
          WHERE caller_symbol_id IN (SELECT id FROM symbols WHERE path = ?)`
-      ).run(sourcePath);
+      ).run(relSource);
     }
 
     // Symbols
-    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(sourcePath);
+    sqlite.prepare('DELETE FROM symbols WHERE path = ?').run(relSource);
     if (syms.length > 0) {
       const stmt = sqlite.prepare(
         'INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)'
       );
       for (const s of syms) {
-        stmt.run(sourcePath, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
+        stmt.run(relSource, s.name, s.kind, s.startLine, s.endLine, s.isExport ? 1 : 0);
       }
     }
 
     // Phase 37 CSE-04 continued — insert fresh call-site edges using the new symbol IDs.
-    // Runs AFTER symbols INSERT so caller IDs are fresh in this same txn (FLAG-02 resolution).
-    // Callee-side rows from OTHER files are left untouched (D-19 eventual-consistency).
     if (callSiteEdges !== undefined && callSiteEdges.length > 0) {
-      // D-17: prepared statements created ONCE outside the per-edge loop.
       const callerLookup = sqlite.prepare(
         `SELECT id FROM symbols WHERE path = ? AND name = ? AND start_line = ? LIMIT 1`
       );
@@ -1443,11 +1441,15 @@ export function setEdgesAndSymbols(
       );
 
       for (const edge of callSiteEdges) {
-        const callerRow = callerLookup.get(sourcePath, edge.callerName, edge.callerStartLine) as
+        const callerRow = callerLookup.get(relSource, edge.callerName, edge.callerStartLine) as
           { id: number } | undefined;
         if (!callerRow) continue;  // symbol row missing (Pitfall A callerStartLine mismatch, or race) — silent discard
 
-        const calleeRow = calleeLookup.get(edge.calleePath, edge.calleeName) as
+        // calleePath is absolute (extractor output); skip cross-project callees.
+        const relCallee = relInOrNull(edge.calleePath);
+        if (relCallee === null) continue;
+
+        const calleeRow = calleeLookup.get(relCallee, edge.calleeName) as
           { id: number } | undefined;
         if (!calleeRow) continue;  // callee not in DB (renamed since index built, or cross-file out-of-date) — silent discard
 
@@ -1468,11 +1470,12 @@ export function setEdgesAndSymbols(
  */
 export function getFilesChangedSince(mtimeMs: number): Array<{ path: string; mtime: number }> {
   const sqlite = getSqlite();
-  return sqlite
+  const rows = sqlite
     .prepare(
       'SELECT path, mtime FROM files WHERE is_directory = 0 AND mtime IS NOT NULL AND mtime > ? ORDER BY mtime DESC'
     )
     .all(mtimeMs) as Array<{ path: string; mtime: number }>;
+  return rows.map(r => ({ ...r, path: absOut(r.path) }));
 }
 
 /**
@@ -1487,13 +1490,15 @@ export function getFilesByPaths(paths: string[]): Array<{ path: string; mtime: n
   const sqlite = getSqlite();
   const results: Array<{ path: string; mtime: number | null }> = [];
   const CHUNK = 500;
-  for (let i = 0; i < paths.length; i += CHUNK) {
-    const chunk = paths.slice(i, i + CHUNK);
+  // Translate inbound absolute paths to relative for the IN clause.
+  const relPaths = paths.map(p => relIn(p));
+  for (let i = 0; i < relPaths.length; i += CHUNK) {
+    const chunk = relPaths.slice(i, i + CHUNK);
     const placeholders = chunk.map(() => '?').join(', ');
     const rows = sqlite
       .prepare(`SELECT path, mtime FROM files WHERE path IN (${placeholders})`)
       .all(...chunk) as Array<{ path: string; mtime: number | null }>;
-    results.push(...rows);
+    results.push(...rows.map(r => ({ ...r, path: absOut(r.path) })));
   }
   return results;
 }
