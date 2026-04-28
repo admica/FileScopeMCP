@@ -63,10 +63,46 @@ describe('loadConfig', () => {
     await fs.writeFile(configPath, JSON.stringify(validConfig));
     const config = await loadConfig(configPath);
     expect(config.baseDirectory).toBe('/my/test/project');
-    expect(config.excludePatterns).toEqual(['**/node_modules', '**/dist']);
+    // Original patterns preserved (loadConfig auto-merges with DEFAULT_EXCLUDES,
+    // so the array also contains current defaults — assertion is on inclusion).
+    expect(config.excludePatterns).toContain('**/node_modules');
+    expect(config.excludePatterns).toContain('**/dist');
     expect(config.fileWatching!.enabled).toBe(false);
     expect(config.fileWatching!.maxWatchedDirectories).toBe(500);
     expect(config.version).toBe('1.0.0');
+  });
+
+  it('augments excludePatterns with missing DEFAULT_EXCLUDES entries on load', async () => {
+    // Regression: configs created before a pattern was added to defaults would
+    // silently miss it (loadConfig used to read excludePatterns verbatim).
+    const configPath = path.join(tmpDir, 'sparse-excludes.json');
+    const sparseConfig = {
+      baseDirectory: '/my/sparse/project',
+      excludePatterns: ['**/custom-only-pattern'],
+      fileWatching: {
+        enabled: true,
+        ignoreDotFiles: true,
+        autoRebuildTree: true,
+        maxWatchedDirectories: 1000,
+        watchForNewFiles: true,
+        watchForDeleted: true,
+        watchForChanged: true,
+      },
+      version: '1.0.0',
+    };
+    await fs.writeFile(configPath, JSON.stringify(sparseConfig));
+    const config = await loadConfig(configPath);
+
+    // Custom pattern preserved
+    expect(config.excludePatterns).toContain('**/custom-only-pattern');
+    // A representative sample of defaults that were missing from the sparse input
+    expect(config.excludePatterns).toContain('**/.git');
+    expect(config.excludePatterns).toContain('**/node_modules');
+    expect(config.excludePatterns).toContain('**/*.db-wal');
+    // No duplicates introduced
+    const counts = new Map<string, number>();
+    for (const p of config.excludePatterns) counts.set(p, (counts.get(p) ?? 0) + 1);
+    for (const [p, c] of counts) expect(c, `pattern "${p}" appears ${c} times`).toBe(1);
   });
 
   it('returns DEFAULT_CONFIG when file is empty', async () => {

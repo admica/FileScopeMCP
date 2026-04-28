@@ -143,6 +143,16 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/*.temp",
   "**/*.swp",
   "**/*.swo",
+  // SQLite databases — binary, mutate on every write, summarization is meaningless
+  "**/*.db",
+  "**/*.db-wal",
+  "**/*.db-shm",
+  "**/*.db-journal",
+  "**/*.sqlite",
+  "**/*.sqlite3",
+  "**/*.sqlite-wal",
+  "**/*.sqlite-shm",
+  "**/*.sqlite3-journal",
   // OS files
   "**/.DS_Store",
   "**/Thumbs.db",
@@ -248,6 +258,25 @@ export async function loadConfig(configPath: string = path.join(FILESCOPE_DIR, C
       logInfo(`Config loaded successfully from ${configPath}`);
       logDebug(`Base directory: ${validatedConfig.baseDirectory}`);
       logDebug(`Version: ${validatedConfig.version}`);
+
+      // Augment with any DEFAULT_EXCLUDES patterns the saved config is missing.
+      // Without this, repos created before a pattern was added to defaults would
+      // silently miss new exclusions (e.g. *.db-wal causing a re-summarize loop
+      // on SQLite WAL files). Existing user patterns are preserved verbatim;
+      // duplicates are skipped. Removing a baked-in default requires editing
+      // DEFAULT_EXCLUDES in source — re-adding it via this merge is intentional.
+      const existing = new Set(validatedConfig.excludePatterns);
+      const added: string[] = [];
+      for (const p of DEFAULT_EXCLUDES) {
+        if (!existing.has(p)) {
+          validatedConfig.excludePatterns.push(p);
+          added.push(p);
+        }
+      }
+      if (added.length > 0) {
+        logInfo(`Augmented excludePatterns with ${added.length} pattern(s) from current DEFAULT_EXCLUDES (config was missing these — likely created before they were added to defaults)`);
+        logDebug(`Added patterns:`, added);
+      }
 
       return validatedConfig;
     } catch (parseError) {
