@@ -15,6 +15,8 @@ import {
   getAllLocalImportEdges,
   purgeRecordsMatching,
   purgeRecordsOutsideRoot,
+  upsertSymbols,
+  getSymbolsForFile,
 } from './repository.js';
 import type { FileNode, PackageDependency } from '../types.js';
 
@@ -304,6 +306,21 @@ describe('purgeRecordsMatching', () => {
     expect(result.deps).toBe(0);
     expect(getFile('/project/a.ts')).not.toBeNull();
   });
+
+  it('deletes symbols whose path satisfies the predicate', () => {
+    upsertSymbols('/project/src/keep.ts', [
+      { name: 'kept', kind: 'function', startLine: 1, endLine: 2, isExport: false },
+    ]);
+    upsertSymbols('/project/.claude/worktrees/agent/file.ts', [
+      { name: 'gone', kind: 'function', startLine: 1, endLine: 2, isExport: false },
+    ]);
+
+    const result = purgeRecordsMatching((p) => p.includes('/.claude/worktrees/'));
+
+    expect(result.symbols).toBe(1);
+    expect(getSymbolsForFile('/project/src/keep.ts')).toHaveLength(1);
+    expect(getSymbolsForFile('/project/.claude/worktrees/agent/file.ts')).toHaveLength(0);
+  });
 });
 
 describe('purgeRecordsOutsideRoot', () => {
@@ -355,5 +372,23 @@ describe('purgeRecordsOutsideRoot', () => {
     purgeRecordsOutsideRoot('/home/foo/bar');
 
     expect(getDependencies('/home/foo/bar/a.ts')).toHaveLength(0);
+  });
+
+  it('purges symbols whose path lies outside the project root', () => {
+    // Regression: rsync'ing a repo across hosts left stale `symbols` rows
+    // referencing the previous host's absolute paths. purgeRecordsOutsideRoot
+    // originally only cleaned `files` and `file_dependencies`.
+    upsertSymbols('/home/foo/bar/keep.ts', [
+      { name: 'kept', kind: 'function', startLine: 1, endLine: 2, isExport: false },
+    ]);
+    upsertSymbols('/home/other-host/intruder.ts', [
+      { name: 'gone', kind: 'function', startLine: 1, endLine: 2, isExport: false },
+    ]);
+
+    const result = purgeRecordsOutsideRoot('/home/foo/bar');
+
+    expect(getSymbolsForFile('/home/foo/bar/keep.ts')).toHaveLength(1);
+    expect(getSymbolsForFile('/home/other-host/intruder.ts')).toHaveLength(0);
+    expect(result.symbols).toBe(1);
   });
 });

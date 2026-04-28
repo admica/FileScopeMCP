@@ -235,7 +235,29 @@ export class ServerCoordinator {
     // Write PID file (informational — multiple MCP instances per repo are normal
     // since each Claude Code session spawns its own stdio child process).
     // SQLite WAL mode + busy_timeout handle concurrent DB access safely.
-    fsSync.writeFileSync(path.join(filescopeDir, 'instance.pid'), String(process.pid), 'utf-8');
+    //
+    // Detect stale PID from a previous run that died ungracefully (SIGKILL,
+    // OOM, host crash) — graceful shutdown removes the file via shutdown(),
+    // but uncatchable signals leave it behind. Logging here gives operators
+    // visibility into "the previous instance died hard" without changing the
+    // overwrite behavior below.
+    const pidFilePath = path.join(filescopeDir, 'instance.pid');
+    if (fsSync.existsSync(pidFilePath)) {
+      try {
+        const prevPid = parseInt(fsSync.readFileSync(pidFilePath, 'utf-8').trim(), 10);
+        if (!isNaN(prevPid) && prevPid !== process.pid) {
+          try {
+            process.kill(prevPid, 0); // throws ESRCH if not running
+            // Process is alive — multiple instances are valid; just overwrite.
+          } catch (e: any) {
+            if (e.code === 'ESRCH') {
+              log(`Cleaning stale instance.pid (previous PID ${prevPid} not running — likely died via SIGKILL or crash)`);
+            }
+          }
+        }
+      } catch { /* unreadable / unparseable — overwrite anyway */ }
+    }
+    fsSync.writeFileSync(pidFilePath, String(process.pid), 'utf-8');
 
     // Reload config from disk so runtime edits (e.g. adding llm block) take effect
     const freshConfig = await loadConfig();
@@ -258,16 +280,16 @@ export class ServerCoordinator {
     // Purge any records left from a different project root (e.g. DB copied from
     // another machine or directory). Must run before migration and tree build.
     const purged = purgeRecordsOutsideRoot(projectRoot);
-    if (purged.files > 0 || purged.deps > 0) {
-      log(`Purged ${purged.files} stale file records and ${purged.deps} stale dependency edges outside ${projectRoot}`);
+    if (purged.files > 0 || purged.deps > 0 || purged.symbols > 0 || purged.symbolDeps > 0) {
+      log(`Purged ${purged.files} stale file records, ${purged.deps} dependency edges, ${purged.symbols} symbols, ${purged.symbolDeps} symbol-dep edges outside ${projectRoot}`);
     }
 
     // Purge records that now match the current exclude patterns. Handles the case
     // where paths (e.g. .claude/worktrees/) were indexed before being excluded, so
     // detect_cycles and related tools don't report false positives on stale data.
     const excluded = purgeRecordsMatching((p) => isExcluded(p, projectRoot, false));
-    if (excluded.files > 0 || excluded.deps > 0) {
-      log(`Purged ${excluded.files} file records and ${excluded.deps} dependency edges matching current exclude patterns`);
+    if (excluded.files > 0 || excluded.deps > 0 || excluded.symbols > 0 || excluded.symbolDeps > 0) {
+      log(`Purged ${excluded.files} file records, ${excluded.deps} dependency edges, ${excluded.symbols} symbols, ${excluded.symbolDeps} symbol-dep edges matching current exclude patterns`);
     }
 
     // Run JSON-to-SQLite migration if needed — receives the already-open DB handle

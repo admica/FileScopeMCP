@@ -510,7 +510,7 @@ export function getAllFiles(): FileNode[] {
  * of `/foo/bar` would wrongly keep records under `/foo/bar-sibling/...`. LIKE
  * metacharacters in the root itself are escaped via a custom ESCAPE clause.
  */
-export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; deps: number } {
+export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; deps: number; symbols: number; symbolDeps: number } {
   const sqlite = getSqlite();
   // Escape SQL LIKE metacharacters so roots containing `%`, `_`, or `\` match literally.
   const escapedRoot = projectRoot.replace(/[\\%_]/g, (c) => '\\' + c);
@@ -524,12 +524,34 @@ export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; d
      )`,
   ).run(projectRoot, childPattern, projectRoot, childPattern);
 
+  // symbol_dependencies references symbols by id, not path — must purge before
+  // removing the parent symbol rows or we'd leave dangling caller/callee ids.
+  const symDepResult = sqlite.prepare(
+    `DELETE FROM symbol_dependencies
+     WHERE caller_symbol_id IN (
+       SELECT id FROM symbols WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')
+     )
+     OR callee_symbol_id IN (
+       SELECT id FROM symbols WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')
+     )`,
+  ).run(projectRoot, childPattern, projectRoot, childPattern);
+
+  const symResult = sqlite.prepare(
+    `DELETE FROM symbols
+     WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')`,
+  ).run(projectRoot, childPattern);
+
   const fileResult = sqlite.prepare(
     `DELETE FROM files
      WHERE NOT (path = ? OR path LIKE ? ESCAPE '\\')`,
   ).run(projectRoot, childPattern);
 
-  return { files: fileResult.changes, deps: depResult.changes };
+  return {
+    files: fileResult.changes,
+    deps: depResult.changes,
+    symbols: symResult.changes,
+    symbolDeps: symDepResult.changes,
+  };
 }
 
 /**
@@ -541,30 +563,48 @@ export function purgeRecordsOutsideRoot(projectRoot: string): { files: number; d
  */
 export function purgeRecordsMatching(
   shouldPurge: (filePath: string) => boolean,
-): { files: number; deps: number } {
+): { files: number; deps: number; symbols: number; symbolDeps: number } {
   const sqlite = getSqlite();
-  const allPaths = sqlite.prepare('SELECT path FROM files').all() as Array<{ path: string }>;
-  const toDelete = allPaths.map(r => r.path).filter(shouldPurge);
+  const filePaths = sqlite.prepare('SELECT path FROM files').all() as Array<{ path: string }>;
+  const symbolPaths = sqlite.prepare('SELECT DISTINCT path FROM symbols').all() as Array<{ path: string }>;
 
-  if (toDelete.length === 0) return { files: 0, deps: 0 };
+  const filesToDelete = filePaths.map(r => r.path).filter(shouldPurge);
+  const symbolPathsToDelete = symbolPaths.map(r => r.path).filter(shouldPurge);
+
+  if (filesToDelete.length === 0 && symbolPathsToDelete.length === 0) {
+    return { files: 0, deps: 0, symbols: 0, symbolDeps: 0 };
+  }
 
   const deleteFileStmt = sqlite.prepare('DELETE FROM files WHERE path = ?');
   const deleteDepStmt = sqlite.prepare(
     'DELETE FROM file_dependencies WHERE source_path = ? OR target_path = ?'
   );
+  // symbol_dependencies references symbols by id — purge edges first, then symbols.
+  const deleteSymDepStmt = sqlite.prepare(
+    `DELETE FROM symbol_dependencies
+     WHERE caller_symbol_id IN (SELECT id FROM symbols WHERE path = ?)
+        OR callee_symbol_id IN (SELECT id FROM symbols WHERE path = ?)`
+  );
+  const deleteSymStmt = sqlite.prepare('DELETE FROM symbols WHERE path = ?');
 
   let files = 0;
   let deps = 0;
-  const tx = sqlite.transaction((paths: string[]) => {
-    for (const p of paths) {
+  let symbols = 0;
+  let symbolDeps = 0;
+  const tx = sqlite.transaction((fPaths: string[], sPaths: string[]) => {
+    for (const p of fPaths) {
       deps += deleteDepStmt.run(p, p).changes;
       files += deleteFileStmt.run(p).changes;
     }
+    for (const p of sPaths) {
+      symbolDeps += deleteSymDepStmt.run(p, p).changes;
+      symbols += deleteSymStmt.run(p).changes;
+    }
   });
-  tx(toDelete);
+  tx(filesToDelete, symbolPathsToDelete);
 
   markCommunitiesDirty();
-  return { files, deps };
+  return { files, deps, symbols, symbolDeps };
 }
 
 // ─── Exports snapshot ─────────────────────────────────────────────────────────
