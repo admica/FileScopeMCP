@@ -195,8 +195,9 @@ export type GraphData = { nodes: GraphNode[]; edges: GraphEdge[] };
 // ─── Path helpers ─────────────────────────────────────────────────────────────
 
 /**
- * Strip the repoBasePath prefix from an absolute path stored in the DB.
- * Returns the relative path, or the original value if prefix is not present.
+ * Strip the repoBasePath prefix from a path that may be absolute (legacy DB
+ * format) or already relative (current — paths stored relative to projectRoot
+ * for host portability per repository.ts). No-op when already relative.
  */
 function stripPrefix(absPath: string, basePath: string): string {
   return absPath.startsWith(basePath + '/') ? absPath.slice(basePath.length + 1) : absPath;
@@ -207,16 +208,22 @@ function stripPrefix(absPath: string, basePath: string): string {
 /**
  * Return direct children of a directory (or root-level entries when parentPath is '').
  * Results sorted: directories first, then alphabetically by name.
- * repoBasePath is the absolute repo root — DB stores absolute paths.
+ * Paths in the DB are stored relative to projectRoot — query directly without
+ * an absolute-prefix wrapper. The `repoBasePath` parameter is retained for
+ * stripPrefix back-compat with any legacy absolute-stored rows.
  */
 export function getTreeEntries(
   db: InstanceType<typeof Database>,
   repoBasePath: string,
   parentPath: string
 ): { entries: TreeEntryRow[] } {
-  const absPrefix = parentPath === '' ? repoBasePath : `${repoBasePath}/${parentPath}`;
+  // Match against the relative-stored path. Empty parent = root: every row.
+  // Non-empty parent: rows under `${parentPath}/`. The "no deeper slashes"
+  // constraint excludes nested files.
+  const childLike   = parentPath === '' ? '%'        : `${parentPath}/%`;
+  const grandchild  = parentPath === '' ? '%/%'      : `${parentPath}/%/%`;
+  const prefixLen   = parentPath === '' ? 0           : parentPath.length + 1;
 
-  // Fetch direct file children (no deeper slashes)
   const fileRows = db.prepare(`
     SELECT path, name, is_directory, importance,
            (summary IS NOT NULL) AS has_summary,
@@ -225,22 +232,18 @@ export function getTreeEntries(
     FROM files
     WHERE path LIKE ? AND path NOT LIKE ?
     ORDER BY name ASC
-  `).all(`${absPrefix}/%`, `${absPrefix}/%/%`) as Array<{
+  `).all(childLike, grandchild) as Array<{
     path: string; name: string; is_directory: number;
     importance: number | null; has_summary: number; is_stale: number;
   }>;
 
-  // Synthesize directory entries from files that live deeper than direct children.
-  // Extract unique immediate subdirectory names under absPrefix.
-  const prefixLen = absPrefix.length + 1; // +1 for trailing '/'
   const dirNames = new Set<string>();
   const dirRows = db.prepare(`
     SELECT path FROM files
     WHERE path LIKE ? AND is_directory = 0
-  `).all(`${absPrefix}/%/%`) as Array<{ path: string }>;
+  `).all(grandchild) as Array<{ path: string }>;
 
   for (const r of dirRows) {
-    // path = absPrefix + '/' + segment + '/...'
     const nextSlash = r.path.indexOf('/', prefixLen);
     if (nextSlash !== -1) {
       dirNames.add(r.path.slice(prefixLen, nextSlash));
@@ -265,28 +268,26 @@ export function getTreeEntries(
     isStale: Boolean(r.is_stale),
   }));
 
-  // Directories first, then files (both already sorted by name)
   return { entries: [...dirEntries, ...fileEntries] };
 }
 
 /**
  * Return full file metadata for a single file, including parsed JSON blobs and dependency info.
  * Returns null if the file is not found or is a directory.
- * repoBasePath is the absolute repo root — DB stores absolute paths.
+ * `filePath` is the project-relative path used by the DB (matches the URL form).
  */
 export function getFileDetail(
   db: InstanceType<typeof Database>,
   repoBasePath: string,
   filePath: string
 ): object | null {
-  const absPath = repoBasePath + '/' + filePath;
-
+  // DB stores paths relative to projectRoot — query directly with filePath.
   const row = db.prepare(`
     SELECT path, name, importance, summary, mtime,
            summary_stale_since, concepts_stale_since, change_impact_stale_since,
            exports_snapshot, concepts, change_impact
     FROM files WHERE path = ? AND is_directory = 0
-  `).get(absPath) as {
+  `).get(filePath) as {
     path: string;
     name: string;
     importance: number | null;
@@ -310,17 +311,17 @@ export function getFileDetail(
   const dependencies = db.prepare(`
     SELECT target_path AS path, dependency_type AS type
     FROM file_dependencies WHERE source_path = ? AND dependency_type = 'local_import'
-  `).all(absPath) as { path: string; type: string }[];
+  `).all(filePath) as { path: string; type: string }[];
 
   const dependents = db.prepare(`
     SELECT source_path AS path
     FROM file_dependencies WHERE target_path = ? AND dependency_type = 'local_import'
-  `).all(absPath) as { path: string }[];
+  `).all(filePath) as { path: string }[];
 
   const packageDeps = db.prepare(`
     SELECT package_name AS name, package_version AS version, is_dev_dependency AS isDev
     FROM file_dependencies WHERE source_path = ? AND dependency_type = 'package_import'
-  `).all(absPath) as { name: string; version: string; isDev: number }[];
+  `).all(filePath) as { name: string; version: string; isDev: number }[];
 
   return {
     path: stripPrefix(row.path, repoBasePath),
@@ -343,14 +344,15 @@ export function getFileDetail(
 
 /**
  * Return aggregate stats and top files for a directory (all descendants, not just direct children).
- * repoBasePath is the absolute repo root — DB stores absolute paths.
+ * `dirPath` is the project-relative directory path used by the DB.
  */
 export function getDirDetail(
   db: InstanceType<typeof Database>,
   repoBasePath: string,
   dirPath: string
 ): object {
-  const absDir = repoBasePath + '/' + dirPath;
+  // DB stores paths relative to projectRoot — query with the relative prefix.
+  const dirLike = `${dirPath}/%`;
 
   const agg = db.prepare(`
     SELECT
@@ -362,7 +364,7 @@ export function getDirDetail(
                        OR change_impact_stale_since IS NOT NULL) AS stale_count
     FROM files
     WHERE is_directory = 0 AND path LIKE ?
-  `).get(`${absDir}/%`) as {
+  `).get(dirLike) as {
     total_files: number;
     avg_importance: number | null;
     with_summary: number;
@@ -375,7 +377,7 @@ export function getDirDetail(
     WHERE is_directory = 0 AND path LIKE ?
     ORDER BY importance DESC
     LIMIT 10
-  `).all(`${absDir}/%`) as { path: string; name: string; importance: number | null }[];
+  `).all(dirLike) as { path: string; name: string; importance: number | null }[];
 
   const totalFiles = agg.total_files ?? 0;
   const withSummary = agg.with_summary ?? 0;
@@ -398,7 +400,7 @@ export function getDirDetail(
 /**
  * Return all local_import edges and their endpoint file metadata for the dependency graph.
  * Optional dirFilter limits to edges where at least one endpoint is under that subtree.
- * repoBasePath is the absolute repo root — DB stores absolute paths.
+ * `dirFilter` and the DB-stored paths are project-relative.
  */
 export function getGraphData(
   db: InstanceType<typeof Database>,
@@ -413,13 +415,14 @@ export function getGraphData(
   `;
   const edgeParams: string[] = [];
   if (dirFilter) {
-    const absDirFilter = `${repoBasePath}/${dirFilter}/%`;
+    const dirFilterLike = `${dirFilter}/%`;
     edgeQuery += ` AND (source_path LIKE ? OR target_path LIKE ?)`;
-    edgeParams.push(absDirFilter, absDirFilter);
+    edgeParams.push(dirFilterLike, dirFilterLike);
   }
   const rawEdges = db.prepare(edgeQuery).all(...edgeParams) as GraphEdge[];
 
-  // Strip absolute prefix from edge paths
+  // Edges already relative-stored — stripPrefix is a no-op for current rows
+  // and a safe back-compat for any legacy absolute-stored rows.
   const edges: GraphEdge[] = rawEdges.map((e) => ({
     source: stripPrefix(e.source, repoBasePath),
     target: stripPrefix(e.target, repoBasePath),
@@ -436,12 +439,11 @@ export function getGraphData(
   }
   if (pathSet.size === 0) return { nodes: [], edges: [] };
 
-  // Nodes: fetch metadata + community membership for all referenced files using absolute paths
+  // Nodes: fetch metadata + community membership for all referenced files.
   // LEFT JOIN file_communities so files without a community still appear (community_id = null).
-  // Note: SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999.
-  // The 500-node performance cap (D-12) keeps this well under limit.
-  const absPaths = Array.from(pathSet).map((p) => repoBasePath + '/' + p);
-  const placeholders = absPaths.map(() => '?').join(',');
+  // SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999; the 500-node cap (D-12) is safely under.
+  const relPaths = Array.from(pathSet);
+  const placeholders = relPaths.map(() => '?').join(',');
   const fileRows = db.prepare(`
     SELECT f.path, f.name, f.importance,
            (f.summary IS NOT NULL) AS has_summary,
@@ -451,7 +453,7 @@ export function getGraphData(
     FROM files f
     LEFT JOIN file_communities fc ON fc.file_path = f.path
     WHERE f.path IN (${placeholders}) AND f.is_directory = 0
-  `).all(...absPaths) as Array<{
+  `).all(...relPaths) as Array<{
     path: string; name: string; importance: number | null;
     has_summary: number; is_stale: number; community_id: number | null;
   }>;

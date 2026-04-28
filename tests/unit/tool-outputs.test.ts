@@ -26,7 +26,16 @@ import {
   getSymbolsForFile,
   getFilesChangedSince,
   getFilesByPaths,
+  setRepoProjectRoot,
+  clearRepoProjectRoot,
 } from '../../src/db/repository.js';
+import { relativizePath } from '../../src/file-utils.js';
+
+// Bind the relative-paths translator so this suite exercises the production
+// code path. Without it, repo functions run identity-passthrough and bypass
+// sites (raw SQL with WHERE path = ?) silently mismatch in production.
+const TEST_ROOT = '/';
+const rawRel = (p: string) => relativizePath(p, TEST_ROOT);
 
 let tmpDir: string;
 let dbPath: string;
@@ -35,6 +44,7 @@ beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tool-outputs-test-'));
   dbPath = path.join(tmpDir, 'test.db');
   openDatabase(dbPath);
+  setRepoProjectRoot(TEST_ROOT);
 
   const sqlite = getSqlite();
   sqlite.exec(`
@@ -88,6 +98,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   closeDatabase();
+  clearRepoProjectRoot();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -102,7 +113,7 @@ function insertFile(filePath: string, opts: Record<string, any> = {}): void {
   sqlite
     .prepare('INSERT OR REPLACE INTO files (path, name, is_directory, importance, summary, concepts, change_impact, summary_stale_since, concepts_stale_since, change_impact_stale_since) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)')
     .run(
-      filePath, name,
+      rawRel(filePath), name,
       opts.importance ?? 0,
       opts.summary ?? null,
       opts.concepts ?? null,
@@ -118,7 +129,7 @@ function insertDep(src: string, tgt: string, opts: Record<string, any> = {}): vo
   sqlite.prepare(
     'INSERT INTO file_dependencies (source_path, target_path, dependency_type, edge_type, confidence, confidence_source, package_name) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(
-    src, tgt,
+    rawRel(src), rawRel(tgt),
     opts.dependency_type ?? 'local_import',
     opts.edge_type ?? 'imports',
     opts.confidence ?? 0.8,
@@ -370,7 +381,7 @@ describe('writeLlmResult and clearStaleness', () => {
     writeLlmResult('/src/a.ts', 'concepts', conceptsJson);
 
     const sqlite = getSqlite();
-    const row = sqlite.prepare('SELECT concepts FROM files WHERE path = ?').get('/src/a.ts') as { concepts: string };
+    const row = sqlite.prepare('SELECT concepts FROM files WHERE path = ?').get(rawRel('/src/a.ts')) as { concepts: string };
     expect(row.concepts).toBe(conceptsJson);
   });
 
@@ -454,7 +465,7 @@ describe('find_symbol response contract (Phase 34)', () => {
     clear();
     const sqlite = getSqlite();
     sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
-      .run('/src/a.ts', 'foo', 'function', 1, 5, 1);
+      .run(rawRel('/src/a.ts'), 'foo', 'function', 1, 5, 1);
     const { items, total } = findSymbols({ name: 'foo', exportedOnly: true, limit: 50 });
     const truncated = items.length < total;
     const response: Record<string, unknown> = {
@@ -472,7 +483,7 @@ describe('find_symbol response contract (Phase 34)', () => {
     const sqlite = getSqlite();
     for (let i = 0; i < 5; i++) {
       sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(`/src/f${i}.ts`, 'foo', 'function', 1, 5, 1);
+        .run(rawRel(`/src/f${i}.ts`), 'foo', 'function', 1, 5, 1);
     }
     const { items, total } = findSymbols({ name: 'foo', exportedOnly: true, limit: 2 });
     const truncated = items.length < total;
@@ -507,11 +518,11 @@ describe('get_file_summary response contract — Phase 34 enrichment', () => {
     insertFile('/src/mod.ts', { importance: 5 });
     const sqlite = getSqlite();
     sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
-      .run('/src/mod.ts', 'zebra', 'function', 30, 35, 1);
+      .run(rawRel('/src/mod.ts'), 'zebra', 'function', 30, 35, 1);
     sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
-      .run('/src/mod.ts', 'apple', 'class', 10, 15, 1);
+      .run(rawRel('/src/mod.ts'), 'apple', 'class', 10, 15, 1);
     sqlite.prepare('INSERT INTO symbols (path, name, kind, start_line, end_line, is_export) VALUES (?, ?, ?, ?, ?, ?)')
-      .run('/src/mod.ts', '_priv', 'function', 20, 25, 0);
+      .run(rawRel('/src/mod.ts'), '_priv', 'function', 20, 25, 0);
     const exports = getSymbolsForFile('/src/mod.ts')
       .filter(s => s.isExport)
       .sort((a, b) => a.startLine - b.startLine)
@@ -526,7 +537,7 @@ describe('get_file_summary response contract — Phase 34 enrichment', () => {
     const sqlite = getSqlite();
     sqlite.prepare(
       'INSERT INTO file_dependencies (source_path, target_path, dependency_type, edge_type, confidence, confidence_source, imported_names, import_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run('/src/user.ts', '/src/target.ts', 'local_import', 'imports', 0.8, 'inferred', JSON.stringify(['foo']), 3);
+    ).run(rawRel('/src/user.ts'), rawRel('/src/target.ts'), 'local_import', 'imports', 0.8, 'inferred', JSON.stringify(['foo']), 3);
     const dependents = getDependentsWithImports('/src/target.ts');
     expect(dependents).toEqual([
       { path: '/src/user.ts', importedNames: ['foo'], importLines: [3] },
@@ -543,7 +554,7 @@ function insertFileWithMtime(p: string, mtime: number | null): void {
   const name = p.split('/').pop() ?? p;
   sqlite
     .prepare('INSERT OR REPLACE INTO files (path, name, is_directory, importance, mtime) VALUES (?, ?, 0, ?, ?)')
-    .run(p, name, 0, mtime);
+    .run(rawRel(p), name, 0, mtime);
 }
 
 describe('list_changed_since response contract (Phase 35)', () => {

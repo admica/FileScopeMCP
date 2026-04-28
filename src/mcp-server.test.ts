@@ -6,6 +6,15 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { openDatabase, closeDatabase, getSqlite } from './db/db.js';
+import { setRepoProjectRoot, clearRepoProjectRoot } from './db/repository.js';
+import { relativizePath } from './file-utils.js';
+
+// Bind the relative-paths translator so this suite exercises the production
+// code path. Without it, repo functions run in identity-passthrough and bugs
+// in code that bypasses repository.ts (e.g. mcp-server.ts:310's raw SELECT
+// for concepts/change_impact) silently slip through.
+const TEST_ROOT = '/';
+const rawRel = (p: string) => relativizePath(p, TEST_ROOT);
 
 let tmpDir: string;
 let dbPath: string;
@@ -14,6 +23,7 @@ beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-server-test-'));
   dbPath = path.join(tmpDir, 'test.db');
   openDatabase(dbPath);
+  setRepoProjectRoot(TEST_ROOT);
 
   const sqlite = getSqlite();
   sqlite.exec(`
@@ -62,6 +72,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   closeDatabase();
+  clearRepoProjectRoot();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -82,7 +93,7 @@ function insertFile(filePath: string, opts?: {
   sqlite
     .prepare('INSERT OR REPLACE INTO files (path, name, is_directory, importance, summary, concepts, change_impact, summary_stale_since, concepts_stale_since, change_impact_stale_since) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)')
     .run(
-      filePath,
+      rawRel(filePath),
       name,
       opts?.importance ?? 0,
       opts?.summary ?? null,
@@ -259,8 +270,8 @@ function insertDependency(sourcePath: string, targetPath: string, opts?: {
   sqlite.prepare(
     'INSERT INTO file_dependencies (source_path, target_path, dependency_type, edge_type, confidence, confidence_source) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(
-    sourcePath,
-    targetPath,
+    rawRel(sourcePath),
+    rawRel(targetPath),
     opts?.dependency_type ?? 'local_import',
     opts?.edge_type ?? 'imports',
     opts?.confidence ?? 0.8,

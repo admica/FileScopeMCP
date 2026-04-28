@@ -4,7 +4,7 @@
 // ensures staleness propagates to all transitive dependents so Phase 5
 // can regenerate their summaries and concepts.
 import { readFileSync } from 'node:fs';
-import { getDependents, markStale, getFile } from '../db/repository.js';
+import { getDependents, markStale, getFile, toStoredPath } from '../db/repository.js';
 import { submitJob } from '../broker/client.js';
 import { getSqlite } from '../db/db.js';
 import { log } from '../logger.js';
@@ -139,11 +139,14 @@ export function cascadeStale(
 export function markSelfStale(filePath: string, opts: { timestamp: number }): void {
   const { timestamp } = opts;
   const sqlite = getSqlite();
+  // Bypass goes through raw SQL (markStale in the repo writes all 3 columns;
+  // this only sets summary + concepts). Translate to the DB-stored path form
+  // so the WHERE clause matches the relative-paths storage layout.
   sqlite
     .prepare(
       'UPDATE files SET summary_stale_since = ?, concepts_stale_since = ? WHERE path = ?'
     )
-    .run(timestamp, timestamp, filePath);
+    .run(timestamp, timestamp, toStoredPath(filePath));
 
   // Read file content and importance for broker submission
   try {

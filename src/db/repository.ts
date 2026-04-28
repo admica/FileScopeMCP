@@ -69,6 +69,26 @@ function absOut(relPath: string): string {
   return absolutifyPath(relPath, _projectRoot);
 }
 
+/**
+ * Translate an absolute path to the DB-stored form. Returns the input
+ * unchanged in test/passthrough mode (no project root bound).
+ *
+ * Exported for the small number of call sites that bypass repository.ts to
+ * issue raw SQL with WHERE/UPDATE on path columns. They need to match the
+ * stored form. Keep this surface tiny; prefer a repo function when one
+ * already exists.
+ */
+export function toStoredPath(absPath: string): string {
+  return relIn(absPath);
+}
+
+/**
+ * Translate a DB-stored path back to absolute. Mirror of toStoredPath.
+ */
+export function fromStoredPath(storedPath: string): string {
+  return absOut(storedPath);
+}
+
 // ─── Community dirty flag ──────────────────────────────────────────────────────
 // Module-level mutable flag: true = community cache is stale, Louvain must rerun.
 // Starts true so the first query always runs Louvain (D-10, D-12).

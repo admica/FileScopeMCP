@@ -7,6 +7,8 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { writeFileSync } from 'fs';
 import { openDatabase, closeDatabase, getSqlite } from '../db/db.js';
+import { setRepoProjectRoot, clearRepoProjectRoot } from '../db/repository.js';
+import { relativizePath } from '../file-utils.js';
 
 vi.mock('../broker/client.js', () => ({
   submitJob: vi.fn(),
@@ -20,10 +22,20 @@ function p(name: string): string {
   return path.join(tmpDir, name);
 }
 
+// Tests must exercise the same code path production runs: paths in repo public
+// API are absolute, but the DB stores them relative to projectRoot (host
+// portability). Without this binding the tests would default to identity-
+// passthrough and miss bugs in code that bypasses repository.ts to issue raw
+// SQL with WHERE path = ? (e.g. cascade-engine.ts:144 markSelfStale).
+function rawRel(p: string): string {
+  return relativizePath(p, tmpDir);
+}
+
 beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cascade-engine-test-'));
   dbPath = path.join(tmpDir, 'test.db');
   openDatabase(dbPath);
+  setRepoProjectRoot(tmpDir);
 
   const sqlite = getSqlite();
   sqlite.exec(`
@@ -57,6 +69,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   closeDatabase();
+  clearRepoProjectRoot();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -66,7 +79,7 @@ function insertFile(filePath: string, content = 'export const x = 1;'): void {
   const name = path.basename(filePath);
   sqlite
     .prepare('INSERT OR IGNORE INTO files (path, name, is_directory) VALUES (?, ?, 0)')
-    .run(filePath, name);
+    .run(rawRel(filePath), name);
   writeFileSync(filePath, content);
 }
 
@@ -77,7 +90,7 @@ function insertDep(sourcePath: string, targetPath: string): void {
     .prepare(
       'INSERT INTO file_dependencies (source_path, target_path, dependency_type) VALUES (?, ?, ?)'
     )
-    .run(sourcePath, targetPath, 'local_import');
+    .run(rawRel(sourcePath), rawRel(targetPath), 'local_import');
 }
 
 // Helper: clear all tables between test groups
@@ -103,8 +116,8 @@ describe('markStale', () => {
     markStale([aPath, bPath], 1000);
 
     const sqlite = getSqlite();
-    const a = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(aPath) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
-    const b = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(bPath) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
+    const a = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(rawRel(aPath)) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
+    const b = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(rawRel(bPath)) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number };
 
     expect(a.summary_stale_since).toBe(1000);
     expect(a.concepts_stale_since).toBe(1000);
@@ -140,14 +153,14 @@ describe('upsertFile staleness preservation', () => {
 
     // Verify staleness was set
     const sqlite = getSqlite();
-    const before = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(filePath) as { summary_stale_since: number };
+    const before = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(rawRel(filePath)) as { summary_stale_since: number };
     expect(before.summary_stale_since).toBe(5000);
 
     // Now call upsertFile again (e.g., on file change)
     upsertFile({ ...node, summary: 'Updated summary' });
 
     // Staleness columns must NOT have been reset to null
-    const after = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(filePath) as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null };
+    const after = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(rawRel(filePath)) as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null };
     expect(after.summary_stale_since).toBe(5000);
     expect(after.concepts_stale_since).toBe(5000);
     expect(after.change_impact_stale_since).toBe(5000);
@@ -179,7 +192,7 @@ describe('cascadeStale', () => {
 
     const sqlite = getSqlite();
     const checkStale = (fp: string) =>
-      sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(fp) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number } | undefined;
+      sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(rawRel(fp)) as { summary_stale_since: number; concepts_stale_since: number; change_impact_stale_since: number } | undefined;
 
     const aRow = checkStale(aPath);
     const bRow = checkStale(bPath);
@@ -231,13 +244,13 @@ describe('cascadeStale', () => {
 
     const sqlite = getSqlite();
     // dep-11 and dep-12 should NOT be stale
-    const dep11 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(fileList[11]) as { summary_stale_since: number | null } | undefined;
-    const dep12 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(fileList[12]) as { summary_stale_since: number | null } | undefined;
+    const dep11 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(rawRel(fileList[11])) as { summary_stale_since: number | null } | undefined;
+    const dep12 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(rawRel(fileList[12])) as { summary_stale_since: number | null } | undefined;
     expect(dep11?.summary_stale_since).toBeNull();
     expect(dep12?.summary_stale_since).toBeNull();
 
     // dep-10 (depth 10) should be marked stale
-    const dep10 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(fileList[10]) as { summary_stale_since: number | null } | undefined;
+    const dep10 = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(rawRel(fileList[10])) as { summary_stale_since: number | null } | undefined;
     expect(dep10?.summary_stale_since).toBe(4000);
   });
 
@@ -248,7 +261,7 @@ describe('cascadeStale', () => {
     cascadeStale(isolatedPath, { timestamp: 5000 });
 
     const sqlite = getSqlite();
-    const row = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(isolatedPath) as { summary_stale_since: number } | undefined;
+    const row = sqlite.prepare('SELECT summary_stale_since FROM files WHERE path = ?').get(rawRel(isolatedPath)) as { summary_stale_since: number } | undefined;
     expect(row?.summary_stale_since).toBe(5000);
 
     // Only 3 submitJob calls for the 1 file
@@ -405,7 +418,7 @@ describe('markSelfStale', () => {
     markSelfStale(selfPath, { timestamp: 6000 });
 
     const sqlite = getSqlite();
-    const row = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(selfPath) as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null } | undefined;
+    const row = sqlite.prepare('SELECT summary_stale_since, concepts_stale_since, change_impact_stale_since FROM files WHERE path = ?').get(rawRel(selfPath)) as { summary_stale_since: number | null; concepts_stale_since: number | null; change_impact_stale_since: number | null } | undefined;
 
     expect(row?.summary_stale_since).toBe(6000);
     expect(row?.concepts_stale_since).toBe(6000);

@@ -38,6 +38,7 @@ import {
   getFilesByPaths,
   getCallers,
   getCallees,
+  toStoredPath,
 } from './db/repository.js';
 import type { SymbolKind } from './db/symbol-types.js';
 import { isConnected as brokerIsConnected, resubmitStaleFiles } from './broker/client.js';
@@ -306,9 +307,10 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
     const isStale = coordinator.checkFileFreshness(normalizedPath);
     const staleness = getStaleness(normalizedPath);
     const sqlite = getSqlite();
+    // Raw SQL bypasses repository.ts; translate to the DB-stored path form.
     const llmData = sqlite
       .prepare('SELECT concepts, change_impact FROM files WHERE path = ?')
-      .get(normalizedPath) as { concepts: string | null; change_impact: string | null } | undefined;
+      .get(toStoredPath(normalizedPath)) as { concepts: string | null; change_impact: string | null } | undefined;
     return mcpSuccess({
       path: node.path,
       ...(isStale && { stale: true }),
