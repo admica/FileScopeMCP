@@ -151,10 +151,37 @@ FileScopeMCP uses a local LLM via llama.cpp's llama-server (or any OpenAI-compat
 
 Setup: `./setup-llm.sh` (prints platform-specific instructions including the WSL2+Windows alternative). Status: `./setup-llm.sh --status`.
 
+### Path Storage (host-portable layout)
+
+The SQLite DB stores **paths relative to `projectRoot`**, but the public API
+(MCP tools, repository.ts exports) deals in **absolute** paths. Translation
+happens at a single chokepoint inside `repository.ts`. This makes a
+`.filescope/` directory survive being rsync'd or moved between hosts —
+expensive LLM-generated content (summary, concepts, change_impact) is
+preserved across path changes that would otherwise trigger a wipe-and-rescan.
+
+**Invariant**: `coordinator.init(projectRoot)` calls
+`setRepoProjectRoot(projectRoot)` once. From that point, repository.ts
+relativizes inputs and absolutifies outputs at every SQL site. Outside
+repository.ts, all code dealing with paths uses absolute form.
+
+**Bypass escape hatch**: a small number of call sites issue raw SQL
+against path columns instead of going through repository.ts (e.g.
+`cascade-engine.ts:144` `markSelfStale`, `mcp-server.ts:310`
+`get_file_summary` LLM-data lookup, `nexus/repo-store.ts` tree/detail
+queries). These import `toStoredPath` / `fromStoredPath` from
+`db/repository.js` to translate at the boundary. Keep this surface tiny.
+
+**Format guard**: `coordinator.init()` writes / verifies
+`kv_state['paths_format'] = 'relative_v1'` on first connection. If a
+future format bump renders an old DB incompatible, the guard throws with
+a clear recovery hint rather than corrupting silently. To recover from
+a flagged-mismatch error, delete `.filescope/` and reinit.
+
 ### Key Conventions
 
 - TypeScript strict mode, ES modules
 - All tools return structured JSON with consistent error codes (`NOT_INITIALIZED`, `NOT_FOUND`, `BROKER_DISCONNECTED`)
 - Tool descriptions are the contract — they are what agents read to decide when to call a tool. Write them precisely.
 - Tests: `npm test`
-- Database: SQLite in `.filescope/` within the target project directory
+- Database: SQLite in `.filescope/` within the target project directory; paths stored relative to `projectRoot` (see Path Storage)
