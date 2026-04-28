@@ -24,6 +24,6 @@ FileScopeMCP-tree.json
 *.csv
 run.sh
 .filescope/
-
+logs/
 .planning/
 .claude/
