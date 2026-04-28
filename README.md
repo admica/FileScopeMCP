@@ -135,7 +135,7 @@ Everything lives in `.filescope/data.db` (SQLite, WAL mode) per project. The bro
 |-----|-------------|
 | [AGENTS.md](AGENTS.md) | Cross-agent context file — MCP registration, broker config, architecture (read by Hermes, Codex, OpenClaw) |
 | [FileScopeMCP Skill](skills/filescope-mcp/SKILL.md) | Portable skill file — tool reference, workflows, tips for agents using FileScopeMCP |
-| [LLM Setup](docs/llm-setup.md) | llama.cpp / llama-server installation — local, WSL2+Windows, or remote |
+| [LLM Setup](docs/llm-setup.md) | llama.cpp / llama-server installation — Linux/macOS native (default), WSL2+Windows, or remote LAN |
 | [Configuration](docs/configuration.md) | Per-project config, broker config, ignore patterns |
 | [MCP Clients](docs/mcp-clients.md) | Setup for Claude Code, Cursor AI, daemon mode |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |

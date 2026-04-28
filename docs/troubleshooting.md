@@ -28,7 +28,7 @@ FileScopeMCP auto-initializes to the current working directory when Claude Code 
 4. Check `~/.filescope/broker.json` — `baseURL` and `model` must be correct
 5. Run `./setup-llm.sh --status` to verify llama-server reachability
 
-For WSL + Windows issues, see [llm-setup.md](llm-setup.md).
+For the WSL2 + Windows alternative setup, see the troubleshooting section in [llm-setup.md](llm-setup.md#wsl--windows-troubleshooting).
 
 ## Stale PID file ("daemon already running" error)
 

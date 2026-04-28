@@ -8,9 +8,9 @@ Without a running llama-server, FileScopeMCP still works for file tracking and d
 
 Pick the guide that matches your setup:
 
-- [Same machine (Linux/macOS)](#same-machine-linuxmacos) — llama-server and FileScopeMCP on the same OS
-- [WSL2 + Windows GPU](#wsl2--windows-gpu) — FileScopeMCP in WSL2, llama-server on Windows for GPU access
+- [Same machine (Linux/macOS)](#same-machine-linuxmacos) — **default** — llama-server and FileScopeMCP on the same Linux or macOS host (this is what agent runtimes like Hermes use)
 - [Remote / LAN server](#remote--lan-server) — llama-server on a different machine on your network
+- [WSL2 + Windows GPU](#wsl2--windows-gpu) — alternative for Windows users: FileScopeMCP in WSL2, llama-server on the Windows host for GPU access
 
 ---
 
@@ -77,7 +77,7 @@ No broker config changes are needed — the default `broker.default.json` templa
 
 ## WSL2 + Windows GPU
 
-This is the recommended setup for Windows users with a dedicated GPU. WSL2 doesn't give native GPU access to llama.cpp, so llama-server runs on Windows and FileScopeMCP connects to it across the WSL2 boundary.
+Alternative setup for Windows users with a dedicated GPU. WSL2 doesn't give native GPU access to llama.cpp, so llama-server runs on Windows and FileScopeMCP connects to it across the WSL2 boundary. If you're on a native Linux host (including Hermes on Ubuntu), use the [Same Machine](#same-machine-linuxmacos) guide above instead.
 
 ### Step 1: Pick the Windows binary
 

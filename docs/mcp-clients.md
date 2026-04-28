@@ -39,7 +39,37 @@ set_base_directory(path: "/path/to/your/project")
 
 Cursor does not have a `claude mcp add` equivalent, so registration is manual. Copy the appropriate JSON block below into your project's `.cursor/mcp.json`.
 
-### WSL (Cursor on Windows, FileScopeMCP in WSL)
+### Linux / macOS Native (default)
+
+```json
+{
+  "mcpServers": {
+    "FileScopeMCP": {
+      "command": "node",
+      "args": ["/path/to/FileScopeMCP/dist/mcp-server.js", "--base-dir=${projectRoot}"],
+      "transport": "stdio"
+    }
+  }
+}
+```
+
+### Windows Native
+
+```json
+{
+  "mcpServers": {
+    "FileScopeMCP": {
+      "command": "node",
+      "args": ["C:\\FileScopeMCP\\dist\\mcp-server.js", "--base-dir=${projectRoot}"],
+      "transport": "stdio",
+      "disabled": false,
+      "alwaysAllow": []
+    }
+  }
+}
+```
+
+### WSL (alternative — Cursor on Windows, FileScopeMCP in WSL)
 
 Build inside WSL (`./build.sh`), then add to your project's `.cursor/mcp.json`:
 
@@ -59,37 +89,7 @@ Build inside WSL (`./build.sh`), then add to your project's `.cursor/mcp.json`:
 
 Replace `Ubuntu-24.04` with your WSL distro name (`wsl -l -q` to list) and `/home/yourname/FileScopeMCP` with the WSL path to this repo.
 
-### Windows Native
-
-```json
-{
-  "mcpServers": {
-    "FileScopeMCP": {
-      "command": "node",
-      "args": ["C:\\FileScopeMCP\\dist\\mcp-server.js", "--base-dir=${projectRoot}"],
-      "transport": "stdio",
-      "disabled": false,
-      "alwaysAllow": []
-    }
-  }
-}
-```
-
-### macOS / Linux Native
-
-```json
-{
-  "mcpServers": {
-    "FileScopeMCP": {
-      "command": "node",
-      "args": ["/path/to/FileScopeMCP/dist/mcp-server.js", "--base-dir=${projectRoot}"],
-      "transport": "stdio"
-    }
-  }
-}
-```
-
-## Cross-host (WSL → Windows)
+## Cross-host alternative (WSL → Windows)
 
 If FileScopeMCP runs in WSL and Claude Code runs on the Windows host, automatic registration via `npm run register-mcp` does not apply — the `claude` CLI on Windows cannot spawn a WSL process directly. Configure this manually by editing the Windows-side `.claude.json` (or using `claude mcp add` on Windows) with a `wsl` shim:
 
