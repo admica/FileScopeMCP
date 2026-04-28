@@ -120,6 +120,55 @@ describe('ServerCoordinator', () => {
     await coordinator2.shutdown();
   });
 
+  // ─── paths_format kv_state guard ───────────────────────────────────────────
+
+  it('paths_format guard: writes "relative_v1" to fresh DB on first init', async () => {
+    tmpDir = makeTmpProject();
+
+    await coordinator.init(tmpDir);
+
+    // Read kv_state directly via raw SQL to confirm the flag was written
+    const sqlite = (await import('./db/db.js')).getSqlite();
+    const row = sqlite
+      .prepare('SELECT value FROM kv_state WHERE key = ?')
+      .get('paths_format') as { value: string } | undefined;
+    expect(row?.value).toBe('relative_v1');
+  });
+
+  it('paths_format guard: accepts a DB whose flag matches', async () => {
+    tmpDir = makeTmpProject();
+
+    // First init writes the flag.
+    await coordinator.init(tmpDir);
+    await coordinator.shutdown();
+
+    // Second init against the same DB must succeed (idempotent).
+    const coordinator2 = new ServerCoordinator();
+    const result = await coordinator2.init(tmpDir);
+    expect(result.isError).toBeFalsy();
+    expect(coordinator2.isInitialized()).toBe(true);
+    await coordinator2.shutdown();
+  });
+
+  it('paths_format guard: rejects a DB with an unrecognized flag value', async () => {
+    tmpDir = makeTmpProject();
+
+    // First init runs drizzle's schema migrations (creating kv_state) and
+    // writes 'relative_v1'. Pre-creating kv_state ourselves conflicts with
+    // drizzle's CREATE TABLE during auto-migrate.
+    await coordinator.init(tmpDir);
+    await coordinator.shutdown();
+
+    // Simulate a future format bump or incompatible code: mutate the flag.
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(path.join(tmpDir, '.filescope', 'data.db'));
+    db.prepare("UPDATE kv_state SET value = 'absolute_v0' WHERE key = 'paths_format'").run();
+    db.close();
+
+    const coordinator2 = new ServerCoordinator();
+    await expect(coordinator2.init(tmpDir)).rejects.toThrow(/Incompatible.*paths_format.*absolute_v0/);
+  });
+
   // ─── Test 10: Daemon mode without MCP transport ────────────────────────────
 
   it('Daemon mode: init() runs standalone without initServer() or MCP transport', async () => {

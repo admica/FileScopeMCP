@@ -19,7 +19,7 @@ import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
 import { runMultilangSymbolsBulkExtractionIfNeeded } from './migrate/bulk-multilang-symbol-extract.js';
 import { runCallSiteEdgesBulkExtractionIfNeeded } from './migrate/bulk-call-site-extract.js';
-import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsMatching, setRepoProjectRoot } from './db/repository.js';
+import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsMatching, setRepoProjectRoot, getKvState, setKvState } from './db/repository.js';
 import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
 import type { Symbol as SymbolRow } from './db/symbol-types.js';
@@ -281,6 +281,25 @@ export class ServerCoordinator {
     // path-bearing SQL in repository.ts relativizes inputs and absolutifies
     // outputs against this root — DB stores host-portable relative paths.
     setRepoProjectRoot(projectRoot);
+
+    // Format guard. Refuses to load a DB created by pre-relative-paths code,
+    // where the failure mode is silent wrong-data (absolute strings get
+    // returned as-is by absolutifyPath's defensive passthrough). The error
+    // points the operator at a clean recovery: delete .filescope/.
+    //
+    // Fresh DB → no flag yet → write 'relative_v1'.
+    // Future format bumps would compare against new known values here.
+    const PATHS_FORMAT_KEY     = 'paths_format';
+    const PATHS_FORMAT_CURRENT = 'relative_v1';
+    const storedFormat = getKvState(PATHS_FORMAT_KEY);
+    if (storedFormat === null) {
+      setKvState(PATHS_FORMAT_KEY, PATHS_FORMAT_CURRENT);
+    } else if (storedFormat !== PATHS_FORMAT_CURRENT) {
+      throw new Error(
+        `Incompatible .filescope/ DB format: kv_state.paths_format='${storedFormat}', expected '${PATHS_FORMAT_CURRENT}'. ` +
+        `Delete ${path.join(projectRoot, '.filescope')} and reinit to refresh.`
+      );
+    }
 
     // (Cross-host portability is now intrinsic: paths are stored relative to
     // projectRoot, so a rsync'd .filescope/ no longer holds rows from a foreign
