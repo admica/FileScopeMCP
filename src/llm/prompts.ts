@@ -3,6 +3,8 @@
 // The SYSTEM_PROMPT defines output format rules and is injected by the broker worker
 // on every request via generateText's `system` parameter.
 
+import { z } from 'zod';
+
 // ~16k tokens of source code ≈ 64KB. Small models degrade on longer contexts.
 const MAX_CONTENT_BYTES = 64 * 1024;
 
@@ -81,3 +83,26 @@ FILE: ${filePath}
 ${diff}
 \`\`\``;
 }
+
+// ─── Output schemas (constrained-decoding contract for LLM JSON tasks) ────────
+// Mirror the field shapes documented in SYSTEM_PROMPT. Used by the broker worker
+// via Output.object({schema}) to make the LLM emit valid JSON via response_format.
+// Without these, weak JSON-followers drift to prose ("This file…") and the
+// downstream JSON.parse throws.
+
+export const ConceptsSchema = z.object({
+  functions:  z.array(z.string()),
+  classes:    z.array(z.string()),
+  interfaces: z.array(z.string()),
+  exports:    z.array(z.string()),
+  purpose:    z.string(),
+});
+export type Concepts = z.infer<typeof ConceptsSchema>;
+
+export const ChangeImpactSchema = z.object({
+  riskLevel:       z.enum(['low', 'medium', 'high']),
+  affectedAreas:   z.array(z.string()),
+  breakingChanges: z.array(z.string()),
+  summary:         z.string(),
+});
+export type ChangeImpact = z.infer<typeof ChangeImpactSchema>;

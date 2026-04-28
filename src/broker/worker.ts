@@ -4,7 +4,7 @@
 // enforces per-job timeout via AbortController, and reports results via callbacks.
 // Exports: BrokerWorker
 
-import { generateText } from 'ai';
+import { generateText, Output } from 'ai';
 import type { LanguageModel } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
@@ -13,6 +13,8 @@ import {
   buildSummaryPrompt,
   buildConceptsPrompt,
   buildChangeImpactPrompt,
+  ConceptsSchema,
+  ChangeImpactSchema,
 } from '../llm/prompts.js';
 import { log } from '../logger.js';
 import type { QueueJob, JobResult } from './types.js';
@@ -55,7 +57,12 @@ function createLLMModel(config: BrokerConfig['llm']): LanguageModel {
         baseURL: config.baseURL!,
         apiKey: config.apiKey ?? 'llama',
       });
-      return provider(config.model);
+      // supportsStructuredOutputs enables response_format dispatch so the SDK
+      // can request JSON-mode / JSON-schema sampling from the underlying server
+      // (llama.cpp's llama-server uses GBNF grammar to enforce this). Required
+      // for Output.object() to actually constrain the model rather than relying
+      // on prompt-only instructions, which weak JSON-followers ignore.
+      return provider.languageModel(config.model, { supportsStructuredOutputs: true });
     }
     default: {
       const exhaustiveCheck: never = config.provider;
@@ -213,30 +220,35 @@ export class BrokerWorker {
       }
 
       case 'concepts': {
-        const { text, usage } = await generateText({
+        // Constrained decoding via Output.object — the model is forced to emit
+        // a JSON object matching ConceptsSchema. Eliminates the prior class of
+        // "Unexpected token 'T'" failures where weak JSON-followers replied
+        // with prose. Schema validation runs inside the SDK; a failure surfaces
+        // here as a thrown error and is reported as code='llm_error' upstream.
+        const { experimental_output, usage } = await generateText({
           model: this.model,
           system: SYSTEM_PROMPT,
           prompt: buildConceptsPrompt(job.filePath, job.fileContent),
           maxOutputTokens,
           abortSignal: signal,
+          experimental_output: Output.object({ schema: ConceptsSchema }),
         });
-        const conceptsParsed = JSON.parse(normalizeOutput(text));
-        return { text: JSON.stringify(conceptsParsed), totalTokens: usage?.totalTokens ?? 0 };
+        return { text: JSON.stringify(experimental_output), totalTokens: usage?.totalTokens ?? 0 };
       }
 
       case 'change_impact': {
         if (!job.payload) {
           throw Object.assign(new Error('no payload (diff text) for change_impact job'), { name: 'parse_error' });
         }
-        const { text, usage } = await generateText({
+        const { experimental_output, usage } = await generateText({
           model: this.model,
           system: SYSTEM_PROMPT,
           prompt: buildChangeImpactPrompt(job.filePath, job.payload),
           maxOutputTokens,
           abortSignal: signal,
+          experimental_output: Output.object({ schema: ChangeImpactSchema }),
         });
-        const impactParsed = JSON.parse(normalizeOutput(text));
-        return { text: JSON.stringify(impactParsed), totalTokens: usage?.totalTokens ?? 0 };
+        return { text: JSON.stringify(experimental_output), totalTokens: usage?.totalTokens ?? 0 };
       }
 
       default: {
