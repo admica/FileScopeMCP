@@ -70,6 +70,62 @@ export function toPlatformPath(normalizedPath: string): string {
   return normalizedPath.split('/').join(path.sep);
 }
 
+/**
+ * Convert an absolute path to one stored in the project's SQLite DB.
+ *
+ * Output convention: forward-slash separated, project-root-relative. The root
+ * directory itself relativizes to '' (empty string — what `path.relative` returns
+ * for identical inputs). No leading './'.
+ *
+ * Throws if `absPath` resolves outside `projectRoot`. Use `tryRelativizePath`
+ * when out-of-root inputs are expected (e.g. extracted edges that may point at
+ * cross-project files) and should be skipped silently.
+ */
+export function relativizePath(absPath: string, projectRoot: string): string {
+  const result = tryRelativizePath(absPath, projectRoot);
+  if (result === null) {
+    throw new Error(`relativizePath: ${absPath} is not under ${projectRoot}`);
+  }
+  return result;
+}
+
+/**
+ * Same as relativizePath but returns null instead of throwing when `absPath`
+ * resolves outside `projectRoot`. Intended for write-path filters where edges
+ * to cross-project files are dropped rather than stored — preserves the
+ * project-internal-only invariant for the relative-paths storage layout.
+ */
+export function tryRelativizePath(absPath: string, projectRoot: string): string | null {
+  // Cosmetic-normalize both inputs first so the comparison and the relative()
+  // call see consistent separators. Without this, mixed-separator inputs on
+  // Windows could escape the prefix check.
+  const normAbs  = canonicalizePath(absPath);
+  const normRoot = canonicalizePath(projectRoot);
+
+  // path.relative returns '' for identical inputs (root case), 'sub/file' for
+  // descendants, '../sibling' for paths above/outside, and 'C:/foo' (absolute)
+  // for paths on a different drive on Windows.
+  const rel = path.relative(normRoot, normAbs).replace(/\\/g, '/');
+
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
+  return rel;
+}
+
+/**
+ * Convert a project-relative DB path back to an absolute filesystem path.
+ *
+ * The empty string '' rehydrates to `projectRoot` (the root directory itself).
+ * Inputs that are already absolute pass through unchanged — defensive guard
+ * against accidental double-translation if a caller forgets relativization.
+ */
+export function absolutifyPath(relPath: string, projectRoot: string): string {
+  if (path.isAbsolute(relPath)) return canonicalizePath(relPath);
+  if (relPath === '') return canonicalizePath(projectRoot);
+  return canonicalizePath(path.resolve(projectRoot, relPath));
+}
+
 // Go import regexes — two-pass approach per Go Language Specification
 const GO_SINGLE_IMPORT_RE = /^import\s+(?:[\w_.]+\s+)?"([^"]+)"/gm;
 const GO_GROUPED_BLOCK_RE = /^import\s*\(([\s\S]*?)\)/gm;

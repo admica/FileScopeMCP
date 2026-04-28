@@ -1,4 +1,4 @@
-import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp, calculateImportance, isExcluded } from './file-utils';
+import { canonicalizePath, normalizePath, toPlatformPath, globToRegExp, calculateImportance, isExcluded, relativizePath, tryRelativizePath, absolutifyPath } from './file-utils';
 import { FileNode } from './types';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
@@ -99,6 +99,89 @@ describe('canonicalizePath', () => {
   it('should resolve dot to baseDir', () => {
     const result = canonicalizePath('.', '/project/root');
     expect(result).toBe('/project/root');
+  });
+});
+
+describe('relativizePath / tryRelativizePath / absolutifyPath', () => {
+  const root = '/home/user/dev/proj';
+
+  describe('tryRelativizePath', () => {
+    it('returns empty string when absPath equals projectRoot (root case)', () => {
+      expect(tryRelativizePath(root, root)).toBe('');
+    });
+
+    it('returns forward-slash relative path for descendants', () => {
+      expect(tryRelativizePath(`${root}/src/index.ts`, root)).toBe('src/index.ts');
+      expect(tryRelativizePath(`${root}/a/b/c/d.ts`, root)).toBe('a/b/c/d.ts');
+    });
+
+    it('returns null for paths outside projectRoot', () => {
+      expect(tryRelativizePath('/home/user/other/file.ts', root)).toBeNull();
+      expect(tryRelativizePath('/elsewhere/file.ts', root)).toBeNull();
+      expect(tryRelativizePath('/home/user/dev/proj-sibling/file.ts', root)).toBeNull();
+    });
+
+    it('handles backslash inputs by normalizing to forward slashes', () => {
+      // Mixed separators (e.g. extracted edges on Windows) must still resolve
+      // correctly against the (also-normalized) root.
+      expect(tryRelativizePath('C:/repo/src/file.ts', 'C:/repo')).toBe('src/file.ts');
+      expect(tryRelativizePath('C:\\repo\\src\\file.ts', 'C:\\repo')).toBe('src/file.ts');
+    });
+
+    it('rejects paths on a different Windows drive', () => {
+      expect(tryRelativizePath('D:/other/file.ts', 'C:/repo')).toBeNull();
+    });
+  });
+
+  describe('relativizePath (throwing variant)', () => {
+    it('throws on out-of-root inputs', () => {
+      expect(() => relativizePath('/elsewhere/file.ts', root)).toThrow(/not under/);
+    });
+
+    it('returns the same value as tryRelativizePath for in-root inputs', () => {
+      expect(relativizePath(`${root}/src/x.ts`, root)).toBe('src/x.ts');
+      expect(relativizePath(root, root)).toBe('');
+    });
+  });
+
+  describe('absolutifyPath', () => {
+    it('rehydrates empty string to projectRoot', () => {
+      expect(absolutifyPath('', root)).toBe(root);
+    });
+
+    it('rehydrates relative paths against projectRoot', () => {
+      expect(absolutifyPath('src/index.ts', root)).toBe(`${root}/src/index.ts`);
+      expect(absolutifyPath('a/b/c.ts', root)).toBe(`${root}/a/b/c.ts`);
+    });
+
+    it('passes absolute inputs through (defensive against double-translation)', () => {
+      expect(absolutifyPath('/already/absolute.ts', root)).toBe('/already/absolute.ts');
+    });
+  });
+
+  describe('round-trip', () => {
+    it('preserves descendant paths through rel→abs→rel', () => {
+      const abs = `${root}/deeply/nested/file.ts`;
+      const rel = relativizePath(abs, root);
+      const abs2 = absolutifyPath(rel, root);
+      const rel2 = relativizePath(abs2, root);
+      expect(rel2).toBe(rel);
+    });
+
+    it('preserves the root through rel→abs→rel', () => {
+      const rel = relativizePath(root, root);
+      expect(rel).toBe('');
+      expect(absolutifyPath(rel, root)).toBe(root);
+    });
+
+    it('survives a host-root change (proves storage is host-portable)', () => {
+      // Same project, different host paths — relative form is stable.
+      const oldRoot = '/home/alice/dev/proj';
+      const newRoot = '/home/bob/work/proj';
+      const abs = `${oldRoot}/src/lib/utils.ts`;
+      const rel = relativizePath(abs, oldRoot);
+      expect(absolutifyPath(rel, newRoot)).toBe(`${newRoot}/src/lib/utils.ts`);
+    });
   });
 });
 

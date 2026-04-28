@@ -5,12 +5,71 @@
 import { eq, like, asc, or } from 'drizzle-orm';
 import { getDb, getSqlite } from './db.js';
 import { files, file_dependencies } from './schema.js';
+import { relativizePath, tryRelativizePath, absolutifyPath } from '../file-utils.js';
 import type { FileNode, PackageDependency } from '../types.js';
 import type { ExportSnapshot } from '../change-detector/types.js';
 import type { EdgeResult } from '../language-config.js';
 import type { CommunityResult } from '../community-detection.js';
 import type { Symbol as SymbolRow, SymbolKind } from './symbol-types.js';
 import type { ImportMeta } from '../change-detector/ast-parser.js';
+
+// ─── Project root state ────────────────────────────────────────────────────────
+// Set once per init by coordinator.ts (mirrors the getSqlite() handle pattern).
+// Required for the abs↔rel path translation done at every SQL boundary in this
+// module — the DB stores paths relative to projectRoot for host portability,
+// while callers continue to deal in absolute paths.
+//
+// Named distinctly from global-state.setProjectRoot() (which resets exclude
+// caches as a side effect) — that module owns its own root for unrelated
+// concerns. This one is purely the abs↔rel translation chokepoint.
+let _projectRoot: string | null = null;
+
+export function setRepoProjectRoot(root: string): void {
+  _projectRoot = root;
+}
+
+/**
+ * For tests and shutdown only. Production code should not call this — leaving
+ * the root set across DB lifecycles is fine because openDatabase() is paired
+ * with setRepoProjectRoot() in coordinator.init().
+ */
+export function clearRepoProjectRoot(): void {
+  _projectRoot = null;
+}
+
+function rootOrThrow(): string {
+  if (_projectRoot === null) {
+    throw new Error('repository: setRepoProjectRoot() must be called before any path-bearing query');
+  }
+  return _projectRoot;
+}
+
+/**
+ * Internal: translate an inbound absolute path to its DB-stored relative form.
+ * Throws if the path is not under projectRoot — use `relInOrNull` when an
+ * out-of-root input is expected and should be skipped silently (extracted
+ * cross-project edges).
+ */
+function relIn(absPath: string): string {
+  return relativizePath(absPath, rootOrThrow());
+}
+
+/**
+ * Internal: same as relIn but returns null on out-of-root rather than throwing.
+ * Use at write sites where extractor output may include cross-project refs.
+ */
+function relInOrNull(absPath: string): string | null {
+  return tryRelativizePath(absPath, rootOrThrow());
+}
+
+/**
+ * Internal: translate an outbound DB-stored relative path back to absolute.
+ * Used when projecting query results back to callers, who all deal in absolute
+ * paths (MCP tool boundary contract).
+ */
+function absOut(relPath: string): string {
+  return absolutifyPath(relPath, rootOrThrow());
+}
 
 // ─── Community dirty flag ──────────────────────────────────────────────────────
 // Module-level mutable flag: true = community cache is stale, Louvain must rerun.
