@@ -4,10 +4,10 @@
 # FileScopeMCP llama-server instance.
 #
 # Stack:
-#   - VictoriaMetrics (single binary, PromQL-compatible TSDB)  port :8428
-#   - node_exporter (with textfile collector)                  port :9100
+#   - Grafana (optional, --no-grafana to skip)                 port :8881
+#   - VictoriaMetrics (single binary, PromQL-compatible TSDB)  port :8882
+#   - node_exporter (with textfile collector)                  port :8883
 #   - nvidia-smi systemd timer -> textfile (no daemon)
-#   - Grafana (optional, --no-grafana to skip)                 port :3000
 #
 # Every long-lived service has a hard MemoryMax cgroup cap so a misbehaving
 # component cannot OOM-kill llama-server. Defaults assume llama-server is
@@ -69,9 +69,9 @@ if $STATUS_ONLY; then
     echo
     echo "Endpoints:"
     for url in "http://localhost:${LLAMA_PORT}/metrics" \
-               "http://localhost:8428/metrics" \
-               "http://localhost:9100/metrics" \
-               "http://localhost:3000/api/health"; do
+               "http://localhost:8882/metrics" \
+               "http://localhost:8883/metrics" \
+               "http://localhost:8881/api/health"; do
         if curl -sf -o /dev/null --max-time 2 "$url"; then
             ok "$url reachable"
         else
@@ -203,8 +203,8 @@ fi
 echo
 info "Verifying scrape targets (give VM ~5s to scrape):"
 sleep 5
-for url in "http://localhost:8428/metrics" \
-           "http://localhost:9100/metrics" \
+for url in "http://localhost:8882/metrics" \
+           "http://localhost:8883/metrics" \
            "http://localhost:${LLAMA_PORT}/metrics"; do
     if curl -sf -o /dev/null --max-time 3 "$url"; then ok "$url"; else warn "$url unreachable"; fi
 done
@@ -219,7 +219,7 @@ echo
 ok "Install complete."
 echo
 echo "Next steps:"
-echo "  1. Open Grafana:        http://$(hostname -I | awk '{print $1}'):3000  (admin/admin)"
+echo "  1. Open Grafana:        http://$(hostname -I | awk '{print $1}'):8881  (admin/admin)"
 echo "  2. Import dashboards:   1860 (Node Exporter Full), 21434 (llama.cpp)"
 echo "  3. Build a custom GPU panel from nvidia_smi_* metrics (memory_used_bytes etc)."
 echo "  4. Health check:        sudo ./install.sh --status"
