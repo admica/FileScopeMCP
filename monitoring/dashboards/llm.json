@@ -2,142 +2,154 @@
   "title": "FileScopeMCP LLM",
   "rows": [
     {
-      "title": "LLM at-a-glance",
+      "title": "Status",
       "panels": [
         {
-          "title": "llama-server up (1=up, 0=down)",
-          "width": 3,
+          "title": "STATUS (1 = running)",
+          "description": "1 if VictoriaMetrics is successfully scraping llama-server, 0 if it can't reach it.",
+          "width": 2,
           "expr": ["up{job=\"llamacpp\"}"],
           "showLegend": false
         },
         {
-          "title": "LLM uptime (since last restart)",
-          "width": 3,
-          "expr": ["time() - llama_server_start_time_seconds"],
+          "title": "uptime (seconds)",
+          "description": "Wall-clock seconds since the most recent llama-server start. Resets on restart.",
+          "width": 2,
           "unit": "s",
+          "expr": ["time() - llama_server_start_time_seconds"],
           "showLegend": false
         },
         {
-          "title": "Requests in flight",
-          "width": 3,
+          "title": "in flight",
+          "description": "Requests currently being processed by llama-server. 0 = idle.",
+          "width": 2,
           "expr": ["llamacpp:requests_processing"],
           "showLegend": false
         },
         {
-          "title": "Requests deferred (queued)",
-          "width": 3,
-          "expr": ["llamacpp:requests_deferred"],
-          "showLegend": false
-        }
-      ]
-    },
-    {
-      "title": "LLM throughput",
-      "panels": [
-        {
-          "title": "Generation rate (tokens/sec, 5m avg)",
-          "description": "Current token generation throughput. Computed from cumulative counters.",
-          "width": 6,
-          "expr": ["rate(llamacpp:tokens_predicted_total[5m]) / rate(llamacpp:tokens_predicted_seconds_total[5m])"],
-          "unit": "tok/s",
+          "title": "VRAM used %",
+          "description": "GPU memory used as a fraction of total. ~80%+ means model is loaded.",
+          "width": 2,
+          "unit": "%",
+          "expr": ["nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes * 100"],
           "showLegend": false
         },
-        {
-          "title": "Prompt processing rate (tokens/sec, 5m avg)",
-          "description": "Current prompt-processing throughput.",
-          "width": 6,
-          "expr": ["rate(llamacpp:prompt_tokens_total[5m]) / rate(llamacpp:prompt_seconds_total[5m])"],
-          "unit": "tok/s",
-          "showLegend": false
-        }
-      ]
-    },
-    {
-      "title": "GPU",
-      "panels": [
-        {
-          "title": "VRAM used",
-          "description": "GPU memory consumed. Watch for sustained climbs near total.",
-          "width": 3,
-          "expr": ["nvidia_smi_memory_used_bytes"],
-          "alias": ["{{name}}"],
-          "unit": "B"
-        },
-        {
-          "title": "GPU compute utilization",
-          "width": 3,
-          "expr": ["nvidia_smi_gpu_utilization_ratio * 100"],
-          "alias": ["{{name}}"],
-          "unit": "%"
-        },
-        {
-          "title": "GPU temperature",
-          "width": 3,
-          "expr": ["nvidia_smi_temperature_celsius"],
-          "alias": ["{{name}}"],
-          "unit": "°C"
-        },
-        {
-          "title": "GPU power draw",
-          "width": 3,
-          "expr": ["nvidia_smi_power_draw_watts"],
-          "alias": ["{{name}}"],
-          "unit": "W"
-        }
-      ]
-    },
-    {
-      "title": "System resources",
-      "panels": [
         {
           "title": "RAM available",
-          "description": "Free + reclaimable. If this trends down, the LLM is under pressure.",
-          "width": 4,
+          "description": "Free + reclaimable system RAM. Watch for sustained drops while under load.",
+          "width": 2,
+          "unit": "B",
           "expr": ["node_memory_MemAvailable_bytes"],
-          "unit": "B",
           "showLegend": false
         },
         {
-          "title": "Swap used",
-          "description": "Non-zero swap = paging. Sustained > 100MB means thrashing risk.",
-          "width": 4,
-          "expr": ["node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes"],
-          "unit": "B",
+          "title": "load 1m",
+          "description": "System load average over the last minute.",
+          "width": 2,
+          "expr": ["node_load1"],
           "showLegend": false
-        },
-        {
-          "title": "Load average",
-          "width": 4,
-          "expr": [
-            "node_load1",
-            "node_load5",
-            "node_load15"
-          ],
-          "alias": ["1 min", "5 min", "15 min"]
         }
       ]
     },
     {
-      "title": "Cumulative work (since last LLM restart)",
+      "title": "Throughput",
       "panels": [
         {
-          "title": "Total prompt tokens processed",
+          "title": "Gen speed during generation (tok/s)",
+          "description": "Tokens generated per second of *generation time* (idle time excluded). Measures the model's actual speed when working. Goes to NaN when idle (no recent generation).",
+          "width": 3,
+          "unit": "tok/s",
+          "expr": ["rate(llamacpp:tokens_predicted_total[5m]) / rate(llamacpp:tokens_predicted_seconds_total[5m])"],
+          "showLegend": false
+        },
+        {
+          "title": "Prompt speed during processing (tok/s)",
+          "description": "Tokens processed per second of *prompt-processing time*. Measures prompt throughput while working. Typically much higher than gen speed.",
+          "width": 3,
+          "unit": "tok/s",
+          "expr": ["rate(llamacpp:prompt_tokens_total[5m]) / rate(llamacpp:prompt_seconds_total[5m])"],
+          "showLegend": false
+        },
+        {
+          "title": "Tokens generated / min (wall-clock)",
+          "description": "Output tokens per minute over wall-clock time. 0 = idle. Different from 'Gen speed during generation' — this drops when the LLM isn't being used.",
+          "width": 3,
+          "unit": "tok/min",
+          "expr": ["rate(llamacpp:tokens_predicted_total[5m]) * 60"],
+          "showLegend": false
+        },
+        {
+          "title": "Prompt tokens / min (wall-clock)",
+          "description": "Prompt tokens consumed per minute over wall-clock time. 0 = no requests arriving.",
+          "width": 3,
+          "unit": "tok/min",
+          "expr": ["rate(llamacpp:prompt_tokens_total[5m]) * 60"],
+          "showLegend": false
+        }
+      ]
+    },
+    {
+      "title": "Cumulative work (since llama-server start)",
+      "panels": [
+        {
+          "title": "Total prompt tokens consumed",
+          "description": "Counter — only resets when llama-server restarts. Slope shows recent work volume.",
           "width": 4,
-          "expr": ["llamacpp:prompt_tokens_total"],
           "unit": "tokens",
+          "expr": ["llamacpp:prompt_tokens_total"],
           "showLegend": false
         },
         {
           "title": "Total tokens generated",
+          "description": "Counter — total output tokens since llama-server started. Steeper slope = more work.",
           "width": 4,
-          "expr": ["llamacpp:tokens_predicted_total"],
           "unit": "tokens",
+          "expr": ["llamacpp:tokens_predicted_total"],
           "showLegend": false
         },
         {
-          "title": "Total decode() calls",
+          "title": "Largest batch seen (tokens)",
+          "description": "Max n_tokens observed in any single decode batch. Indicator of how close you've come to the 98K context limit.",
           "width": 4,
-          "expr": ["llamacpp:n_decode_total"],
+          "unit": "tokens",
+          "expr": ["llamacpp:n_tokens_max"],
+          "showLegend": false
+        }
+      ]
+    },
+    {
+      "title": "Resources over time",
+      "panels": [
+        {
+          "title": "VRAM used (bytes)",
+          "description": "Absolute VRAM consumption. Sudden climbs near total = model growing or memory leak.",
+          "width": 3,
+          "unit": "B",
+          "expr": ["nvidia_smi_memory_used_bytes"],
+          "showLegend": false
+        },
+        {
+          "title": "Swap used",
+          "description": "Sustained > 100MB indicates the box is paging — risk of llama-server OOM/slowdown.",
+          "width": 3,
+          "unit": "B",
+          "expr": ["node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes"],
+          "showLegend": false
+        },
+        {
+          "title": "CPU busy %",
+          "description": "Aggregate CPU utilization across all cores. High during prompt processing on CPU-offloaded MoE experts.",
+          "width": 3,
+          "unit": "%",
+          "expr": ["100 - 100 * avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))"],
+          "showLegend": false
+        },
+        {
+          "title": "GPU compute %",
+          "description": "How busy the GPU's compute units are. Spikes during inference, near 0 when idle.",
+          "width": 3,
+          "unit": "%",
+          "expr": ["nvidia_smi_gpu_utilization_ratio * 100"],
           "showLegend": false
         }
       ]
