@@ -1,0 +1,12 @@
+[Unit]
+Description=Run nvidia-smi-textfile every 15s
+Requires=nvidia-smi-textfile.service
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=15s
+AccuracySec=1s
+Unit=nvidia-smi-textfile.service
+
+[Install]
+WantedBy=timers.target

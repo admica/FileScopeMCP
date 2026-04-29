@@ -293,15 +293,13 @@ llama-server \\
   -m $MODEL_PATH \\
   --alias $MODEL_ALIAS \\
   -c $CONTEXT_SIZE \\
-  -n 32768 \\
   -ngl 99 \\
   --n-cpu-moe 14 \\
   -fa on \\
   --no-mmap \\
   --mlock \\
-  -b 2048 -ub 512 \\
+  -b 2048 -ub 768 \\
   --cache-type-k q8_0 --cache-type-v q8_0 \\
-  --swa-full \\
   --no-context-shift \\
   --ctx-checkpoints 128 \\
   --checkpoint-every-n-tokens 4096 \\

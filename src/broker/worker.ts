@@ -56,6 +56,20 @@ function createLLMModel(config: BrokerConfig['llm']): LanguageModel {
         name: 'custom',
         baseURL: config.baseURL!,
         apiKey: config.apiKey ?? 'llama',
+        // Disable Qwen3.6 / DeepSeek-R1-style chain-of-thought for every broker
+        // request. Constrained-decoding tasks (concepts, change_impact) cannot
+        // benefit from a thinking phase — the JSON-Schema sampling mask makes
+        // pre-output deliberation impossible to influence the result. The
+        // server's CLI default (`--chat-template-kwargs preserve_thinking:true`)
+        // is for interactive clients (hermes); this per-request override
+        // affects only the broker's provider instance.
+        transformRequestBody: (body) => ({
+          ...body,
+          chat_template_kwargs: {
+            ...(body as Record<string, unknown>).chat_template_kwargs as Record<string, unknown> | undefined,
+            enable_thinking: false,
+          },
+        }),
       });
       // supportsStructuredOutputs enables response_format dispatch so the SDK
       // can request JSON-mode / JSON-schema sampling from the underlying server

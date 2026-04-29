@@ -1,0 +1,26 @@
+[Unit]
+Description=Prometheus Node Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prometheus
+Group=prometheus
+ExecStart=/usr/local/bin/node_exporter \
+    --collector.textfile.directory=/var/lib/node_exporter/textfile_collector \
+    --web.listen-address=:8883
+Restart=on-failure
+RestartSec=5
+
+MemoryHigh=48M
+MemoryMax=64M
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/node_exporter
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

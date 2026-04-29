@@ -1,0 +1,16 @@
+[Unit]
+Description=Emit nvidia-smi GPU metrics for node_exporter textfile collector
+After=node_exporter.service
+Requires=node_exporter.service
+
+[Service]
+Type=oneshot
+User=prometheus
+Group=prometheus
+ExecStart=/usr/local/bin/nvidia-smi-textfile.sh /var/lib/node_exporter/textfile_collector/nvidia_smi.prom
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+PrivateTmp=true

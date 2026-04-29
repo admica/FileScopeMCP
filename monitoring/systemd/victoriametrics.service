@@ -1,0 +1,31 @@
+[Unit]
+Description=VictoriaMetrics single-node TSDB (Prometheus-compatible)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prometheus
+Group=prometheus
+ExecStart=/usr/local/bin/victoria-metrics-prod \
+    -storageDataPath=/var/lib/victoriametrics \
+    -retentionPeriod=7d \
+    -promscrape.config=/etc/victoriametrics/prometheus.yml \
+    -httpListenAddr=:8882 \
+    -memory.allowedPercent=70 \
+    -loggerLevel=WARN
+Restart=on-failure
+RestartSec=5
+
+# Hard memory cap: cgroup-kills VM before it can OOM-kill llama-server.
+MemoryHigh=200M
+MemoryMax=256M
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/victoriametrics
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

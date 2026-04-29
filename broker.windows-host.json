@@ -1,10 +1,6 @@
 {
-  "llm": {
-    "provider": "openai-compatible",
-    "model": "llm-model",
-    "baseURL": "http://wsl-host:8880/v1",
-    "maxTokensPerCall": 1024
-  },
-  "jobTimeoutMs": 120000,
-  "maxQueueSize": 1000
+  "windows_host": "127.0.0.53",
+  "port": 8880,
+  "model_alias": "FileScopeMCP-brain",
+  "timeout": 30
 }
