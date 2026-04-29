@@ -1,0 +1,146 @@
+{
+  "title": "FileScopeMCP LLM",
+  "rows": [
+    {
+      "title": "LLM at-a-glance",
+      "panels": [
+        {
+          "title": "llama-server up (1=up, 0=down)",
+          "width": 3,
+          "expr": ["up{job=\"llamacpp\"}"],
+          "showLegend": false
+        },
+        {
+          "title": "LLM uptime (since last restart)",
+          "width": 3,
+          "expr": ["time() - llama_server_start_time_seconds"],
+          "unit": "s",
+          "showLegend": false
+        },
+        {
+          "title": "Requests in flight",
+          "width": 3,
+          "expr": ["llamacpp:requests_processing"],
+          "showLegend": false
+        },
+        {
+          "title": "Requests deferred (queued)",
+          "width": 3,
+          "expr": ["llamacpp:requests_deferred"],
+          "showLegend": false
+        }
+      ]
+    },
+    {
+      "title": "LLM throughput",
+      "panels": [
+        {
+          "title": "Generation rate (tokens/sec, 5m avg)",
+          "description": "Current token generation throughput. Computed from cumulative counters.",
+          "width": 6,
+          "expr": ["rate(llamacpp:tokens_predicted_total[5m]) / rate(llamacpp:tokens_predicted_seconds_total[5m])"],
+          "unit": "tok/s",
+          "showLegend": false
+        },
+        {
+          "title": "Prompt processing rate (tokens/sec, 5m avg)",
+          "description": "Current prompt-processing throughput.",
+          "width": 6,
+          "expr": ["rate(llamacpp:prompt_tokens_total[5m]) / rate(llamacpp:prompt_seconds_total[5m])"],
+          "unit": "tok/s",
+          "showLegend": false
+        }
+      ]
+    },
+    {
+      "title": "GPU",
+      "panels": [
+        {
+          "title": "VRAM used",
+          "description": "GPU memory consumed. Watch for sustained climbs near total.",
+          "width": 3,
+          "expr": ["nvidia_smi_memory_used_bytes"],
+          "alias": ["{{name}}"],
+          "unit": "B"
+        },
+        {
+          "title": "GPU compute utilization",
+          "width": 3,
+          "expr": ["nvidia_smi_gpu_utilization_ratio * 100"],
+          "alias": ["{{name}}"],
+          "unit": "%"
+        },
+        {
+          "title": "GPU temperature",
+          "width": 3,
+          "expr": ["nvidia_smi_temperature_celsius"],
+          "alias": ["{{name}}"],
+          "unit": "°C"
+        },
+        {
+          "title": "GPU power draw",
+          "width": 3,
+          "expr": ["nvidia_smi_power_draw_watts"],
+          "alias": ["{{name}}"],
+          "unit": "W"
+        }
+      ]
+    },
+    {
+      "title": "System resources",
+      "panels": [
+        {
+          "title": "RAM available",
+          "description": "Free + reclaimable. If this trends down, the LLM is under pressure.",
+          "width": 4,
+          "expr": ["node_memory_MemAvailable_bytes"],
+          "unit": "B",
+          "showLegend": false
+        },
+        {
+          "title": "Swap used",
+          "description": "Non-zero swap = paging. Sustained > 100MB means thrashing risk.",
+          "width": 4,
+          "expr": ["node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes"],
+          "unit": "B",
+          "showLegend": false
+        },
+        {
+          "title": "Load average",
+          "width": 4,
+          "expr": [
+            "node_load1",
+            "node_load5",
+            "node_load15"
+          ],
+          "alias": ["1 min", "5 min", "15 min"]
+        }
+      ]
+    },
+    {
+      "title": "Cumulative work (since last LLM restart)",
+      "panels": [
+        {
+          "title": "Total prompt tokens processed",
+          "width": 4,
+          "expr": ["llamacpp:prompt_tokens_total"],
+          "unit": "tokens",
+          "showLegend": false
+        },
+        {
+          "title": "Total tokens generated",
+          "width": 4,
+          "expr": ["llamacpp:tokens_predicted_total"],
+          "unit": "tokens",
+          "showLegend": false
+        },
+        {
+          "title": "Total decode() calls",
+          "width": 4,
+          "expr": ["llamacpp:n_decode_total"],
+          "showLegend": false
+        }
+      ]
+    }
+  ]
+}

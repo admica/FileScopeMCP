@@ -32,6 +32,8 @@ VRAM_SOURCE=""
 GPU_NAME=""
 STATUS_ONLY=false
 LAUNCH_ONLY=false
+INSTALL_SERVICE_ONLY=false
+START_SCRIPT="${HOME}/start-llama-server.sh"
 
 # --- Colors (degrade gracefully) ---
 GREEN='\033[1;32m'
@@ -58,6 +60,17 @@ while [[ $# -gt 0 ]]; do
             LAUNCH_ONLY=true
             shift
             ;;
+        --install-service)
+            INSTALL_SERVICE_ONLY=true
+            shift
+            ;;
+        --start-script)
+            if [[ -z "${2:-}" ]]; then
+                die "--start-script requires a path (e.g. ~/start-llama-server.sh)"
+            fi
+            START_SCRIPT="$2"
+            shift 2
+            ;;
         --model)
             if [[ -z "${2:-}" ]]; then
                 die "--model requires a path to a GGUF file (e.g. ~/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf)"
@@ -71,11 +84,16 @@ while [[ $# -gt 0 ]]; do
 Usage: ./setup-llm.sh [OPTIONS]
 
 Options:
-  --launch          Print the exact llama-server launch command to stdout
-  --model <path>    Override the GGUF model file path
-                    Default: $MODEL_PATH_DEFAULT
-  --status          Check llama-server reachability and broker config
-  --help, -h        Show this help
+  --launch              Print the exact llama-server launch command to stdout
+  --model <path>        Override the GGUF model file path
+                        Default: $MODEL_PATH_DEFAULT
+  --status              Check llama-server reachability and broker config
+  --install-service     Install systemd unit at /etc/systemd/system/llama-server.service
+                        and enable it (Linux only — refuses to run under WSL since
+                        llama-server runs on the Windows host in that case).
+  --start-script <path> Path to the shell script the unit should ExecStart
+                        (default: \$HOME/start-llama-server.sh).
+  --help, -h            Show this help
 
 Architecture:
   - Default model is Qwen3.6 35B A3B MoE: 35B total params, ~3B active per token.
@@ -541,36 +559,14 @@ linux_guide() {
     echo ""
     echo -e "  ${GREEN}Run as a systemd service (optional):${NC}"
     echo ""
-    echo -e "    Create ${CYAN}/etc/systemd/system/llama-server.service${NC}:"
+    echo -e "    The unit template lives at ${CYAN}monitoring/systemd/llama-server.service${NC}."
+    echo -e "    To install (writes /etc/systemd/system/llama-server.service, enables, starts):"
     echo ""
-    cat <<EOF
-    [Unit]
-    Description=llama.cpp server for FileScopeMCP
-    After=network.target
-
-    [Service]
-    Type=simple
-    User=$USER
-    Environment="CUDA_VISIBLE_DEVICES=0"
-    ExecStart=/path/to/llama-server \\
-      -m $MODEL_PATH \\
-      --alias $MODEL_ALIAS \\
-      -c $CONTEXT_SIZE -n 32768 -ngl 99 --n-cpu-moe 14 -fa on \\
-      --no-mmap --mlock -b 2048 -ub 512 \\
-      --cache-type-k q8_0 --cache-type-v q8_0 \\
-      --swa-full --no-context-shift \\
-      --ctx-checkpoints 128 --checkpoint-every-n-tokens 4096 --cache-ram 4096 \\
-      --jinja --reasoning-format deepseek --reasoning-budget 4096 \\
-      --host 0.0.0.0 --port $LLM_PORT --metrics -np 1
-    Restart=on-failure
-    RestartSec=5s
-
-    [Install]
-    WantedBy=multi-user.target
-EOF
+    echo -e "      ${CYAN}sudo $(realpath "$0") --install-service${NC}"
     echo ""
-    echo -e "    ${CYAN}sudo systemctl daemon-reload${NC}"
-    echo -e "    ${CYAN}sudo systemctl enable --now llama-server${NC}"
+    echo -e "    The unit assumes your launch script is at ${CYAN}\$HOME/start-llama-server.sh${NC}"
+    echo -e "    — override with ${CYAN}--start-script /path/to/script${NC}. The unit also writes a"
+    echo -e "    start-time metric for the monitoring dashboard's 'LLM uptime' panel."
     echo ""
 }
 
@@ -698,6 +694,60 @@ show_status() {
 }
 
 # ============================================================================
+# Install systemd unit (--install-service)
+# ============================================================================
+install_service() {
+    if is_wsl; then
+        die "WSL2 detected — llama-server runs on the Windows host in this setup, not inside WSL. Skipping systemd install."
+    fi
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        die "macOS detected — systemd is Linux-only. Use launchd or run llama-server in a terminal/tmux instead."
+    fi
+
+    [[ $EUID -eq 0 ]] || die "--install-service must be run with sudo"
+
+    local template="$SCRIPT_DIR/monitoring/systemd/llama-server.service"
+    [[ -f "$template" ]] || die "Unit template not found: $template"
+
+    [[ -f "$START_SCRIPT" ]] || die "Start script not found: $START_SCRIPT (override with --start-script PATH)"
+    chmod +x "$START_SCRIPT" 2>/dev/null || true
+
+    local target=/etc/systemd/system/llama-server.service
+    local owning_user="${SUDO_USER:-$USER}"
+
+    info "Installing $target"
+    info "  User=$owning_user"
+    info "  ExecStart=$START_SCRIPT"
+
+    # Make sure the textfile_collector dir exists for ExecStartPost.
+    install -d -m 0755 /var/lib/node_exporter/textfile_collector 2>/dev/null || true
+
+    sed -e "s|__USER__|${owning_user}|g" \
+        -e "s|__START_SCRIPT__|${START_SCRIPT}|g" \
+        "$template" > "$target"
+    chmod 0644 "$target"
+
+    systemctl daemon-reload
+    ok "daemon-reloaded"
+
+    if ! systemctl is-enabled --quiet llama-server.service 2>/dev/null; then
+        systemctl enable llama-server.service
+        ok "enabled at boot"
+    else
+        ok "already enabled at boot"
+    fi
+
+    if systemctl is-active --quiet llama-server.service 2>/dev/null; then
+        warn "llama-server already running. To apply unit changes, run:"
+        warn "  sudo systemctl restart llama-server"
+    else
+        systemctl start llama-server.service
+        ok "llama-server started"
+    fi
+}
+
+# ============================================================================
 # Dispatch
 # ============================================================================
 
@@ -708,6 +758,11 @@ fi
 
 if $STATUS_ONLY; then
     show_status
+    exit 0
+fi
+
+if $INSTALL_SERVICE_ONLY; then
+    install_service
     exit 0
 fi
 

@@ -1,0 +1,31 @@
+[Unit]
+Description=llama.cpp server (FileScopeMCP backend)
+After=network.target network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+ExecStart=__START_SCRIPT__
+# Record start time to a textfile that node_exporter scrapes; used by the
+# dashboard's "LLM uptime" panel. Runs as root (+ prefix) because the
+# textfile collector dir is owned by the prometheus user. %%s escapes
+# systemd's own specifier so sh receives a literal `date +%s`.
+ExecStartPost=+/bin/sh -c 'echo "llama_server_start_time_seconds $(date +%%s)" > /var/lib/node_exporter/textfile_collector/llama_server_uptime.prom'
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/lib64/stubs
+
+# Make llama-server very low-priority for OOM kill: kernel picks lighter
+# workloads (start.sh, broker, etc) before sacrificing the LLM.
+OOMScoreAdjust=-500
+
+# Capture llama-server stderr/stdout in the journal so they survive a crash.
+# Previously eaten by tmux session buffer when the unit wrapped llama-server
+# in tmux.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llama-server
+
+[Install]
+WantedBy=multi-user.target

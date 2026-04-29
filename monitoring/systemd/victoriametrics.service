@@ -11,15 +11,18 @@ ExecStart=/usr/local/bin/victoria-metrics-prod \
     -storageDataPath=/var/lib/victoriametrics \
     -retentionPeriod=7d \
     -promscrape.config=/etc/victoriametrics/prometheus.yml \
-    -httpListenAddr=:8882 \
-    -memory.allowedPercent=70 \
+    -httpListenAddr=:8881 \
+    -memory.allowedBytes=64MB \
+    -search.maxConcurrentRequests=1 \
+    -vmui.customDashboardsPath=/etc/victoriametrics/dashboards \
     -loggerLevel=WARN
 Restart=on-failure
 RestartSec=5
 
 # Hard memory cap: cgroup-kills VM before it can OOM-kill llama-server.
-MemoryHigh=200M
-MemoryMax=256M
+# Aggressive footprint for memory-tight single-host setup.
+MemoryHigh=100M
+MemoryMax=128M
 
 NoNewPrivileges=true
 ProtectSystem=strict
