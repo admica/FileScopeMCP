@@ -67,13 +67,23 @@ mcp_servers:
 
 ### LLM Summaries (Optional)
 
-Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. Without it, everything else still works (file tracking, dependencies, symbols, call graphs — just no LLM-generated summaries). If your agent runtime already has a local LLM, configure the broker to reuse it instead.
+Run `./setup-llm.sh` for a platform-specific guide to setting up llama.cpp's `llama-server` — see [docs/llm-setup.md](docs/llm-setup.md) for details. On Linux you can also `sudo ./setup-llm.sh --install-service` to register llama-server as a systemd unit (logs flow to journalctl, OOM-protected, auto-restart on boot). The flag is a no-op under WSL2 since llama-server runs on the Windows host there. Without llama-server entirely, everything else still works (file tracking, dependencies, symbols, call graphs — just no LLM-generated summaries). If your agent runtime already has a local LLM, configure the broker to reuse it instead.
 
 Add to your project's `.gitignore`:
 ```
 .filescope/
 .filescope-daemon.log
 ```
+
+### LLM Monitoring (Optional)
+
+If llama-server is running locally, an optional VictoriaMetrics + vmui stack gives you a single-pane dashboard for VRAM, RAM, swap, throughput, and cumulative work. Total resident footprint ~120 MB, capped via systemd cgroups so a misbehaving exporter can't OOM-kill llama-server.
+
+```bash
+sudo ./monitoring/install.sh
+```
+
+Browse the dashboard at `http://<host>:8881/vmui/#/dashboards`. See [monitoring/](monitoring/) for the layout and uninstall script.
 
 ## MCP Tools
 
@@ -140,6 +150,7 @@ Everything lives in `.filescope/data.db` (SQLite, WAL mode) per project. The bro
 | [MCP Clients](docs/mcp-clients.md) | Setup for Claude Code, Cursor AI, daemon mode |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Internals](docs/internals.md) | Dependency detection, importance formula, symbol extraction, call-site edges, storage |
+| [LLM Monitoring](monitoring/) | Optional VictoriaMetrics + vmui dashboard for the local llama-server |
 
 ## License
 

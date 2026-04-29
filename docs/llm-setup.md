@@ -73,6 +73,24 @@ Verify with:
 
 No broker config changes are needed — the default `broker.default.json` template points at `localhost:8880`, and the broker auto-copies it to `~/.filescope/broker.json` on first start if the file is missing.
 
+### Run as a systemd service (Linux only)
+
+Once your launch script (typically `~/start-llama-server.sh`, the command `./setup-llm.sh --launch` prints) is in place, register llama-server as a systemd unit so it auto-starts on boot, restarts on failure, and logs to `journalctl`:
+
+```bash
+sudo ./setup-llm.sh --install-service
+```
+
+The unit lives at `/etc/systemd/system/llama-server.service` (template at `monitoring/systemd/llama-server.service`). It captures stdout/stderr to the journal, sets `OOMScoreAdjust=-500` so the kernel picks lighter workloads first under memory pressure, and writes a start-time metric used by the optional [monitoring dashboard](../monitoring/). Override the launch-script path with `--start-script /path/to/script` if it isn't at `$HOME/start-llama-server.sh`.
+
+The flag is refused under WSL2 — see the [WSL2 + Windows GPU](#wsl2--windows-gpu) section instead.
+
+Tail logs with:
+
+```bash
+sudo journalctl -u llama-server -f
+```
+
 ---
 
 ## WSL2 + Windows GPU
