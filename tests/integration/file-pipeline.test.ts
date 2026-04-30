@@ -22,9 +22,10 @@ import {
   writeLlmResult,
   clearStaleness,
   deleteFile,
+  getSymbolsForFile,
 } from '../../src/db/repository.js';
 import { extractEdges } from '../../src/language-config.js';
-import { calculateImportance, buildDependentMap, scanDirectory } from '../../src/file-utils.js';
+import { calculateImportance, buildDependentMap, scanDirectory, addFileNode, updateFileNodeOnChange } from '../../src/file-utils.js';
 import { extractSnapshot } from '../../src/change-detector/ast-parser.js';
 import { computeSemanticDiff } from '../../src/change-detector/semantic-diff.js';
 import { detectCycles } from '../../src/cycle-detection.js';
@@ -333,6 +334,68 @@ describe('File deletion cleanup', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Multi-file importance with real DB
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// analyzeNewFile dispatch — non-TS/JS symbol freshness on file change/add
+// Regression guard: before the fix, .py/.go/.rb file-change events bypassed
+// extractLangFileParse and never refreshed the symbols table.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('analyzeNewFile dispatch — Python file change refreshes symbols', () => {
+  beforeEach(() => {
+    const sqlite = getSqlite();
+    sqlite.exec('DELETE FROM symbols;');
+  });
+
+  it('addFileNode writes Python symbols (not just edges) on first add', async () => {
+    const fixtureDir = await fs.mkdtemp(path.join(tmpDir, 'pyadd-'));
+    const pyPath = path.join(fixtureDir, 'sample.py');
+    await fs.writeFile(pyPath, [
+      'def alpha():',
+      '    return 1',
+      '',
+      'class Greeter:',
+      '    pass',
+      '',
+    ].join('\n'));
+
+    const root: FileNode = {
+      path: fixtureDir,
+      name: path.basename(fixtureDir),
+      isDirectory: true,
+      children: [],
+    };
+
+    await addFileNode(pyPath, root, fixtureDir);
+
+    const syms = getSymbolsForFile(pyPath);
+    const names = syms.map(s => s.name).sort();
+    expect(names).toEqual(['Greeter', 'alpha']);
+  });
+
+  it('updateFileNodeOnChange refreshes Python symbols when content changes', async () => {
+    const fixtureDir = await fs.mkdtemp(path.join(tmpDir, 'pychange-'));
+    const pyPath = path.join(fixtureDir, 'sample.py');
+    await fs.writeFile(pyPath, 'def alpha():\n    return 1\n');
+
+    const root: FileNode = {
+      path: fixtureDir,
+      name: path.basename(fixtureDir),
+      isDirectory: true,
+      children: [],
+    };
+
+    await addFileNode(pyPath, root, fixtureDir);
+    expect(getSymbolsForFile(pyPath).map(s => s.name)).toEqual(['alpha']);
+
+    // Simulate edit — append a new function and remove the old one.
+    await fs.writeFile(pyPath, 'def gamma():\n    return 99\n');
+    await updateFileNodeOnChange(pyPath, root, fixtureDir);
+
+    const namesAfter = getSymbolsForFile(pyPath).map(s => s.name).sort();
+    expect(namesAfter).toEqual(['gamma']);
+  });
+});
 
 describe('Multi-file importance with DB', () => {
   it('hub file (many dependents) gets higher importance than leaf file', () => {

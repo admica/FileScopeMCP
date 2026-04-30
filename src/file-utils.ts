@@ -5,7 +5,7 @@ import { FileNode, PackageDependency, FileTreeConfig } from "./types.js";
 import { getProjectRoot, getConfig, addExclusionPattern, getFilescopeIgnore } from './global-state.js';
 import { log } from './logger.js'; // Import the logger
 import { upsertFile, deleteFile, setEdges, setEdgesAndSymbols } from './db/repository.js';
-import { extractEdges, extractTsJsFileParse } from './language-config.js';
+import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
 import type { Symbol as SymbolRow } from './db/symbol-types.js';
 import type { ImportMeta } from './change-detector/ast-parser.js';
@@ -929,7 +929,17 @@ async function analyzeNewFile(filePath: string, projectRoot: string): Promise<{
       edges = await extractEdges(filePath, content, projectRoot);
     }
   } else {
-    edges = await extractEdges(filePath, content, projectRoot);
+    // Phase 36/37 freshness wiring: route .py/.go/.rb through extractLangFileParse so
+    // symbols re-extract on file change/add (not just first-boot bulk migration). Returns
+    // null for unsupported extensions, falling back to edges-only.
+    const parsed = await extractLangFileParse(filePath, content, projectRoot);
+    if (parsed) {
+      edges = parsed.edges;
+      symbols = parsed.symbols;
+      useAtomicWrite = true;
+    } else {
+      edges = await extractEdges(filePath, content, projectRoot);
+    }
   }
 
   const dependencies = edges
@@ -1001,7 +1011,16 @@ export async function updateFileNodeOnChange(
   const pkgDepsChanged = JSON.stringify(existingNode.packageDependencies) !== JSON.stringify(newPkgDeps);
 
   if (!depsChanged && !pkgDepsChanged) {
-    log(`[updateFileNodeOnChange] No dependency changes detected for ${normalizedFilePath}`);
+    // Renaming or adding a function/class inside a file changes symbols without
+    // changing imports. Persist the symbol set even though the tree didn't mutate,
+    // otherwise find_symbol returns stale data for the rest of the session.
+    // The reverse-dep map and importance graph are unchanged, so we skip those.
+    if (useAtomicWrite) {
+      setEdgesAndSymbols(existingNode.path, edges, symbols, importMeta, callSiteEdges);
+      log(`[updateFileNodeOnChange] No dep changes for ${normalizedFilePath}; persisted refreshed symbols`);
+    } else {
+      log(`[updateFileNodeOnChange] No dependency changes detected for ${normalizedFilePath}`);
+    }
     return false;
   }
 
