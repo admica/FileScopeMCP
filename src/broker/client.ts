@@ -62,6 +62,25 @@ export function disconnect(): void {
   }
 }
 
+// File extensions where the `concepts` schema (functions/classes/interfaces/exports)
+// is semantically meaningless: data, configs, docs, web assets, lockfiles. Submitting
+// them produces ~30% schema-parse failures from small models that have no valid
+// content to populate the typed buckets with. Summaries are still useful for these
+// (purpose / overview prose), so the filter is concepts-only.
+const NO_CONCEPTS_EXTENSIONS = new Set([
+  'md', 'mdx', 'txt', 'rst', 'adoc',
+  'json', 'json5', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env',
+  'css', 'scss', 'sass', 'less', 'html', 'htm', 'svg', 'xml',
+  'lock', 'csv', 'tsv',
+]);
+
+function fileExtension(filePath: string): string {
+  const lastDot = filePath.lastIndexOf('.');
+  const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+  if (lastDot <= lastSlash) return '';
+  return filePath.slice(lastDot + 1).toLowerCase();
+}
+
 /**
  * Submit a job to the broker. Fire-and-forget — silently dropped if not connected.
  */
@@ -73,6 +92,10 @@ export function submitJob(
   payload?: string,
 ): void {
   if (!isConnected()) return;
+
+  if (jobType === 'concepts' && NO_CONCEPTS_EXTENSIONS.has(fileExtension(filePath))) {
+    return;
+  }
 
   const msg: SubmitMessage = {
     type: 'submit',

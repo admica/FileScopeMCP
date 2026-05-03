@@ -239,11 +239,15 @@ export class BrokerWorker {
         // "Unexpected token 'T'" failures where weak JSON-followers replied
         // with prose. Schema validation runs inside the SDK; a failure surfaces
         // here as a thrown error and is reported as code='llm_error' upstream.
+        // temperature=0 because grammar-constrained JSON has no benefit from
+        // sampling diversity — higher temperatures only widen the distribution
+        // of edge-case schema failures on weak open-weight models (Qwen3.6-class).
         const { experimental_output, usage } = await generateText({
           model: this.model,
           system: SYSTEM_PROMPT,
           prompt: buildConceptsPrompt(job.filePath, job.fileContent),
           maxOutputTokens,
+          temperature: 0,
           abortSignal: signal,
           experimental_output: Output.object({ schema: ConceptsSchema }),
         });
@@ -259,6 +263,7 @@ export class BrokerWorker {
           system: SYSTEM_PROMPT,
           prompt: buildChangeImpactPrompt(job.filePath, job.payload),
           maxOutputTokens,
+          temperature: 0,
           abortSignal: signal,
           experimental_output: Output.object({ schema: ChangeImpactSchema }),
         });

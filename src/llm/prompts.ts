@@ -27,6 +27,18 @@ Given a source file, extract metadata as a JSON object with exactly these fields
 - exports: ALL top-level export identifiers (superset of above — includes constants, variables, re-exports)
 - purpose: one sentence describing what the file does
 
+EXAMPLE concepts response:
+Input file (src/utils/format.ts):
+  export function formatDate(d: Date): string { return d.toISOString(); }
+  export class Formatter { static padLeft(s: string, n: number): string { return s.padStart(n); } }
+  export interface FormatOptions { locale?: string; }
+  export const DEFAULT_LOCALE = 'en-US';
+  function _internalHelper() {}
+Output:
+{"functions":["formatDate"],"classes":["Formatter"],"interfaces":["FormatOptions"],"exports":["formatDate","Formatter","FormatOptions","DEFAULT_LOCALE"],"purpose":"Date formatting utilities with a Formatter class and a default-locale constant."}
+
+If the file has no exported identifiers, return all arrays as [] and write a brief purpose. Never omit a field.
+
 TASK: change_impact
 Given a unified diff, assess its impact as a JSON object with exactly these fields:
 {"riskLevel": "", "affectedAreas": [], "breakingChanges": [], "summary": ""}
