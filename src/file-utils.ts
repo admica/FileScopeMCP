@@ -373,6 +373,8 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
       break;
     case '.js':
     case '.jsx':
+    case '.mjs':
+    case '.cjs':
       importance += 2;
       break;
     case '.php':
@@ -400,6 +402,9 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
       else importance += 1;
       break;
     case '.rb':
+      importance += 2;
+      break;
+    case '.py':
       importance += 2;
       break;
     case '.c':

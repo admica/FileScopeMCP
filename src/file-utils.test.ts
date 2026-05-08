@@ -933,6 +933,39 @@ describe('Ruby import parsing', () => {
     expect(gemfileNode).toBeDefined();
     expect(gemfileNode!.importance).toBeGreaterThanOrEqual(3);
   });
+
+  it('calculateInitialImportance returns >= 2 for .py files', async () => {
+    const pyFile = path.join(tempDir, 'helpers.py');
+    fs.writeFileSync(pyFile, '# python file\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const pyNode = nodes.find(n => n.name === 'helpers.py');
+    expect(pyNode).toBeDefined();
+    expect(pyNode!.importance).toBeGreaterThanOrEqual(2);
+  });
+
+  it('calculateInitialImportance returns >= 2 for .mjs files', async () => {
+    const mjsFile = path.join(tempDir, 'entry.mjs');
+    fs.writeFileSync(mjsFile, 'export const x = 1;\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const mjsNode = nodes.find(n => n.name === 'entry.mjs');
+    expect(mjsNode).toBeDefined();
+    expect(mjsNode!.importance).toBeGreaterThanOrEqual(2);
+  });
+
+  it('calculateInitialImportance returns >= 2 for .cjs files', async () => {
+    const cjsFile = path.join(tempDir, 'worker.cjs');
+    fs.writeFileSync(cjsFile, 'module.exports = {};\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const cjsNode = nodes.find(n => n.name === 'worker.cjs');
+    expect(cjsNode).toBeDefined();
+    expect(cjsNode!.importance).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe('scanDirectory streaming', () => {
