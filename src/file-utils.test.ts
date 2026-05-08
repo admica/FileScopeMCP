@@ -986,6 +986,26 @@ describe('Ruby import parsing', () => {
     expect(cmakeNode).toBeDefined();
     expect(cmakeNode!.importance).toBeGreaterThanOrEqual(2);
   });
+
+  it('calculateInitialImportance returns >= 1 for .sh files', async () => {
+    fs.writeFileSync(path.join(tempDir, 'deploy.sh'), '#!/bin/bash\necho hi\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const shNode = nodes.find(n => n.name === 'deploy.sh');
+    expect(shNode).toBeDefined();
+    expect(shNode!.importance).toBeGreaterThanOrEqual(1);
+  });
+
+  it('calculateInitialImportance returns >= 1 for .sql files', async () => {
+    fs.writeFileSync(path.join(tempDir, 'migration.sql'), 'CREATE TABLE foo (id INTEGER);\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const sqlNode = nodes.find(n => n.name === 'migration.sql');
+    expect(sqlNode).toBeDefined();
+    expect(sqlNode!.importance).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('scanDirectory streaming', () => {

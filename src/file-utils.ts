@@ -375,8 +375,10 @@ export function resolveImportPath(importPath: string, currentFilePath: string, b
  *   v1 — original algorithm (pre-2026-05-08)
  *   v2 — added .py/.mjs/.cjs to base-tier extension switch (e4578e4) and
  *        lowercased Makefile/CMakeLists in significantNames (7be6fbf)
+ *   v3 — added .sh and .sql to base-tier extension switch (+1 each):
+ *        ops scripts and DB migrations now eligible for summarization.
  */
-export const IMPORTANCE_ALGORITHM_VERSION = 'v2';
+export const IMPORTANCE_ALGORITHM_VERSION = 'v3';
 
 function calculateInitialImportance(filePath: string, baseDir: string): number {
   let importance = 0;
@@ -426,6 +428,12 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
       break;
     case '.py':
       importance += 2;
+      break;
+    case '.sh':
+      importance += 1;
+      break;
+    case '.sql':
+      importance += 1;
       break;
     case '.c':
     case '.cpp':
