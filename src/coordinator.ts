@@ -8,7 +8,7 @@ import {
   FileWatchingConfig,
   PackageDependency
 } from './types.js';
-import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, getAllFileNodes, isExcluded, IMPORTANCE_ALGORITHM_VERSION } from './file-utils.js';
+import { scanDirectory, calculateImportance, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, getAllFileNodes, isExcluded, IMPORTANCE_ALGORITHM_VERSION } from './file-utils.js';
 import { canonicalizePath } from './storage-utils.js';
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, FILESCOPE_DIR } from './config-utils.js';
@@ -911,9 +911,13 @@ export class ServerCoordinator {
     // +3/+2/+1). Calling getAllFiles() would silently zero those, capping every
     // file at the static-only baseline (extension + location + significantNames)
     // and erasing the orchestrator/fan-in signals the formula is built on.
+    //
+    // No buildDependentMap call: getAllFilesWithDeps already populates
+    // node.dependents directly via getDependents() (same `file_dependencies`
+    // source of truth), so deriving it again from node.dependencies would be
+    // redundant work over the same data.
     const freshDbFiles = getAllFilesWithDeps();
     const tempTree = this.reconstructTreeFromDb(freshDbFiles, config.baseDirectory);
-    buildDependentMap(tempTree);
     calculateImportance(tempTree);
 
     // Persist updated importance values back to SQLite

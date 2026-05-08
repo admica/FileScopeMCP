@@ -617,13 +617,16 @@ export function getAllFiles(): FileNode[] {
  * `packageDependencies` on every returned FileNode by joining `file_dependencies`.
  *
  * Use this when the caller will pass the resulting tree to logic that depends
- * on edge counts — most importantly `calculateNodeImportance` (which adds up
- * to +6 from dependents/dependencies/packageDeps caps) and
- * `buildDependentMap` (which derives the reverse map from `node.dependencies`).
+ * on edge counts — most importantly `calculateNodeImportance`, which adds up
+ * to +6 from the dependents/dependencies/packageDeps caps. The default
+ * `getAllFiles()` skips this work for performance; using it where dep counts
+ * are required produces silently underweighted importance values because
+ * every node looks like a leaf.
  *
- * The default `getAllFiles()` skips this work for performance; using it where
- * dep counts are required produces silently underweighted importance values
- * because every node looks like a leaf.
+ * Note: `dependents` here comes directly from `getDependents()` (same
+ * `file_dependencies` table). Callers do NOT need to also run
+ * `buildDependentMap` — that walks `node.dependencies` to derive the reverse
+ * map from the same source of truth, so it would be redundant work.
  *
  * Cost: one SELECT per file across three small per-path lookups. For repos in
  * the hundreds of files this is ~ms; for very large repos consider batching.
