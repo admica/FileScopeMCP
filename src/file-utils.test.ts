@@ -966,6 +966,26 @@ describe('Ruby import parsing', () => {
     expect(cjsNode).toBeDefined();
     expect(cjsNode!.importance).toBeGreaterThanOrEqual(2);
   });
+
+  it('calculateInitialImportance returns >= 2 for Makefile (case-insensitive significantNames match)', async () => {
+    fs.writeFileSync(path.join(tempDir, 'Makefile'), 'all:\n\t@echo hi\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const makefileNode = nodes.find(n => n.name === 'Makefile');
+    expect(makefileNode).toBeDefined();
+    expect(makefileNode!.importance).toBeGreaterThanOrEqual(2);
+  });
+
+  it('calculateInitialImportance returns >= 2 for CMakeLists.txt (case-insensitive significantNames match)', async () => {
+    fs.writeFileSync(path.join(tempDir, 'CMakeLists.txt'), 'cmake_minimum_required(VERSION 3.10)\n');
+
+    const { scanDirectory } = await import('./file-utils.js');
+    const nodes = await collectStream(scanDirectory(tempDir));
+    const cmakeNode = nodes.find(n => n.name === 'CMakeLists.txt');
+    expect(cmakeNode).toBeDefined();
+    expect(cmakeNode!.importance).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe('scanDirectory streaming', () => {

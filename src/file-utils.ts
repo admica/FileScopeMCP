@@ -438,7 +438,7 @@ function calculateInitialImportance(filePath: string, baseDir: string): number {
     'index', 'main', 'server', 'app', 'config', 'types', 'utils',
     'kernel', 'provider', 'middleware', 'service', 'repository',
     'controller', 'model', 'layout', 'master',
-    'platformio', 'CMakeLists', 'Makefile'
+    'platformio', 'cmakelists', 'makefile'
   ];
   if (significantNames.includes(fileName.toLowerCase())) {
     importance += 2;
