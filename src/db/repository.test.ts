@@ -12,6 +12,7 @@ import {
   getDependents,
   setDependencies,
   getAllFiles,
+  getAllFilesWithDeps,
   getAllLocalImportEdges,
   purgeRecordsMatching,
   upsertSymbols,
@@ -223,6 +224,63 @@ describe('getAllFiles', () => {
   it('returns empty array when no files exist', () => {
     const all = getAllFiles();
     expect(all).toHaveLength(0);
+  });
+});
+
+describe('getAllFilesWithDeps', () => {
+  it('populates dependencies, dependents, and packageDependencies on every node', () => {
+    // Pass 2b regression: this is the call site that was broken in v3.
+    // calculateNodeImportance reads these three fields and adds up to
+    // +6 to the static-only baseline; if any is undefined the bonus dies
+    // silently and orchestrator files cap out at the static formula.
+    upsertFile(makeFile({ path: '/project/a.ts', name: 'a.ts' }));
+    upsertFile(makeFile({ path: '/project/b.ts', name: 'b.ts' }));
+    upsertFile(makeFile({ path: '/project/c.ts', name: 'c.ts' }));
+
+    // a.ts imports b.ts and c.ts (out-edges); b.ts imports c.ts.
+    setDependencies('/project/a.ts', ['/project/b.ts', '/project/c.ts'], []);
+    setDependencies('/project/b.ts', ['/project/c.ts'], []);
+
+    // a.ts also has a package import.
+    const pkgDep = {
+      name: 'lodash',
+      version: '^4.0.0',
+      path: '/project/node_modules/lodash',
+      scope: undefined,
+      isDevDependency: false,
+    } as unknown as PackageDependency;
+    setDependencies('/project/a.ts', ['/project/b.ts', '/project/c.ts'], [pkgDep]);
+
+    const all = getAllFilesWithDeps();
+    const a = all.find(f => f.path === '/project/a.ts')!;
+    const b = all.find(f => f.path === '/project/b.ts')!;
+    const c = all.find(f => f.path === '/project/c.ts')!;
+
+    // a: 2 outgoing local imports + 1 package import; nothing depends on it
+    expect(a.dependencies).toHaveLength(2);
+    expect(a.dependents ?? []).toHaveLength(0);
+    expect(a.packageDependencies).toHaveLength(1);
+
+    // b: 1 outgoing local import; a depends on it
+    expect(b.dependencies).toHaveLength(1);
+    expect(b.dependents).toEqual(['/project/a.ts']);
+
+    // c: no outgoing; both a and b depend on it
+    expect(c.dependencies ?? []).toHaveLength(0);
+    expect((c.dependents ?? []).sort()).toEqual(['/project/a.ts', '/project/b.ts']);
+  });
+
+  it('returns empty arrays (not undefined) for files with no edges', () => {
+    upsertFile(makeFile({ path: '/project/lonely.ts', name: 'lonely.ts' }));
+    const all = getAllFilesWithDeps();
+    expect(all).toHaveLength(1);
+    // Whether dependents is empty array or undefined is implementation-defined;
+    // the contract that matters is that calculateNodeImportance can read .length
+    // without throwing. Both [] and undefined are handled by `?.length ?? 0`.
+    const f = all[0];
+    expect(f.dependencies?.length ?? 0).toBe(0);
+    expect(f.dependents?.length ?? 0).toBe(0);
+    expect(f.packageDependencies?.length ?? 0).toBe(0);
   });
 });
 

@@ -612,6 +612,32 @@ export function getAllFiles(): FileNode[] {
     .map((r: FileRow) => rowToFileNode(r, false));
 }
 
+/**
+ * Like `getAllFiles`, but populates `dependencies`, `dependents`, and
+ * `packageDependencies` on every returned FileNode by joining `file_dependencies`.
+ *
+ * Use this when the caller will pass the resulting tree to logic that depends
+ * on edge counts — most importantly `calculateNodeImportance` (which adds up
+ * to +6 from dependents/dependencies/packageDeps caps) and
+ * `buildDependentMap` (which derives the reverse map from `node.dependencies`).
+ *
+ * The default `getAllFiles()` skips this work for performance; using it where
+ * dep counts are required produces silently underweighted importance values
+ * because every node looks like a leaf.
+ *
+ * Cost: one SELECT per file across three small per-path lookups. For repos in
+ * the hundreds of files this is ~ms; for very large repos consider batching.
+ */
+export function getAllFilesWithDeps(): FileNode[] {
+  const db = getDb();
+  return db
+    .select()
+    .from(files)
+    .orderBy(asc(files.path))
+    .all()
+    .map((r: FileRow) => rowToFileNode(r, true));
+}
+
 // ─── Purge stale records ─────────────────────────────────────────────────────
 
 /**

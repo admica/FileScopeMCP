@@ -19,7 +19,7 @@ import { runMigrationIfNeeded } from './migrate/json-to-sqlite.js';
 import { runSymbolsBulkExtractionIfNeeded } from './migrate/bulk-symbol-extract.js';
 import { runMultilangSymbolsBulkExtractionIfNeeded } from './migrate/bulk-multilang-symbol-extract.js';
 import { runCallSiteEdgesBulkExtractionIfNeeded } from './migrate/bulk-call-site-extract.js';
-import { getAllFiles, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsMatching, setRepoProjectRoot, getKvState, setKvState } from './db/repository.js';
+import { getAllFiles, getAllFilesWithDeps, getFile, upsertFile, getDependencies, setEdges, setEdgesAndSymbols, purgeRecordsMatching, setRepoProjectRoot, getKvState, setKvState } from './db/repository.js';
 import { extractEdges, extractTsJsFileParse, extractLangFileParse } from './language-config.js';
 import type { EdgeResult } from './language-config.js';
 import type { Symbol as SymbolRow } from './db/symbol-types.js';
@@ -548,8 +548,10 @@ export class ServerCoordinator {
       this.treeMutex.run(async () => {
         if (!this._initialized || !this._projectRoot) return;
         try {
-          // Bridge: reconstruct a temporary tree from DB for file-utils functions
-          const dbFiles = getAllFiles();
+          // Bridge: reconstruct a temporary tree from DB for file-utils functions.
+          // WithDeps so transitive importance propagation in
+          // recalculateImportanceForAffected can walk node.dependents.
+          const dbFiles = getAllFilesWithDeps();
           const tempTree = this.reconstructTreeFromDb(dbFiles, projectRoot);
 
           switch (eventType) {
@@ -626,7 +628,9 @@ export class ServerCoordinator {
   private async runStartupIntegritySweep(): Promise<void> {
     if (!this._projectRoot) return;
     try {
-      const dbFiles = getAllFiles();
+      // WithDeps so the heal-loop's updateFileNodeOnChange / addFileNode /
+      // removeFileNode can correctly propagate importance through dependents.
+      const dbFiles = getAllFilesWithDeps();
       const tempTree = this.reconstructTreeFromDb(dbFiles, this._projectRoot);
       const result = await integrityCheck(tempTree, this._projectRoot);
       const totalIssues = result.staleFiles.length + result.missingFiles.length + result.newFiles.length;
@@ -635,7 +639,7 @@ export class ServerCoordinator {
         return;
       }
       log(`[Startup Sweep] Found ${totalIssues} issues. Healing...`);
-      const healDbFiles = getAllFiles();
+      const healDbFiles = getAllFilesWithDeps();
       const healTree = this.reconstructTreeFromDb(healDbFiles, this._projectRoot);
       for (const filePath of result.staleFiles) {
         await updateFileNodeOnChange(filePath, healTree, this._projectRoot);
@@ -902,7 +906,12 @@ export class ServerCoordinator {
    */
   private recalculateImportanceFromDb(config: FileTreeConfig): void {
     log('Pass 2b: Calculating importance...');
-    const freshDbFiles = getAllFiles();
+    // WithDeps is REQUIRED here: calculateNodeImportance reads node.dependents,
+    // node.dependencies, and node.packageDependencies (each contributing up to
+    // +3/+2/+1). Calling getAllFiles() would silently zero those, capping every
+    // file at the static-only baseline (extension + location + significantNames)
+    // and erasing the orchestrator/fan-in signals the formula is built on.
+    const freshDbFiles = getAllFilesWithDeps();
     const tempTree = this.reconstructTreeFromDb(freshDbFiles, config.baseDirectory);
     buildDependentMap(tempTree);
     calculateImportance(tempTree);

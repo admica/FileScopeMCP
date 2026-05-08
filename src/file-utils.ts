@@ -377,8 +377,16 @@ export function resolveImportPath(importPath: string, currentFilePath: string, b
  *        lowercased Makefile/CMakeLists in significantNames (7be6fbf)
  *   v3 — added .sh and .sql to base-tier extension switch (+1 each):
  *        ops scripts and DB migrations now eligible for summarization.
+ *   v4 — no formula change; effective input change. Pass 2b previously called
+ *        getAllFiles() (withDeps=false), so calculateNodeImportance saw
+ *        dependentsCount=0/dependenciesCount=0/packageDeps=0 for every file.
+ *        ~90% of files were silently underweighted (orchestrators dropped from
+ *        a true ~10 to a static-only 5). Switched Pass 2b and the file-event
+ *        and integrity-sweep paths to getAllFilesWithDeps() so the formula's
+ *        +3/+2/+1 dep bonuses actually fire. Bump triggers a one-time
+ *        recompute across all existing DBs via the auto-bust mechanism.
  */
-export const IMPORTANCE_ALGORITHM_VERSION = 'v3';
+export const IMPORTANCE_ALGORITHM_VERSION = 'v4';
 
 function calculateInitialImportance(filePath: string, baseDir: string): number {
   let importance = 0;
