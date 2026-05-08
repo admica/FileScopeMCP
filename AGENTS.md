@@ -121,16 +121,18 @@ ln -s /home/user/dev/FileScopeMCP/skills/filescope-mcp ~/.hermes/skills/filescop
 
 ```
 src/
-  mcp-server.ts     — MCP protocol handler, tool registration, stdio transport
-  coordinator.ts    — orchestrates scanning, watching, and broker lifecycle
-  scanner.ts        — tree-sitter AST parsing, dependency extraction, symbol extraction
-  watcher.ts        — file system watcher, semantic change detection
-  broker/           — LLM job queue (priority queue, OpenAI-compatible HTTP client)
-  nexus/            — web dashboard (localhost:1234), cross-repo aggregation
-  db.ts             — SQLite via better-sqlite3, schema migrations
+  mcp-server.ts        — MCP protocol handler, tool registration, stdio transport
+  coordinator.ts       — central orchestrator: init, scanning, file events, change classification, cascade, broker lifecycle
+  language-config.ts   — per-language extractor dispatch: AST (tree-sitter) for TS/JS, Python, C, C++, Rust; regex for Go, Ruby, Lua, Zig, PHP, C#, Java
+  file-watcher.ts      — chokidar wrapper with debounced events and crash auto-restart
+  change-detector/     — semantic change classification (AST diff for TS/JS via tree-sitter, LLM-powered diff for everything else)
+  cascade/             — BFS staleness propagation across the dependency graph (depth-limited, payload-bounded)
+  broker/              — LLM job queue (priority heap with dedup, Unix socket IPC, multi-provider HTTP via the `ai` SDK)
+  nexus/               — Fastify web dashboard (localhost:1234), cross-repo aggregation, log SSE
+  db/                  — Drizzle ORM over better-sqlite3 (WAL mode); schema, repository, and migrations
 ```
 
-The `broker/` and `nexus/` modules must NOT cross-import.
+The `broker/` module must NOT import from `nexus/`. (Nexus reads broker config, stats, and types to surface LLM activity in the dashboard — the dependency is one-directional.)
 
 ### Build and Run
 

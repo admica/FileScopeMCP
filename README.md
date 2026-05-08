@@ -15,7 +15,7 @@ Works with **Claude Code**, **Hermes Agent**, **Codex**, **OpenClaw**, **Cursor 
 
 **Importance ranking** — every file scored 0-10 based on how many things depend on it, what it exports, and where it lives. Your LLM sees the critical files first.
 
-**Dependency mapping** — bidirectional import tracking across all supported languages. AST-level extraction (tree-sitter) for TS/JS, Python, C, C++, Rust, Go, and Ruby; regex-based for Lua, Zig, PHP, C#, and Java. Finds circular dependencies too.
+**Dependency mapping** — bidirectional import tracking across all supported languages. AST-level extraction (tree-sitter) for TS/JS, Python, C, C++, and Rust; regex-based for Go, Ruby, Lua, Zig, PHP, C#, and Java. Finds circular dependencies too.
 
 **Symbol intelligence** — extracts functions, classes, interfaces, types, enums, consts, modules, and structs from source via tree-sitter. `find_symbol` resolves names to file + line range. `find_callers` and `find_callees` map the call graph for TS/JS so your AI can answer "who calls this function?" before refactoring.
 

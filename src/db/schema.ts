@@ -55,7 +55,7 @@ export const symbols = sqliteTable('symbols', {
   id:         integer('id').primaryKey({ autoIncrement: true }),
   path:       text('path').notNull(),
   name:       text('name').notNull(),
-  kind:       text('kind').notNull(),       // 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const'
+  kind:       text('kind').notNull(),       // 'function' | 'class' | 'interface' | 'type' | 'enum' | 'const' | 'module' | 'struct'
   start_line: integer('start_line').notNull(),
   end_line:   integer('end_line').notNull(),
   is_export:  integer('is_export', { mode: 'boolean' }).notNull().default(false),

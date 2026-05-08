@@ -33,7 +33,7 @@ Resolve a symbol name to its file + line range. Exact case-sensitive match. Trai
 - Use when you know a function/class name but not where it lives
 - `kind` accepts: function, class, interface, type, enum, const, module, struct
 - `exportedOnly` defaults true — pass false to find private helpers
-- Example: `find_symbol("processFile")` → `{path: "src/scanner.ts", startLine: 142, endLine: 198}`
+- Example: `find_symbol("processFile")` → `{path: "src/coordinator.ts", startLine: 142, endLine: 198}`
 
 **`search(query, maxItems?)`**
 Semantic search across symbols, summaries, purposes, and paths. Ranked results.
@@ -123,9 +123,9 @@ get_file_summary("path/to/file")   → see dependents with import lines
 
 ### "I need to understand this module before editing it"
 ```
-get_file_summary("src/scanner.ts")  → summary, deps, dependents, exports
+get_file_summary("src/coordinator.ts")  → summary, deps, dependents, exports
 find_callees("mainExportedFn")      → what it calls internally
-get_communities("src/scanner.ts")   → its architectural neighborhood
+get_communities("src/coordinator.ts")   → its architectural neighborhood
 ```
 
 ### "Where should I add this new feature?"
