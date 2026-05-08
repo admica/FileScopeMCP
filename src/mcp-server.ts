@@ -662,7 +662,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("search", {
     title: "Search",
-    description: "Search file metadata across symbols (function/class/interface names), purpose descriptions, LLM summaries, and file paths. Returns results ranked: symbol match (100) > purpose match (50) > summary match (20) > path match (10). Use this to find files by what they do, not just their name.",
+    description: "Search file metadata across symbols (function/class/interface names), purpose descriptions, LLM summaries, and file paths. Multi-word queries are tokenized: each word is matched independently and per-row scores are summed, so 'file watcher debounce' correctly surfaces a file whose summary mentions debounce and whose path contains 'file-watcher' even if no field contains the literal phrase. Quote a phrase to require it as a unit: '\"change impact\"'. Per-token column ranks: symbol=100, purpose/affectedAreas=50, summary=20, path=10. Use this to find files by what they do, not just their name. Tokens shorter than 2 chars are dropped.",
     inputSchema: {
       query: z.string().describe("Search term to match against symbols, purpose, summaries, and paths"),
       maxItems: z.coerce.number().optional().describe("Max results (default 10)"),

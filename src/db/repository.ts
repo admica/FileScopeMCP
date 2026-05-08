@@ -839,8 +839,60 @@ LIMIT @limit
 `;
 
 /**
+ * Tokenize a search query into individual terms.
+ *
+ * Behavior:
+ *   - "quoted phrases" become single tokens (preserved verbatim, lowercased)
+ *   - whitespace-separated bare words become individual tokens
+ *   - tokens shorter than 2 chars are dropped (function words rarely match meaningfully)
+ *   - SQL LIKE wildcards (% and _) are stripped from each token so user input
+ *     can't accidentally widen the search
+ *   - duplicates are removed
+ *
+ * Returns the tokens in stable order; an empty array means "no useful tokens"
+ * and the caller should short-circuit to empty results.
+ */
+function tokenizeQuery(query: string): string[] {
+  const tokens: string[] = [];
+
+  // Extract quoted phrases first; treat each as a single token.
+  const phraseRegex = /"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = phraseRegex.exec(query)) !== null) {
+    tokens.push(m[1].trim().toLowerCase());
+  }
+  // Strip the phrases from the remainder so they don't get re-tokenized as words.
+  const remainder = query.replace(phraseRegex, ' ');
+
+  for (const tok of remainder.split(/\s+/)) {
+    const cleaned = tok.trim().toLowerCase();
+    if (cleaned.length >= 2) tokens.push(cleaned);
+  }
+
+  // Strip SQL LIKE wildcards (% and _) so user input can't widen the search.
+  const stripped = tokens
+    .map(t => t.replace(/[%_]/g, '').trim())
+    .filter(t => t.length > 0);
+
+  // Dedupe (preserve first-seen order).
+  return Array.from(new Set(stripped));
+}
+
+/**
  * Searches across all stored file metadata: symbols, purpose, summaries, and paths.
- * Returns results ranked by match quality (symbol > purpose > summary > path).
+ *
+ * The query is tokenized (whitespace-split, "quoted phrases" preserved, short
+ * function words dropped). Each token is matched independently against the
+ * indexed columns; per-row scores sum across tokens. A row that matches more
+ * tokens — or matches them in higher-ranked columns — surfaces above one with
+ * fewer/weaker hits. Tokens that don't hit anything contribute zero (graceful
+ * AND-degradation: e.g., "how do I add a language" matches files where
+ * "language" is a meaningful term, since `how`/`do`/`a` won't hit).
+ *
+ * Per-token column ranks (carried from SEARCH_SQL):
+ *   symbol = 100, purpose / affectedAreas = 50, summary = 20, path = 10
+ *
+ * Sort: total_rank DESC, hit_count DESC, importance DESC.
  */
 export function searchFiles(query: string, maxItems: number = 10): {
   results: Array<{ path: string; importance: number; purpose: string | null; matchRank: number }>;
@@ -851,27 +903,70 @@ export function searchFiles(query: string, maxItems: number = 10): {
     return { results: [], query: query || '' };
   }
 
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) {
+    return { results: [], query: query.trim() };
+  }
+
   const sqlite = getSqlite();
-  const pattern = `%${query.trim()}%`;
-  const limit = maxItems + 1;
+  const stmt = sqlite.prepare(SEARCH_SQL);
 
-  const rows = sqlite.prepare(SEARCH_SQL).all({ pattern, limit }) as Array<{
+  // Per-path aggregate. With ~hundreds of files per repo and ≤10 tokens per
+  // realistic query, this stays small — no need for a database-side aggregation.
+  type Aggregate = {
     path: string;
-    name: string;
-    importance: number | null;
+    importance: number;
     purpose: string | null;
-    match_rank: number;
-  }>;
+    totalRank: number;
+    hitCount: number;
+  };
+  const aggregate = new Map<string, Aggregate>();
 
-  const truncated = rows.length > maxItems;
-  const resultRows = truncated ? rows.slice(0, maxItems) : rows;
+  // Per-token row cap: high enough that no realistic single-token query is
+  // truncated below useful coverage, low enough to bound work on huge repos.
+  const PER_TOKEN_LIMIT = 500;
+
+  for (const tok of tokens) {
+    const pattern = `%${tok}%`;
+    const rows = stmt.all({ pattern, limit: PER_TOKEN_LIMIT }) as Array<{
+      path: string;
+      name: string;
+      importance: number | null;
+      purpose: string | null;
+      match_rank: number;
+    }>;
+    for (const r of rows) {
+      const existing = aggregate.get(r.path);
+      if (existing) {
+        existing.totalRank += r.match_rank;
+        existing.hitCount += 1;
+      } else {
+        aggregate.set(r.path, {
+          path: r.path,
+          importance: r.importance ?? 0,
+          purpose: r.purpose ?? null,
+          totalRank: r.match_rank,
+          hitCount: 1,
+        });
+      }
+    }
+  }
+
+  const sorted = [...aggregate.values()].sort((a, b) =>
+    (b.totalRank - a.totalRank)
+    || (b.hitCount - a.hitCount)
+    || (b.importance - a.importance)
+  );
+
+  const truncated = sorted.length > maxItems;
+  const resultRows = truncated ? sorted.slice(0, maxItems) : sorted;
 
   return {
     results: resultRows.map(r => ({
       path: absOut(r.path),
-      importance: r.importance ?? 0,
-      purpose: r.purpose ?? null,
-      matchRank: r.match_rank,
+      importance: r.importance,
+      purpose: r.purpose,
+      matchRank: r.totalRank,
     })),
     query: query.trim(),
     ...(truncated && { truncated: true }),

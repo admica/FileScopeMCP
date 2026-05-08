@@ -744,4 +744,104 @@ describe('searchFiles', () => {
 
     expect(result.results[0].purpose).toBeNull();
   });
+
+  // ─── multi-token tokenization (the §5.1 fix) ─────────────────────────────
+
+  it('multi-word query: tokens score independently, file with most hits wins', () => {
+    clearTables();
+    // file A: path matches "file" + summary mentions "watcher" + summary mentions "debounce"
+    insertFile('/src/file-watcher.ts', {
+      summary: 'A debounced file watcher that batches change events',
+    });
+    // file B: only "file" matches via path
+    insertFile('/src/file-utils.ts', { summary: 'helper functions for path math' });
+    // file C: only "watcher" matches via summary
+    insertFile('/src/cascade.ts', { summary: 'tree watcher for staleness' });
+
+    const result = searchFiles('file watcher debounce');
+
+    expect(result.results.length).toBeGreaterThanOrEqual(1);
+    expect(result.results[0].path).toBe('/src/file-watcher.ts');
+    // file-watcher hits 3 tokens (path:file=10 + summary:watcher=20 + summary:debounce=20 = 50);
+    // others hit at most 2 tokens, both with lower scores.
+    expect(result.results[0].matchRank).toBeGreaterThan(result.results[1].matchRank);
+  });
+
+  it('multi-word query: tokens that miss contribute zero (graceful AND-degradation)', () => {
+    clearTables();
+    insertFile('/src/language-config.ts', {
+      concepts: conceptsJson({ purpose: 'per-language extractor dispatch and grammar registry' }),
+    });
+
+    // "how do I add a language" — only "language" / "add" should hit;
+    // function words "how", "do", "I", "a" are dropped (< 2 chars) or miss.
+    const result = searchFiles('how do I add a language');
+
+    expect(result.results.length).toBeGreaterThanOrEqual(1);
+    expect(result.results[0].path).toBe('/src/language-config.ts');
+  });
+
+  it('quoted phrase preserved as single token', () => {
+    clearTables();
+    insertFile('/src/impact.ts', {
+      change_impact: JSON.stringify({
+        riskLevel: 'low',
+        affectedAreas: ['change impact'],
+        breakingChanges: [],
+        summary: 's',
+      }),
+    });
+    // unquoted "change impact" tokenizes to ['change', 'impact'] —
+    // both hit affectedAreas (rank 50 each, sum 100).
+    const unquoted = searchFiles('change impact');
+    expect(unquoted.results[0].path).toBe('/src/impact.ts');
+    expect(unquoted.results[0].matchRank).toBe(100);
+
+    // quoted "\"change impact\"" tokenizes to ['change impact'] (one token),
+    // matches affectedAreas as a contiguous phrase (rank 50, single token).
+    const quoted = searchFiles('"change impact"');
+    expect(quoted.results[0].path).toBe('/src/impact.ts');
+    expect(quoted.results[0].matchRank).toBe(50);
+  });
+
+  it('user-supplied LIKE wildcards are stripped from tokens', () => {
+    clearTables();
+    insertFile('/src/foo.ts', { summary: 'has the word config in it' });
+    insertFile('/src/bar.ts', { summary: 'has the word baz in it' });
+
+    // '%' as a literal would match every row via LIKE if not stripped.
+    // After stripping, the token becomes 'config' and only foo.ts matches.
+    const result = searchFiles('%config%');
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].path).toBe('/src/foo.ts');
+  });
+
+  it('hit_count breaks ties in totalRank', () => {
+    clearTables();
+    // file A: one token hits at rank 100 (symbol)
+    insertFile('/src/single.ts', {
+      importance: 1,
+      concepts: conceptsJson({ functions: ['fooBar'] }),
+    });
+    // file B: two tokens hit at rank 50 each (purpose × 2 phrases) → sum 100, but 2 hits
+    insertFile('/src/double.ts', {
+      importance: 1,
+      concepts: conceptsJson({ purpose: 'fooBar processes bazQux events for the system' }),
+    });
+
+    const result = searchFiles('fooBar bazQux');
+
+    // Both rows total to 100, but 'double' has hitCount=2 (both tokens hit purpose),
+    // 'single' has hitCount=1 (only fooBar hits, bazQux misses entirely).
+    expect(result.results[0].path).toBe('/src/double.ts');
+  });
+
+  it('all tokens dropped (whitespace + < 2 chars) yields empty results', () => {
+    clearTables();
+    insertFile('/src/anything.ts', { summary: 'x' });
+
+    expect(searchFiles('a b c').results).toEqual([]);
+    expect(searchFiles('  i  a  ').results).toEqual([]);
+  });
 });
