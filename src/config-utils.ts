@@ -50,6 +50,11 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.gsd/workspaces/**",
   "**/.filescope",
   "**/.filescope/**",
+  // Playwright MCP browser-snapshot artifacts — auto-generated YAML test fixtures
+  // (one per page navigation, hundreds per session). Not source; summarization is
+  // noise. Same dual-form rule as the worktrees patterns above.
+  "**/.playwright-mcp",
+  "**/.playwright-mcp/**",
   // Node / JS / TS
   "**/node_modules",
   "**/package-lock.json",

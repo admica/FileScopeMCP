@@ -1137,4 +1137,19 @@ describe('isExcluded — agent worktree descendants', () => {
     expect(isExcluded('/tmp/fake-project2/.filescope/data.db', baseDir, false)).toBe(true);
     expect(isExcluded('/tmp/fake-project2/.filescope/nested/thing.json', baseDir, false)).toBe(true);
   });
+
+  it('matches .playwright-mcp descendants via **/.playwright-mcp/** pattern', () => {
+    setProjectRoot('/tmp/fake-project3');
+    setConfig({
+      baseDirectory: '/tmp/fake-project3',
+      excludePatterns: ['**/.playwright-mcp', '**/.playwright-mcp/**'],
+      version: '1.0.0',
+    });
+
+    const baseDir = '/tmp/fake-project3';
+    expect(isExcluded('/tmp/fake-project3/.playwright-mcp', baseDir, true)).toBe(true);
+    expect(isExcluded('/tmp/fake-project3/.playwright-mcp/page-2026-04-23T04-33-02-431Z.yml', baseDir, false)).toBe(true);
+    expect(isExcluded('/tmp/fake-project3/.playwright-mcp/nested/snapshot.yml', baseDir, false)).toBe(true);
+    expect(isExcluded('/tmp/fake-project3/src/components/playwright.test.ts', baseDir, false)).toBe(false);
+  });
 });
