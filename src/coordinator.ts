@@ -8,7 +8,7 @@ import {
   FileWatchingConfig,
   PackageDependency
 } from './types.js';
-import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, getAllFileNodes, isExcluded } from './file-utils.js';
+import { scanDirectory, calculateImportance, buildDependentMap, normalizePath, addFileNode, removeFileNode, updateFileNodeOnChange, integrityCheck, getAllFileNodes, isExcluded, IMPORTANCE_ALGORITHM_VERSION } from './file-utils.js';
 import { canonicalizePath } from './storage-utils.js';
 import { setProjectRoot, getProjectRoot, setConfig, getConfig } from './global-state.js';
 import { loadConfig, FILESCOPE_DIR } from './config-utils.js';
@@ -728,6 +728,21 @@ export class ServerCoordinator {
         }
 
         if (isFresh) {
+          // Mtime-fresh, but the importance scoring algorithm may have been
+          // bumped since this DB was last written. If so, edges/symbols are
+          // still correct (mtimes unchanged) but importance values are stale —
+          // run Pass 2b only, skipping the expensive Pass 1+2 rescan.
+          const storedImportanceVer = getKvState('importance_algorithm_version');
+          if (storedImportanceVer !== IMPORTANCE_ALGORITHM_VERSION) {
+            log(`Importance algorithm bumped (stored=${storedImportanceVer ?? 'null'} → current=${IMPORTANCE_ALGORITHM_VERSION}) — running Pass 2b only`);
+            this.recalculateImportanceFromDb(config);
+            setKvState('importance_algorithm_version', IMPORTANCE_ALGORITHM_VERSION);
+            this.currentConfig = config;
+            log('BUILD FILE TREE COMPLETED (cache + targeted importance recalc)');
+            log('==========================================\n');
+            return;
+          }
+
           log('Freshness check passed — using SQLite cache');
           this.currentConfig = config;
           log('BUILD FILE TREE COMPLETED (loaded from SQLite, freshness verified)');
@@ -871,6 +886,21 @@ export class ServerCoordinator {
     log('Pass 2 complete: dependencies extracted');
 
     // Pass 2b: Calculate importance using existing tree-based functions
+    this.recalculateImportanceFromDb(config);
+    setKvState('importance_algorithm_version', IMPORTANCE_ALGORITHM_VERSION);
+
+    this.currentConfig = config;
+    log('BUILD FILE TREE COMPLETED (streaming two-pass scan)');
+    log('==========================================\n');
+  }
+
+  /**
+   * Pass 2b — reconstruct the tree from current DB rows, recompute importance,
+   * and persist back. Called from both the full-rescan path and the targeted
+   * algorithm-version-bump fast path; assumes Pass 1+2 have already populated
+   * files and dependencies (or that the existing DB is mtime-fresh).
+   */
+  private recalculateImportanceFromDb(config: FileTreeConfig): void {
     log('Pass 2b: Calculating importance...');
     const freshDbFiles = getAllFiles();
     const tempTree = this.reconstructTreeFromDb(freshDbFiles, config.baseDirectory);
@@ -879,16 +909,13 @@ export class ServerCoordinator {
 
     // Persist updated importance values back to SQLite
     const updatedNodes = getAllFileNodes(tempTree);
+    const sqlite = getSqlite();
     const importanceBatch = sqlite.transaction((nodes: FileNode[]) => {
       for (const node of nodes) {
         upsertFile(node);
       }
     });
     importanceBatch(updatedNodes);
-
-    this.currentConfig = config;
-    log('BUILD FILE TREE COMPLETED (streaming two-pass scan)');
-    log('==========================================\n');
   }
 
   /**

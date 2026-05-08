@@ -358,6 +358,26 @@ export function resolveImportPath(importPath: string, currentFilePath: string, b
   return path.normalize(nodeModulesPath);
 }
 
+/**
+ * Version tag for the importance scoring algorithm.
+ *
+ * Bump this string whenever the logic in `calculateInitialImportance` or
+ * `calculateNodeImportance` changes — e.g. adding a file extension to the base
+ * tier, changing `significantNames`, or altering the dependent-count multiplier.
+ *
+ * The coordinator persists the current value to `kv_state.importance_algorithm_version`
+ * after each importance recalc. On startup, if the stored value differs from the
+ * current value, the cached-tree fast path is bypassed and Pass 2b runs again,
+ * propagating the new algorithm to every existing DB row without a manual SQL
+ * UPDATE. This is the freshness gate for importance-only algorithm changes.
+ *
+ * History:
+ *   v1 — original algorithm (pre-2026-05-08)
+ *   v2 — added .py/.mjs/.cjs to base-tier extension switch (e4578e4) and
+ *        lowercased Makefile/CMakeLists in significantNames (7be6fbf)
+ */
+export const IMPORTANCE_ALGORITHM_VERSION = 'v2';
+
 function calculateInitialImportance(filePath: string, baseDir: string): number {
   let importance = 0;
   const ext = path.extname(filePath);

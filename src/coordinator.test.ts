@@ -150,6 +150,83 @@ describe('ServerCoordinator', () => {
     await coordinator2.shutdown();
   });
 
+  // ─── importance_algorithm_version freshness-bust ──────────────────────────
+
+  it('importance_algorithm_version: fresh DB ends with current version flag', async () => {
+    tmpDir = makeTmpProject();
+
+    await coordinator.init(tmpDir);
+
+    const sqlite = (await import('./db/db.js')).getSqlite();
+    const row = sqlite
+      .prepare('SELECT value FROM kv_state WHERE key = ?')
+      .get('importance_algorithm_version') as { value: string } | undefined;
+    const { IMPORTANCE_ALGORITHM_VERSION } = await import('./file-utils.js');
+    expect(row?.value).toBe(IMPORTANCE_ALGORITHM_VERSION);
+  });
+
+  it('importance_algorithm_version: cache + version-match path skips Pass 2b', async () => {
+    tmpDir = makeTmpProject();
+
+    // First init populates DB and writes the version flag.
+    await coordinator.init(tmpDir);
+    await coordinator.shutdown();
+
+    // Tamper with importance — set every file to 999. If Pass 2b runs, this
+    // gets overwritten by the recalculated value (~3-7 for src/index.ts).
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(path.join(tmpDir, '.filescope', 'data.db'));
+    db.prepare('UPDATE files SET importance = 999 WHERE is_directory = 0').run();
+    db.close();
+
+    // Second init: mtimes unchanged, version match → cache hit, Pass 2b skipped.
+    const coordinator2 = new ServerCoordinator();
+    await coordinator2.init(tmpDir);
+
+    const tampered = getAllFiles().filter(f => !f.isDirectory);
+    expect(tampered.length).toBeGreaterThan(0);
+    expect(tampered.every(f => f.importance === 999)).toBe(true);
+
+    await coordinator2.shutdown();
+  });
+
+  it('importance_algorithm_version: stored mismatch triggers targeted Pass 2b on mtime-fresh DB', async () => {
+    tmpDir = makeTmpProject();
+
+    // First init populates DB and writes the version flag.
+    await coordinator.init(tmpDir);
+    await coordinator.shutdown();
+
+    // Simulate an algorithm bump: downgrade the stored version AND tamper with
+    // importance. The mtime-fresh fast path will detect the version mismatch
+    // and run Pass 2b only — overwriting the tampered values without touching
+    // mtimes, edges, or symbols.
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(path.join(tmpDir, '.filescope', 'data.db'));
+    db.prepare("UPDATE kv_state SET value = 'v0-stale' WHERE key = 'importance_algorithm_version'").run();
+    db.prepare('UPDATE files SET importance = 0 WHERE is_directory = 0').run();
+    db.close();
+
+    const coordinator2 = new ServerCoordinator();
+    await coordinator2.init(tmpDir);
+
+    // Pass 2b should have run, restoring real importance scores. .ts files in
+    // src/ get +3 (extension) +2 (location) = 5 baseline before dependent map.
+    const recalculated = getAllFiles().filter(f => !f.isDirectory && f.path.endsWith('.ts'));
+    expect(recalculated.length).toBeGreaterThan(0);
+    expect(recalculated.every(f => (f.importance ?? 0) > 0)).toBe(true);
+
+    // And the version flag should now be the current value.
+    const sqlite = (await import('./db/db.js')).getSqlite();
+    const row = sqlite
+      .prepare('SELECT value FROM kv_state WHERE key = ?')
+      .get('importance_algorithm_version') as { value: string } | undefined;
+    const { IMPORTANCE_ALGORITHM_VERSION } = await import('./file-utils.js');
+    expect(row?.value).toBe(IMPORTANCE_ALGORITHM_VERSION);
+
+    await coordinator2.shutdown();
+  });
+
   it('paths_format guard: rejects a DB with an unrecognized flag value', async () => {
     tmpDir = makeTmpProject();
 
