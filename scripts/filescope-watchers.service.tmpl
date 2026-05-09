@@ -1,0 +1,24 @@
+[Unit]
+Description=FileScopeMCP Per-Repo Watchers (one MCP server per repo)
+# Watchers depend on the broker (LLM job queue) being up. If the broker
+# unit is not installed yet, see the broker setup docs (out of scope here).
+After=filescope-broker.service
+Requires=filescope-broker.service
+
+[Service]
+Type=simple
+ExecStart=__NODE__ __WATCHERS_JS__
+Restart=on-failure
+RestartSec=10
+# %h expands to the invoking user's home dir for `systemctl --user` units.
+StandardOutput=append:%h/.filescope/watchers.log
+StandardError=append:%h/.filescope/watchers.log
+StandardInput=null
+# Send SIGTERM to the entire cgroup so spawned mcp-server children get
+# reaped even if the supervisor itself misses them.
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
