@@ -229,11 +229,6 @@ export class FileWatcher {
       patterns.push(...config.excludePatterns);
     }
 
-    // Add dot files if configured
-    if (this.config.ignoreDotFiles) {
-      patterns.push(/(^|[\/\\])\../); // Matches all paths starting with a dot
-    }
-
     logDebug(`FileWatcher: Ignoring ${patterns.length} patterns:`, patterns.slice(0, 5));
     return patterns;
   }

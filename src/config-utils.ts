@@ -8,7 +8,6 @@ import { error as logError, info as logInfo, debug as logDebug } from './logger.
 // Define the FileWatchingConfig schema
 const FileWatchingSchema = z.object({
   enabled: z.boolean().default(false),
-  ignoreDotFiles: z.boolean().default(true),
   autoRebuildTree: z.boolean().default(true),
   maxWatchedDirectories: z.number().int().positive().default(1000),
   watchForNewFiles: z.boolean().default(true),
@@ -219,7 +218,6 @@ const DEFAULT_CONFIG: Config = {
   excludePatterns: DEFAULT_EXCLUDES,
   fileWatching: {
     enabled: true,
-    ignoreDotFiles: true,
     autoRebuildTree: true,
     maxWatchedDirectories: 1000,
     watchForNewFiles: true,

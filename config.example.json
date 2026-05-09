@@ -7,7 +7,6 @@
   ],
   "fileWatching": {
     "enabled": true,
-    "ignoreDotFiles": true,
     "autoRebuildTree": true,
     "maxWatchedDirectories": 500,
     "watchForNewFiles": true,

@@ -47,7 +47,6 @@ class AsyncMutex {
 // Default file-watching config used when none exists yet
 const DEFAULT_FILE_WATCHING: FileWatchingConfig = {
   enabled: false,
-  ignoreDotFiles: true,
   autoRebuildTree: true,
   maxWatchedDirectories: 1000,
   watchForNewFiles: true,

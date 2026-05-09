@@ -50,7 +50,6 @@ describe('loadConfig', () => {
       excludePatterns: ['**/node_modules', '**/dist'],
       fileWatching: {
         enabled: false,
-        ignoreDotFiles: true,
         autoRebuildTree: false,
         maxWatchedDirectories: 500,
         watchForNewFiles: true,
@@ -81,7 +80,6 @@ describe('loadConfig', () => {
       excludePatterns: ['**/custom-only-pattern'],
       fileWatching: {
         enabled: true,
-        ignoreDotFiles: true,
         autoRebuildTree: true,
         maxWatchedDirectories: 1000,
         watchForNewFiles: true,

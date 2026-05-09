@@ -13,7 +13,6 @@ Optional — sensible defaults apply when absent. Created automatically when you
   ],
   "fileWatching": {
     "enabled": true,
-    "ignoreDotFiles": true,
     "autoRebuildTree": true,
     "maxWatchedDirectories": 1000,
     "watchForNewFiles": true,

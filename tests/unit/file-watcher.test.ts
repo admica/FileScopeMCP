@@ -1,8 +1,8 @@
 // tests/unit/file-watcher.test.ts
 // Unit tests for FileWatcher class using mocked chokidar.
 // No real filesystem watchers are opened — chokidar.watch() is fully mocked.
-// Tests verify: event dispatch (add/change/unlink), ignore patterns (ignoreDotFiles,
-// excludePatterns), stop() behavior, multiple callbacks, and chokidar invocation.
+// Tests verify: event dispatch (add/change/unlink), excludePatterns filtering,
+// stop() behavior, multiple callbacks, and chokidar invocation.
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // vi.mock is hoisted by vitest transform — must be at module top level (Pitfall 6).
@@ -33,7 +33,6 @@ const BASE_DIR = '/tmp/test-project';
 
 const mockFileWatchingConfig = {
   enabled: true,
-  ignoreDotFiles: false,
   autoRebuildTree: true,
   maxWatchedDirectories: 1000,
   watchForNewFiles: true,
@@ -188,23 +187,6 @@ describe('FileWatcher config-based event filtering', () => {
 describe('FileWatcher ignore patterns', () => {
   afterEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('does not fire callback for dot-prefixed paths when ignoreDotFiles is true (test h)', () => {
-    const cfg = { ...mockFileWatchingConfig, ignoreDotFiles: true };
-    setProjectRoot(BASE_DIR);
-    setConfig({ excludePatterns: [], fileWatching: cfg } as any);
-    const w = new FileWatcher(cfg, BASE_DIR);
-    const cb = vi.fn();
-    w.addEventCallback(cb);
-    w.start();
-
-    const mock = getMockWatcher();
-    // .hidden-file.ts → relative path is '.hidden-file.ts', matches /(^|[\/\\])\../
-    mock.emit('add', `${BASE_DIR}/.hidden-file.ts`);
-
-    expect(cb).not.toHaveBeenCalled();
-    w.stop();
   });
 
   it('does not fire callback for paths matching excludePatterns (test i)', () => {

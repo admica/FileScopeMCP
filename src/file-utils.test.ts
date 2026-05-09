@@ -531,7 +531,7 @@ describe('FileWatcher .filescopeignore integration', () => {
     vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(ig);
     vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: [] } as any);
 
-    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true };
     const watcher = new FileWatcher(config as any, tempDir);
 
     const callback = vi.fn();
@@ -553,7 +553,7 @@ describe('FileWatcher .filescopeignore integration', () => {
     vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(ig);
     vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: [] } as any);
 
-    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true };
     const watcher = new FileWatcher(config as any, tempDir);
 
     const callback = vi.fn();
@@ -574,7 +574,7 @@ describe('FileWatcher .filescopeignore integration', () => {
     vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(null);
     vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: ['**/*.log', 'node_modules'] } as any);
 
-    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true };
     const watcher = new FileWatcher(config as any, tempDir);
 
     const patterns = (watcher as any).getIgnoredPatterns();
@@ -591,7 +591,7 @@ describe('FileWatcher .filescopeignore integration', () => {
     vi.spyOn(globalState, 'getFilescopeIgnore').mockReturnValue(ig);
     vi.spyOn(globalState, 'getConfig').mockReturnValue({ excludePatterns: [] } as any);
 
-    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true, ignoreDotFiles: false };
+    const config = { watchForNewFiles: true, watchForChanged: true, watchForDeleted: true };
     const watcher = new FileWatcher(config as any, tempDir);
 
     const ignoredOption = (watcher as any).buildIgnoredOption();

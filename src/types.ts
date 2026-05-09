@@ -4,7 +4,6 @@ import type { LLMConfig } from './llm/types.js';
 // File watching configuration
 export interface FileWatchingConfig {
   enabled: boolean;               // Master switch for file watching
-  ignoreDotFiles: boolean;        // Whether to ignore files/dirs starting with a dot
   autoRebuildTree: boolean;       // Whether to auto-rebuild the tree on file changes
   maxWatchedDirectories: number;  // Limit to prevent watching too many directories
   watchForNewFiles: boolean;      // Watch for file additions
