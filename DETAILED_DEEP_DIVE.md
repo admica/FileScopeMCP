@@ -3,6 +3,8 @@
 **Status:** brainstorming working doc, not a spec. Captures the full state of analysis as of 2026-04-30.
 **Authoring context:** synthesized from a capability audit, a self-dogfooding session against this very codebase, and freshness-pipeline investigation. Kept honest — flags where the marketing pitch diverges from observed reality.
 
+> **Update 2026-05-09:** the §3.2 / §5 search weakness has been addressed. Commit `f52a4d6` (`fix(search): tokenize multi-word queries so they actually return results`) reworked `searchFiles()` to tokenize the query, run a per-token `LIKE` against the rank-weighted SQL, and aggregate matches per path with `total_rank DESC, hit_count DESC, importance DESC` ranking (`src/db/repository.ts:926`). Multi-word concept queries like "python call site extraction" should now hit. Other items in §1.3 (`extractSignature` not surfaced, `breakingChanges` not exposed, `inheritsFrom` dropped, `buildAstExtractor` dead code) and the §4 Python call-graph plan remain accurate as not-yet-shipped.
+
 ---
 
 ## 0. The question we're trying to answer

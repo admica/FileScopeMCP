@@ -22,16 +22,33 @@ Import patterns detected per language:
 
 ## Importance Calculation
 
-Scores (0-10) from a weighted formula:
+Scores (0-10) from a weighted formula. The algorithm is versioned via
+`importance_algorithm_version` in `kv_state` — when the formula changes
+(new file types, weight tweaks, etc.), the coordinator auto-busts every
+file's cached score on the next init so reads never return values
+computed by an older version.
 
 | Factor | Max contribution |
 |--------|-----------------|
 | Incoming dependents (files that import this file) | +3 |
 | Outgoing dependencies (files this file imports) | +2 |
 | Package dependencies imported | +1 |
-| File type (TS/JS base score; PHP +2; config files like package.json +3) | varies |
-| Location (`src/`, `app/` weighted higher) | varies |
-| Naming (`index`, `main`, `server`, `app`, `config`, `types`, etc.) | varies |
+| Location (`src/`, `app/`, `lib/`, `core/` weighted higher) | varies |
+| Significant names (`index`, `main`, `server`, `app`, `config`, `types`, `Makefile`, `CMakeLists`, etc., case-insensitive) | varies |
+
+File-type base scores (additive, current as of the latest algorithm version):
+
+| Extension(s) | Base score |
+|---|---|
+| `.ts`, `.tsx` | +3 |
+| `.js`, `.jsx`, `.mjs`, `.cjs` | +2 |
+| `.py`, `.go`, `.rb`, `.php` | +2 |
+| `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, `.hxx` | +2 |
+| `.sh`, `.sql` | +1 |
+| `package.json`, `tsconfig.json`, etc. (config JSON) | +3; other `.json` +1 |
+| `README.md` (any case) | +2; other `.md` +1 |
+| `go.mod` | +3 |
+| `Gemfile` | +3 |
 
 ## Autonomous Update Pipeline
 
@@ -113,6 +130,6 @@ The broker is a standalone Node.js process that owns all LLM communication (llam
 - **Queue** — in-memory priority queue (importance DESC, created_at ASC)
 - **Tiers** — interactive (tier 1) > cascade (tier 2) > background (tier 3)
 - **Dedup** — one pending job per file+type per repo, latest content wins
-- **Timeout** — 120s per job for hung LLM calls
+- **Timeout** — `jobTimeoutMs`, schema default 120 s; shipped `broker.default.json` template overrides to 300 s, so fresh installs run at 5 min until the user edits the field
 - **Auto-spawn** — first MCP instance spawns the broker if `broker.sock` is missing
 - **Stats** — per-repo token totals persisted to `~/.filescope/stats.json`

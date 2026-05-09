@@ -118,3 +118,33 @@ node dist/mcp-server.js --daemon --base-dir=/path/to/project
 ```
 
 Logs go to `.filescope-daemon.log` in the project root. A PID file at `.filescope/instance.pid` prevents concurrent daemons on the same project.
+
+## Multi-Repo Watchers (systemd, Linux only)
+
+Run one MCP server per repo registered in `~/.filescope/nexus.json` continuously, even when no MCP client is open. Backed by a `systemctl --user` unit and a small Node supervisor.
+
+```bash
+./scripts/nexus.sh install-watchers     # writes the unit, enables it, starts it
+systemctl --user status filescope-watchers.service
+./scripts/nexus.sh uninstall-watchers   # symmetric removal
+```
+
+What `install-watchers` does:
+
+- Renders `scripts/filescope-watchers.service.tmpl` to `~/.config/systemd/user/filescope-watchers.service` with the absolute paths of `node` and `scripts/watchers.mjs` substituted in.
+- Runs `systemctl --user daemon-reload`, then enables and starts the unit.
+- Idempotent — re-running picks up template/path changes and warns rather than restarts when already active (matches `setup-llm.sh --install-service` style).
+
+What the supervisor does (`scripts/watchers.mjs`):
+
+- Reads the repo list via `readRegistry()` from `~/.filescope/nexus.json`. Falls back to a 2-level filesystem scan (`discoverRepos()`) if the registry is missing.
+- Spawns one `dist/mcp-server.js --base-dir=<repo>` child per registered repo and drives an initial `scan_all` over the MCP stdio handshake.
+- Restarts crashed children after 10 s.
+- On SIGTERM/SIGINT (including `systemctl stop`), SIGTERMs every child, waits up to 8 s for graceful exit, then SIGKILLs stragglers and exits 0.
+
+Logs:
+
+- `~/.filescope/watchers.log` — supervisor (start/stop, child PIDs, restart events)
+- `~/.filescope/watcher-logs/<repo-path-flattened>.log` — per-child stderr
+
+The unit declares `Requires=filescope-broker.service`, so install your broker user unit first. The repo does not currently ship a broker user-unit installer (intentional — out of scope).

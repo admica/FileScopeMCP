@@ -17,7 +17,7 @@ Works with **Claude Code**, **Hermes Agent**, **Codex**, **OpenClaw**, **Cursor 
 
 **Dependency mapping** — bidirectional import tracking across all supported languages. AST-level extraction (tree-sitter) for TS/JS, Python, C, C++, and Rust; regex-based for Go, Ruby, Lua, Zig, PHP, C#, and Java. Finds circular dependencies too.
 
-**Symbol intelligence** — extracts functions, classes, interfaces, types, enums, consts, modules, and structs from source via tree-sitter. `find_symbol` resolves names to file + line range. `find_callers` and `find_callees` map the call graph for TS/JS so your AI can answer "who calls this function?" before refactoring.
+**Symbol intelligence** — extracts functions, classes, interfaces, types, enums, consts, modules, and structs via tree-sitter for TypeScript, JavaScript, Python, Go, and Ruby. `find_symbol` resolves names to file + line range. `find_callers` and `find_callees` map the call graph for TS/JS so your AI can answer "who calls this function?" before refactoring.
 
 **Always fresh** — file watcher + semantic change detection means metadata updates automatically. AST-level diffing for TS/JS, LLM-powered analysis for everything else. Only re-processes what actually changed.
 
@@ -122,6 +122,20 @@ A read-only web dashboard that connects to every FileScopeMCP repo on your machi
 - **Settings** — manage which repos appear, remove or restore from blacklist
 
 Auto-discovers repos by scanning for `.filescope/data.db` directories. No configuration needed.
+
+## Multi-Repo Watchers (systemd, Linux only)
+
+For users who want every repo in `~/.filescope/nexus.json` watched continuously — not only when an MCP client is open — install the per-repo watchers user unit:
+
+```bash
+./scripts/nexus.sh install-watchers     # writes the unit, enables it, starts it
+systemctl --user status filescope-watchers.service
+./scripts/nexus.sh uninstall-watchers   # symmetric removal
+```
+
+The unit launches `scripts/watchers.mjs`, which spawns one `dist/mcp-server.js --base-dir=<repo>` child per registered repo and supervises them (auto-restart on exit, SIGTERM-clean shutdown). The unit `Requires=filescope-broker.service` — install the broker user unit yourself; this command does not ship one.
+
+Logs: `~/.filescope/watchers.log` (supervisor) and `~/.filescope/watcher-logs/*.log` (per-repo children).
 
 ## How It Works
 

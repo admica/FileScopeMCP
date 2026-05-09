@@ -146,6 +146,8 @@ The `broker/` module must NOT import from `nexus/`. (Nexus reads broker config, 
 - `--skip-register` — skip just the registration step
 - `--prefix=/path` — install into a non-cwd location
 - `--check-only` — verify prerequisites without installing
+- `--no-wsl` — suppress the "project is on /mnt/ — use WSL native FS for speed" warning
+- `--legacy-npm` — pass `--legacy-peer-deps` to npm install for older registries
 
 ### LLM Backend
 
@@ -167,12 +169,15 @@ preserved across path changes that would otherwise trigger a wipe-and-rescan.
 relativizes inputs and absolutifies outputs at every SQL site. Outside
 repository.ts, all code dealing with paths uses absolute form.
 
-**Bypass escape hatch**: a small number of call sites issue raw SQL
-against path columns instead of going through repository.ts (e.g.
-`cascade-engine.ts:144` `markSelfStale`, `mcp-server.ts:310`
-`get_file_summary` LLM-data lookup, `nexus/repo-store.ts` tree/detail
-queries). These import `toStoredPath` / `fromStoredPath` from
-`db/repository.js` to translate at the boundary. Keep this surface tiny.
+**Bypass escape hatch**: two call sites issue raw SQL against path
+columns instead of going through repository.ts and import
+`toStoredPath` from `db/repository.js` to translate at the boundary:
+`cascade/cascade-engine.ts` `markSelfStale` and `mcp-server.ts`
+`get_file_summary` LLM-data lookup. Keep this surface tiny.
+
+`nexus/repo-store.ts` does not need a translation helper because the
+DB stores paths in the same relative form the dashboard already
+queries with — its raw SQL is intentional and benign.
 
 **Format guard**: `coordinator.init()` writes / verifies
 `kv_state['paths_format'] = 'relative_v1'` on first connection. If a

@@ -26,7 +26,7 @@ Optional — sensible defaults apply when absent. Created automatically when you
 }
 ```
 
-`excludePatterns` contains only your project-specific additions. ~90 built-in default patterns (node_modules, .git, dist, build, language artifacts, etc.) are always applied automatically.
+`excludePatterns` contains only your project-specific additions. ~145 built-in default patterns (node_modules, .git, dist, build, language artifacts, agent / planning tool dirs like `.claude/`, `.planning/`, `.opencode/`, `.codex/`, etc.) are always applied automatically. New defaults are auto-merged into existing per-project configs on load.
 
 The `llm` block only controls whether the broker connection is active. All LLM settings (model, endpoint, API key) live in the broker config.
 
@@ -53,7 +53,7 @@ Copy the matching template to `~/.filescope/broker.json` and edit as needed.
 | `llm.baseURL` | — | API endpoint (required for `openai-compatible`) |
 | `llm.apiKey` | — | API key (optional; uses env vars if omitted) |
 | `llm.maxTokensPerCall` | `1024` | Maximum tokens per LLM call |
-| `jobTimeoutMs` | `120000` | Job timeout in milliseconds |
+| `jobTimeoutMs` | `120000` (schema) / `300000` (template) | Job timeout in ms. Zod schema default is 120 s; the shipped `broker.default.json` overrides to 300 s, so a fresh install runs at 5 min |
 | `maxQueueSize` | `1000` | Maximum pending jobs |
 
 ## Custom Ignore Patterns (.filescopeignore)
@@ -84,7 +84,7 @@ Per-repo (inside your project):
     data.db-wal          # SQLite write-ahead log
     data.db-shm          # SQLite shared memory
     instance.pid         # Daemon PID lock file
-  .filescope-daemon.log  # Daemon log output (project root)
+  .filescope-daemon.log  # Daemon log output, daemon mode only (project root)
 
 Global (shared across all projects):
   ~/.filescope/
@@ -92,6 +92,9 @@ Global (shared across all projects):
     broker.sock          # Unix domain socket (broker IPC)
     broker.pid           # Broker PID file
     broker.log           # Broker log output
+    mcp-server.log       # MCP server log (always; stderr is suppressed in MCP mode)
     stats.json           # Per-repo token usage stats
-    nexus.json           # Nexus dashboard repo registry
+    nexus.json           # Nexus dashboard repo registry (multi-repo aggregation)
+    watchers.log         # scripts/watchers.mjs supervisor log (only when filescope-watchers.service is installed)
+    watcher-logs/        # one log per repo child spawned by the supervisor
 ```

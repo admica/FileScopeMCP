@@ -24,7 +24,7 @@ Items below have been implemented and are listed here for historical context.
 ### Architecture
 - **Replace polling integrity sweep with mtime-based lazy validation** — One-time startup sweep replaces the 30 s polling loop. Per-file mtime checks on MCP tool access catch changes missed by the watcher. No more periodic full-tree scans.
 - **SQLite storage** — Replaced JSON file persistence with SQLite + WAL mode. drizzle-orm typed schema. Auto-migration from legacy JSON trees.
-- **Test coverage** — 845+ tests covering change detection, cascade engine, LLM pipeline, SQLite migration, MCP server integration, repository layer, coordinator lifecycle, cycle detection, streaming scan, `.filescopeignore`, symbol extraction, call-site edges, community detection, and InMemoryTransport integration.
+- **Test coverage** — 880+ tests covering change detection, cascade engine, LLM pipeline, SQLite migration, MCP server integration, repository layer, coordinator lifecycle, cycle detection, streaming scan, `.filescopeignore`, symbol extraction, call-site edges, community detection, search tokenization, path-portability invariants, and InMemoryTransport integration.
 
 ### Features
 - **Summary auto-generation** — Full background LLM pipeline with multi-provider support (Anthropic, Ollama, OpenAI-compatible).
