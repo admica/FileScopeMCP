@@ -506,4 +506,39 @@ describe('checkFileFreshness', () => {
     // Prevent double-shutdown in afterEach
     coordinator = new ServerCoordinator();
   });
+
+  it('body-only edit while watcher down: integrity sweep persists new mtime to DB', async () => {
+    // Regression for the early-return branch in updateFileNodeOnChange that
+    // updated mtime in-memory but never called upsertFile. Symptom: drifted
+    // files re-flagged by integrityCheck on every startup, "Healed" message
+    // printed, but DB mtime never actually advanced.
+    tmpDir = makeTmpProject();
+    await coordinator.init(tmpDir);
+
+    const filePath = path.join(tmpDir, 'src', 'index.ts');
+    const before = getFile(filePath);
+    expect(before).not.toBeNull();
+    const oldMtime = before!.mtime;
+    expect(oldMtime).toBeDefined();
+
+    await coordinator.shutdown();
+
+    // Body-only edit while server is down — keep imports identical, change body.
+    // Read original content to preserve any imports, but tmp project's index.ts
+    // has none, so this is a pure body change.
+    fs.writeFileSync(filePath, 'export const hello = "body-only-change";\n', 'utf-8');
+    const newDiskMtime = fs.statSync(filePath).mtimeMs;
+    expect(Math.abs(newDiskMtime - oldMtime!)).toBeGreaterThan(1);
+
+    // Re-init — startup integrity sweep should detect drift AND persist new mtime
+    const coordinator2 = new ServerCoordinator();
+    await coordinator2.init(tmpDir);
+
+    const after = getFile(filePath);
+    expect(after).not.toBeNull();
+    expect(Math.abs(after!.mtime! - newDiskMtime)).toBeLessThanOrEqual(1);
+
+    await coordinator2.shutdown();
+    coordinator = new ServerCoordinator();
+  });
 });

@@ -1062,6 +1062,10 @@ export async function updateFileNodeOnChange(
     } else {
       log(`[updateFileNodeOnChange] No dependency changes detected for ${normalizedFilePath}`);
     }
+    // Persist the mtime update from above. Without this, body-only edits leave
+    // a stale mtime in SQLite — integrityCheck will re-flag the file forever,
+    // and getFilesChangedSince() returns wrong results.
+    upsertFile(existingNode);
     return false;
   }
 
