@@ -37,15 +37,23 @@ const DEFAULT_EXCLUDES: string[] = [
   "**/.git",
   "**/.svn",
   "**/.hg",
-  // Agent / planning tool workspaces (full repo clones — catastrophic duplication).
-  // Both the directory itself AND its descendants must be excluded: the glob
-  // engine's `**/X` form only matches the literal directory entry, not files
-  // nested under it, so tools like detect_cycles would otherwise surface
-  // duplicated worktree copies.
-  "**/.claude/worktrees",
-  "**/.claude/worktrees/**",
-  "**/.planning/workspaces",
-  "**/.planning/workspaces/**",
+  // Agent / planning tool state. These directories hold tool-generated artifacts
+  // (planning docs, transcripts, settings, worktree clones) — not source. Indexing
+  // them generates massive churn (planning docs ARE summaries; re-summarizing them
+  // is recursive waste) and risks catastrophic duplication when worktrees contain
+  // full repo clones. Both the directory itself AND its descendants must be
+  // excluded: the glob engine's `**/X` form only matches the literal directory
+  // entry, not files nested under it.
+  "**/.claude",
+  "**/.claude/**",
+  "**/.planning",
+  "**/.planning/**",
+  "**/.opencode",
+  "**/.opencode/**",
+  "**/.codex",
+  "**/.codex/**",
+  // .gsd: only workspaces/ (full repo clones); the rest of .gsd is config metadata
+  // that the user may want indexed. Broaden if that turns out to be wrong.
   "**/.gsd/workspaces",
   "**/.gsd/workspaces/**",
   "**/.filescope",
