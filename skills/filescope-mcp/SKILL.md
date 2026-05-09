@@ -28,11 +28,12 @@ This three-step sequence gives you a working mental model in seconds.
 
 ### Navigation Tools
 
-**`find_symbol(name, kind?, exportedOnly?)`**
+**`find_symbol(name, kind?, exportedOnly?, maxItems?)`**
 Resolve a symbol name to its file + line range. Exact case-sensitive match. Trailing `*` enables prefix match.
 - Use when you know a function/class name but not where it lives
 - `kind` accepts: function, class, interface, type, enum, const, module, struct
 - `exportedOnly` defaults true — pass false to find private helpers
+- `maxItems` clamped to [1, 500], default 50
 - Example: `find_symbol("processFile")` → `{path: "src/coordinator.ts", startLine: 142, endLine: 198}`
 
 **`search(query, maxItems?)`**
@@ -111,7 +112,7 @@ Queue files for LLM summarization. Requires active broker + LLM backend.
 **`exclude_and_remove(filepath)`**
 Permanently exclude a file/pattern from tracking. DESTRUCTIVE — cannot be undone without re-scan.
 - Use for generated files, build artifacts, false positives
-- Adds pattern to `.filescopeignore`
+- Persists pattern to `.filescope/config.json` (excludePatterns array). For `.gitignore`-style commit-able rules, hand-edit `.filescopeignore` instead.
 
 ## Common Workflows
 

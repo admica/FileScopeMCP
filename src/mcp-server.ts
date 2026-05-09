@@ -719,7 +719,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("exclude_and_remove", {
     title: "Exclude and Remove",
-    description: "Permanently exclude a file or glob pattern from tracking and remove it from the database. DESTRUCTIVE: this deletes metadata and cannot be undone without a re-scan. Adds the pattern to .filescopeignore. Use for generated files, build artifacts, or false positives.",
+    description: "Permanently exclude a file or glob pattern from tracking and remove it from the database. DESTRUCTIVE: this deletes metadata and cannot be undone without a re-scan. Persists the pattern to .filescope/config.json (excludePatterns) so it survives restarts. Use for generated files, build artifacts, or false positives.",
     inputSchema: {
       filepath: z.string().describe("The path or pattern of the file to exclude and remove"),
     },
