@@ -587,7 +587,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("set_file_importance", {
     title: "Set File Importance",
-    description: "Manually set the importance ranking (0-10) for a file. Overrides the auto-calculated importance. Falls back to basename matching if the exact path is not found. Idempotent: repeated calls with the same value are safe.",
+    description: "**When to call:** rarely; use only when the auto-calculated importance is clearly wrong for a specific entry-point file. Manually set the importance ranking (0-10) for a file. Overrides the auto-calculated importance. Falls back to basename matching if the exact path is not found. Idempotent: repeated calls with the same value are safe.",
     inputSchema: {
       filepath: z.string().describe("The path to the file to update"),
       importance: z.coerce.number().min(0).max(10).describe("The importance value to set (0-10)"),
