@@ -685,7 +685,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("status", {
     title: "Status",
-    description: "Get system health: broker connection state, LLM processing queue depth and progress, file watching status, and project info (root path, file count, last update time). Call this to verify initialization state and diagnose issues.",
+    description: "**When to call:** at session start, or any time a tool returns NOT_INITIALIZED to diagnose. Get system health: broker connection state, LLM processing queue depth and progress, file watching status, and project info (root path, file count, last update time). Call this to verify initialization state and diagnose issues.",
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
