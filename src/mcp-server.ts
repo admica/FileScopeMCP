@@ -788,7 +788,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("get_cycles_for_file", {
     title: "Get Cycles For File",
-    description: "Get all dependency cycle groups that include a specific file. Returns only the cycles containing the specified file path, useful for understanding a single file's circular dependency involvement. Returns NOT_FOUND if the file is not tracked.",
+    description: "**When to call:** when investigating a single file's involvement in cycles — typically as a follow-up to detect_cycles(). Get all dependency cycle groups that include a specific file. Returns only the cycles containing the specified file path, useful for understanding a single file's circular dependency involvement. Returns NOT_FOUND if the file is not tracked.",
     inputSchema: {
       filepath: z.string().describe("Absolute path to the file"),
     },
