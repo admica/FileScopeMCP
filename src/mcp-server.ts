@@ -643,7 +643,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("scan_all", {
     title: "Scan All",
-    description: "Queue files for LLM summarization via the broker. Uses min_importance to filter low-value files (default 1, skips zero-importance). Set remaining_only=true to skip already-summarized files. Requires an active broker connection (llm.enabled=true in config). Returns BROKER_DISCONNECTED if the broker is unreachable.",
+    description: "**When to call:** after first project setup, after major codebase changes, or when status() reports stale summaries. Use remaining_only=true for incremental refresh. Queue files for LLM summarization via the broker. Uses min_importance to filter low-value files (default 1, skips zero-importance). Set remaining_only=true to skip already-summarized files. Requires an active broker connection (llm.enabled=true in config). Returns BROKER_DISCONNECTED if the broker is unreachable.",
     inputSchema: {
       min_importance: z.coerce.number().optional().default(1).describe("Minimum importance threshold (default 1, skips zero-importance files)"),
       remaining_only: z.boolean().optional().default(false).describe("When true, only queue files that have never been summarized"),
