@@ -32,3 +32,31 @@ describe('CLAUDE.md primer template', () => {
     expect(matches.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('marker regex contract', () => {
+  // Anchor the regex used by filescope-install: must match the BEGIN..END block
+  // greedy across newlines, with the markers themselves included.
+  const MARKER_REGEX = /<!-- BEGIN filescope -->[\s\S]*?<!-- END filescope -->/;
+
+  it('regex matches the entire primer file', () => {
+    const content = readFileSync(PRIMER_PATH, 'utf-8');
+    const match = content.match(MARKER_REGEX);
+    expect(match).not.toBeNull();
+    expect(match![0]).toContain('Operating Protocol');
+  });
+
+  it('regex matches when primer is embedded inside a larger CLAUDE.md', () => {
+    const content = readFileSync(PRIMER_PATH, 'utf-8');
+    const wrapped = `# Project notes\n\nLeading content.\n\n${content}\n\nTrailing content.\n`;
+    const match = wrapped.match(MARKER_REGEX);
+    expect(match).not.toBeNull();
+    expect(match![0]).toContain('Operating Protocol');
+  });
+
+  it('regex matches non-greedily — does not span two primer blocks', () => {
+    const content = readFileSync(PRIMER_PATH, 'utf-8');
+    const doubled = `${content}\n\n${content}`;
+    const matchAll = [...doubled.matchAll(new RegExp(MARKER_REGEX.source, 'g'))];
+    expect(matchAll.length).toBe(2);
+  });
+});
