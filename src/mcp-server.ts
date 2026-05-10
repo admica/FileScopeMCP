@@ -192,7 +192,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("list_files", {
     title: "List Files",
-    description: "List all tracked files with importance rankings. Without maxItems: returns a nested directory tree structure. With maxItems: returns a flat list of the N most important files sorted by importance descending, with truncation metadata. Call status first to verify initialization.",
+    description: "**When to call:** only when you need the full file tree. Prefer find_important_files for top-N navigation — it's cheaper and more relevant. List all tracked files with importance rankings. Without maxItems: returns a nested directory tree structure. With maxItems: returns a flat list of the N most important files sorted by importance descending, with truncation metadata. Call status first to verify initialization.",
     inputSchema: {
       maxItems: z.coerce.number().optional().describe("Cap response to N files sorted by importance. Omit for full tree."),
     },
