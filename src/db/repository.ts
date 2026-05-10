@@ -1336,7 +1336,7 @@ export function getCallers(
   name: string,
   filePath?: string,
   limit: number = 50
-): { items: Array<{ path: string; name: string; kind: string; startLine: number; confidence: number }>; total: number; unresolvedCount: number } {
+): { items: Array<{ path: string; name: string; kind: string; startLine: number; confidence: number }>; total: number; unresolvedCount: number; warning?: string } {
   const sqlite = getSqlite();
 
   // Step 1: resolve target (callee) symbol IDs
@@ -1374,10 +1374,17 @@ export function getCallers(
        AND caller_symbol_id NOT IN (SELECT id FROM symbols)`
   ).get(...ids) as { n: number }).n;
 
+  // Indexed-but-empty: surface a warning so agents don't silently trust a
+  // possible parser miss. See docs/known-issues/find-callers-react-hooks.md.
+  const warning = total === 0
+    ? 'Zero caller edges found for an indexed symbol. The call-graph is built by static analysis and may miss certain patterns (e.g., React hook export forms, dynamic dispatch). If unexpected, fall back to grep to verify.'
+    : undefined;
+
   return {
     items: rows.map(r => ({ path: absOut(r.path), name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
     total,
     unresolvedCount,
+    ...(warning && { warning }),
   };
 }
 
@@ -1394,7 +1401,7 @@ export function getCallees(
   name: string,
   filePath?: string,
   limit: number = 50
-): { items: Array<{ path: string; name: string; kind: string; startLine: number; confidence: number }>; total: number; unresolvedCount: number } {
+): { items: Array<{ path: string; name: string; kind: string; startLine: number; confidence: number }>; total: number; unresolvedCount: number; warning?: string } {
   const sqlite = getSqlite();
 
   // Step 1: resolve source (caller) symbol IDs
@@ -1432,10 +1439,17 @@ export function getCallees(
        AND callee_symbol_id NOT IN (SELECT id FROM symbols)`
   ).get(...ids) as { n: number }).n;
 
+  // Indexed-but-empty: surface a warning so agents don't silently trust a
+  // possible parser miss. See docs/known-issues/find-callers-react-hooks.md.
+  const warning = total === 0
+    ? 'Zero callee edges found for an indexed symbol. The call-graph is built by static analysis and may miss certain patterns (e.g., dynamic dispatch, JSX-embedded calls). If unexpected, fall back to grep to verify.'
+    : undefined;
+
   return {
     items: rows.map(r => ({ path: absOut(r.path), name: r.name, kind: r.kind, startLine: r.start_line, confidence: r.confidence })),
     total,
     unresolvedCount,
+    ...(warning && { warning }),
   };
 }
 
