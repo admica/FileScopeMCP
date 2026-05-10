@@ -5,7 +5,7 @@
 // Claude Code internal state; it only reads hook payload from stdin and writes the
 // hook response on stdout per Claude Code's hook protocol.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +55,15 @@ switch (subcommand) {
     emitContinue();
 }
 
+function isFileScopeProject(baseDir) {
+  // Cheap check: a FileScopeMCP-tracked project has .filescope/data.db.
+  // If it doesn't, spawning mcp-server.js will produce nothing useful and waste seconds.
+  return existsSync(path.join(baseDir, '.filescope', 'data.db'));
+}
+
 function callMcpTool(toolName, args, baseDir) {
+  // Skip the spawn entirely if this directory isn't a FileScopeMCP project.
+  if (!isFileScopeProject(baseDir)) return null;
   // Spawn dist/mcp-server.js with --base-dir and send a single JSON-RPC tool call.
   // Returns the parsed result or null on any error (fail-open).
   const initialize = {
@@ -79,7 +87,7 @@ function callMcpTool(toolName, args, baseDir) {
   const child = spawnSync(process.execPath, [SERVER_JS, `--base-dir=${baseDir}`], {
     input: stdinPayload,
     encoding: 'utf-8',
-    timeout: 5000,
+    timeout: 2000,
   });
   if (child.status !== 0 && child.status !== null) return null;
   // Find the line with id:1 in stdout.
@@ -126,6 +134,37 @@ function handlePreToolUse(stdinPayload) {
 }
 
 function handleSessionStart(stdinPayload) {
-  // STUB — Task 8 implements.
-  emitContinue();
+  let payload;
+  try {
+    payload = JSON.parse(stdinPayload);
+  } catch {
+    emitContinue();
+    return;
+  }
+  const cwd = payload?.cwd ?? process.cwd();
+
+  const important = callMcpTool('find_important_files', { maxItems: 5 }, cwd);
+  const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const changed = callMcpTool('list_changed_since', { since: since24h, maxItems: 10 }, cwd);
+
+  if (!important || important.isError) {
+    // Project not indexed — silent.
+    emitContinue();
+    return;
+  }
+
+  let digest = `FileScopeMCP session digest (${cwd}):\n\n`;
+  const importantText = important.content?.[0]?.text ?? '';
+  if (importantText) {
+    digest += `## Top important files\n${importantText.slice(0, 600)}\n\n`;
+  }
+  if (changed && !changed.isError) {
+    const changedText = changed.content?.[0]?.text ?? '';
+    if (changedText) {
+      digest += `## Recent changes (last 24h)\n${changedText.slice(0, 400)}\n`;
+    }
+  }
+  if (digest.length > 1024) digest = digest.slice(0, 1024) + '\n…(truncated)';
+
+  emitContext(digest);
 }
