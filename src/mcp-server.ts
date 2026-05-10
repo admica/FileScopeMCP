@@ -284,7 +284,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("get_file_summary", {
     title: "Get File Summary",
-    description: "Get full intelligence for a single file: LLM-generated summary, importance score (0-10), dependency list with edge types (imports/inherits/re_exports) and confidence scores, dependents with the imported names + line numbers each dependent uses (use importLines to jump directly to the import statement), exported top-level symbols (exports[] with name/kind/startLine/endLine — Phase 34), package dependencies, concepts, change impact analysis, and staleness flags. Use this before editing a file to understand its role and relationships. Returns NOT_FOUND if the file is not in the scan database.",
+    description: "**When to call:** before editing any file in this project that you have not previously summarized in this session. Source tells you what the file is; this tells you who uses it and what would break — you need both. Skip only if the file is brand-new and not yet in .filescope/data.db. Get full intelligence for a single file: LLM-generated summary, importance score (0-10), dependency list with edge types (imports/inherits/re_exports) and confidence scores, dependents with the imported names + line numbers each dependent uses (use importLines to jump directly to the import statement), exported top-level symbols (exports[] with name/kind/startLine/endLine — Phase 34), package dependencies, concepts, change impact analysis, and staleness flags. Use this before editing a file to understand its role and relationships. Returns NOT_FOUND if the file is not in the scan database.",
     inputSchema: {
       filepath: z.string().describe("The path to the file to check"),
     },
