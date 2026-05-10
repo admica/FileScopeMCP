@@ -18,12 +18,14 @@
     "inspect-symbols": "node scripts/inspect-symbols.mjs",
     "register-mcp": "node scripts/register-mcp.mjs",
     "helper": "node scripts/filescope-helper.mjs",
+    "install-claude-code": "node scripts/filescope-install.mjs --claude-code",
     "test": "vitest",
     "coverage": "vitest run --coverage"
   },
   "bin": {
     "filescope-nexus": "dist/nexus/main.js",
-    "filescope-helper": "scripts/filescope-helper.mjs"
+    "filescope-helper": "scripts/filescope-helper.mjs",
+    "filescope-install": "scripts/filescope-install.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
