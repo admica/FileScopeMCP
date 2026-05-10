@@ -176,7 +176,7 @@ const server = new McpServer(serverInfo);
 export function registerTools(server: McpServer, coordinator: ServerCoordinator): void {
   server.registerTool("set_base_directory", {
     title: "Set Base Directory",
-    description: "Override the base directory for analysis. Initializes the file watcher, database, and broker connection for the specified path. Call this first if --base-dir was not passed at startup. Subsequent calls re-initialize to a new directory.",
+    description: "**When to call:** when status() returns NOT_INITIALIZED, or when switching projects in one session. Override the base directory for analysis. Initializes the file watcher, database, and broker connection for the specified path. Call this first if --base-dir was not passed at startup. Subsequent calls re-initialize to a new directory.",
     inputSchema: {
       path: z.string().describe("The absolute path to the project directory"),
     },
