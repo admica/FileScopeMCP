@@ -30,10 +30,11 @@ if (!existsSync(SERVER_JS)) {
 
 // Guard 2: try spawning `claude mcp add`. If the binary is missing, spawnSync returns
 // an error object with code === 'ENOENT'. Per D-06, this is fail-soft: print hint, exit 0.
+// Capture output so we can detect the idempotent "already exists" path and re-emit.
 const addResult = spawnSync(
   'claude',
   ['mcp', 'add', '--scope', 'user', SERVER_NAME, NODE_BIN, SERVER_JS],
-  { stdio: 'inherit' }
+  { encoding: 'utf-8' }
 );
 
 if (addResult.error && addResult.error.code === 'ENOENT') {
@@ -44,7 +45,17 @@ if (addResult.error && addResult.error.code === 'ENOENT') {
   process.exit(0);
 }
 
-if (addResult.status !== 0) {
+const combinedOutput = (addResult.stdout ?? '') + (addResult.stderr ?? '');
+if (combinedOutput.trim()) process.stdout.write(combinedOutput);
+
+// Idempotent path: claude mcp add returns non-zero when the server is already registered.
+// Treat that as success since the desired state is already in place. The post-check below
+// still runs to confirm.
+const ALREADY_REGISTERED_PATTERN = /already exists in user config/i;
+const addedOk = addResult.status === 0;
+const alreadyThere = !addedOk && ALREADY_REGISTERED_PATTERN.test(combinedOutput);
+
+if (!addedOk && !alreadyThere) {
   console.error('');
   console.error(`  ERROR: \`claude mcp add\` exited with code ${addResult.status}.`);
   console.error('  Re-run with verbose output: claude mcp add --scope user FileScopeMCP "' + NODE_BIN + '" "' + SERVER_JS + '"');
