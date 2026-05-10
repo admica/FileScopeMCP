@@ -470,6 +470,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
   server.registerTool("list_changed_since", {
     title: "List Changed Since",
     description: [
+      "**When to call:** at the start of a session, or after a long absence, to see what files moved since a known timestamp or commit SHA.",
       "Re-orient after multi-file edits — returns every tracked file whose mtime (or git history) is newer than a given reference point.",
       "Two modes, auto-detected: an ISO-8601 timestamp (e.g. `2026-04-23T10:00:00Z`) OR a git commit SHA of 7–40 hex characters (e.g. `860fe61`). Any 7–40 char hex string is treated as a SHA; everything else is parsed as a date.",
       "SHA mode invokes `git diff --name-only <sha> HEAD`, canonicalizes the paths, and intersects with the DB — returning only files currently tracked. If `git diff` fails for any reason (unknown SHA, corrupt repo, git not installed, etc.) the call returns `INVALID_SINCE` — no SHA is ever assumed valid without git's confirmation.",
