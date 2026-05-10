@@ -817,7 +817,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("get_communities", {
     title: "Get Communities",
-    description: "Get file communities detected by Louvain clustering on the local import graph. Returns groups of tightly-coupled files identified by their highest-importance representative. Optionally filter to the community containing a specific file. Communities are lazily recomputed only when the dependency graph changes.",
+    description: "**When to call:** when the user asks about module structure, file groupings, or which files change together. Get file communities detected by Louvain clustering on the local import graph. Returns groups of tightly-coupled files identified by their highest-importance representative. Optionally filter to the community containing a specific file. Communities are lazily recomputed only when the dependency graph changes.",
     inputSchema: {
       file_path: z.string().optional().describe("Optional: filter to the community containing this file path"),
     },
