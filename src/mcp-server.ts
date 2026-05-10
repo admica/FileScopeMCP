@@ -554,7 +554,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("set_file_summary", {
     title: "Set File Summary",
-    description: "Manually set or override the LLM-generated summary for a file. Use when the auto-generated summary is inaccurate or you want to annotate a file with custom context. Idempotent: repeated calls with the same summary are safe. Returns NOT_FOUND if the file is not tracked.",
+    description: "**When to call:** when an auto-generated summary is wrong and you want to override it; not part of routine workflow. Manually set or override the LLM-generated summary for a file. Use when the auto-generated summary is inaccurate or you want to annotate a file with custom context. Idempotent: repeated calls with the same summary are safe. Returns NOT_FOUND if the file is not tracked.",
     inputSchema: {
       filepath: z.string().describe("The path to the file to update"),
       summary: z.string().describe("The summary text to set"),
