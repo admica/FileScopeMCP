@@ -36,6 +36,8 @@ After editing, restart Hermes so it re-reads `mcp_servers`. Verify the server ap
 
 Already registered if `./build.sh` was run. Verify with `claude mcp list`.
 
+For an opinionated install that includes a project priming `CLAUDE.md` and pointers to optional hook templates: `npm run install-claude-code`. Layered — never modifies `.claude/settings.json`. See [ROADMAP.md](ROADMAP.md) Phase 1 for design notes and [docs/claude-code-hooks.md](docs/claude-code-hooks.md) for the hook snippets.
+
 ### Cursor / other MCP clients
 
 See `docs/mcp-clients.md` for per-client config snippets.
