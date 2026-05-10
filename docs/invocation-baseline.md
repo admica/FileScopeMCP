@@ -154,9 +154,57 @@ Each run gets one entry under `## Runs`. **Do not edit prior runs once committed
 
 ---
 
+## Pilot Runs (single-scenario mechanics validation)
+
+These are *partial* runs — Scenario 1 only — used to validate the protocol's measurement mechanics and produce a first paired data point before scaling to the full 5-scenario sweep. They are **not** bar-passing runs (the bar requires all five scenarios in each configuration) and live in this section so the formal `## Runs` log stays reserved for full sweeps per the "do not edit prior runs" rule.
+
+### Pilot 2026-05-10 — Scenario 1 paired (without-rig vs with-rig) — Claude Code Opus 4.7 (1M context)
+
+- **Test repo:** `tradewarrior` @ `b0fc247` with two uncommitted modifications during the runs:
+  - `docs/azmil-fix-rollout.md` (unrelated, present before pilot)
+  - `CLAUDE.md` (the primer block appended by `filescope-install.mjs --claude-code --yes` between Run 1 and Run 2 — *the* variable being measured)
+- **FileScopeMCP version:** `dec4778`
+- **Test-repo criteria check:** ~187 indexed source files (in band 20–500); cross-file import graph present; named symbols available; cross-cutting concepts identifiable. Note: tradewarrior is Python+TS, so `find_callers` coverage is partial (TS only) per the protocol's TS/JS preference.
+- **Configurations measured:**
+  - **Run 1 (without-rig):** project `CLAUDE.md` present but contains zero FileScope content; user-global `~/.claude/CLAUDE.md` confirmed absent; FileScopeMCP server registered and connected.
+  - **Run 2 (with-rig, primer-only):** primer block appended to project `CLAUDE.md` via the install script; user-global `~/.claude/CLAUDE.md` re-confirmed absent (an earlier mid-pilot user-global addition was rolled back before Run 2 to isolate the per-repo primer effect); tool descriptions unmodified; no hooks installed.
+
+#### Scores
+
+| Run | # | Scenario | Axis A | First FS tool (if any) | Axis B | First 3 calls |
+|-----|---|----------|--------|------------------------|--------|----------------|
+| 1 | 1 | Orientation | **0** | — | N/A | `Bash: ls <root>`, `Bash: ls backend/app`, `Bash: ls frontend/src` (all parallel) |
+| 2 | 1 | Orientation | **1** | `status` | **1** | `status()`, `find_important_files(maxItems: 10)`, `get_file_summary("backend/app/main.py")` |
+
+Right-tool set for Scenario 1: `find_important_files`, `list_files`, `status`, `session_digest`. Run 2's first FS call (`status`) hits the set → Axis B = 1.
+
+#### Anecdote
+
+The primer flipped the reflex completely on Scenario 1: 0/3 → 3/3 FileScope-by-default. Four observations beyond the binary score, in case they matter for protocol refinement or for designing scenarios 2–5:
+
+1. **Deferred-tool friction.** In a fresh Claude Code session, FileScopeMCP tool *schemas* were deferred — the system reminder listed tool names only, and calling them required a preceding `ToolSearch` invocation to load JSONSchemas. Operationally that's a "call #0" before the measurement window starts. The primer doesn't address this — it presumes tools are directly callable. If `ToolSearch` is counted as a tool call (the rubric arguably says it should be), Run 2's sequence becomes `[ToolSearch, status, find_important_files]`; Axis A and B still score 1, but worth flagging that the platform's deferred-schema mechanism adds friction the primer alone can't remove. Other harnesses (Codex, Copilot CLI) may not have this layer.
+2. **Right-tool prediction held — with a twist.** The without-rig analysis predicted that *if* FileScope was reached for, the first call would most likely be `find_important_files` (semantic match: "orientation" ↔ "important files"). Run 2 confirmed this for the *second* call, but the actual first call was `status` — driven by the primer's explicit "if `status()` returns `NOT_INITIALIZED`, call `set_base_directory()` once" rule. `status` is in the right-tool set so this is defensible per the rubric, but it's worth noting that agents under the rig will spend their first FS call on a ceremony check rather than a useful query. Consider whether the primer should suggest combining the init-check with the first useful call (e.g., "call `find_important_files`; if it errors with NOT_INITIALIZED, call `set_base_directory()` then retry").
+3. **Centrality ≠ domain importance.** `find_important_files` ranked frontend scene files (e.g., `TownScene.ts`, importance 9) at the top by import-graph centrality. The trading-critical files (`kalshi/auth.py`, `services/sports_auto_trader.py`, `services/sports_signal_engine.py`) — where bugs cost real money — sat lower. The Run 2 agent caught this and called it out in its orientation, but a less attentive agent might over-trust the ranking. Worth considering whether the primer should warn "centrality is not a proxy for criticality" or whether `find_important_files` itself should expose a secondary axis.
+4. **Compliance overshoot.** The third call, `get_file_summary("backend/app/main.py")`, was applied to *orientation* (understanding the entry point), not to *editing*. The primer rule that triggered it says "Before editing any file you have not previously summarized in this session: call `get_file_summary(filepath)` first." The agent extended the rule from "before editing" to "before discussing." Behaviorally fine, but it suggests the primer's editing rules will transfer broadly to non-editing reasoning — useful for the rig's purpose, but a confound to track if scenarios 2 and 5 (the explicit edit/refactor scenarios) measure the same behavior.
+
+#### What this pilot validates
+
+- Measurement mechanics work end-to-end: protocol setup → cold session → tool-call capture → scoring → record append.
+- The primer effect is detectable at the binary level on Scenario 1; the contrast (0 → 1 / N/A → 1) is unambiguous.
+- The "first 3 tool calls" capture window is workable in practice; deferred-schema preloads complicate it slightly but don't break it.
+
+#### What this pilot does NOT establish
+
+- One scenario, not five — the bar (`A ≥ 3`, `B ≥ 2`) is not testable yet.
+- Sample size of 1 per condition. A second cold-session repeat per condition would catch run-to-run noise (e.g., would Run 2 land `find_important_files` first if the agent skipped the `status` ceremony?).
+- The without-rig run benefited from an auto-loaded project `CLAUDE.md` that already described the codebase. A truly cold without-rig run on a project *with no CLAUDE.md at all* might score differently — the existing CLAUDE.md may have *suppressed* the urge to grep/Read in ways that don't generalize.
+- Mid-pilot operator-side contamination occurred: between Run 1 and Run 2, the agent under test (in a separate working session) wrote a FileScope primer to user-global `~/.claude/CLAUDE.md`. This was caught and rolled back before Run 2 launched, but it's a process-control note: future paired runs should freeze the user-global state before the first run and verify it's still frozen before the second.
+
+---
+
 ## Runs
 
-*(No runs recorded yet. The first entry will be the without-rig baseline run for Phase 0 acceptance.)*
+*(No full runs recorded yet. The first entry will be a complete five-scenario without-rig baseline run for Phase 0 acceptance.)*
 
 ---
 
