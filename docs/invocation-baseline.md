@@ -204,7 +204,68 @@ The primer flipped the reflex completely on Scenario 1: 0/3 → 3/3 FileScope-by
 
 ## Runs
 
-*(No full runs recorded yet. The first entry will be a complete five-scenario without-rig baseline run for Phase 0 acceptance.)*
+> **Methodology deviation disclosure (applies to both 2026-05-10 runs below).** The operator executed all five scenarios sequentially in a *single* Claude Code session per configuration, not in five separate cold sessions as the protocol's [Method Overview](#method-overview) and [Procedure](#procedure) sections specify. The deviation was a deliberate operator-time tradeoff. It introduces intra-session context bleed (cached file reads from earlier scenarios, tool-selection patterns established by the first prompt, agent awareness of "this is a series of related questions") which biases scenarios 2–5 in both runs.
+>
+> Critically, the *same* deviation applies to both runs — they remain apples-to-apples for measuring the primer's effect on agent behavior. They are **not** strict Phase 0 / Phase 2 acceptance evidence under a literal reading of the protocol; a future re-run with proper cold-session-per-scenario methodology should be done if strict-protocol acceptance is required. These entries record what *was* measured, with the deviation called out so future readers don't read the scores as protocol-compliant.
+
+### Run 2026-05-10 — without-rig — Claude Code Opus 4.7 (1M context) — single-session sequence
+
+- **Test repo:** `tradewarrior` @ `b0fc247` (working tree had `docs/azmil-fix-rollout.md` modified — unrelated)
+- **Config:**
+  - rig: none (project `CLAUDE.md` reverted to the unmodified `b0fc247` content; verified zero "filescope" mentions before the session opened)
+  - FileScopeMCP version: `dec4778` (server registered and connected; primer absent — server availability without primer is the control)
+  - user-global `~/.claude/CLAUDE.md`: absent
+  - methodology: single-session sequence (see disclosure above)
+  - filled-in scenario placeholders:
+    - `<name>` = `_cycle`
+    - `<file>` = `backend/app/services/sports_auto_trader.py`
+    - `<function>` = `useSportsGames` (TS hook in `frontend/src/hooks/useSports.ts` — TS chosen because `find_callers` is TS/JS only)
+    - `<concept>` = `config loading`
+    - `<symbol>` = `combined_score`
+- **Scores:**
+
+  | # | Scenario | Axis A | First FS tool (if any) | Axis B | Notes |
+  |---|----------|--------|------------------------|--------|-------|
+  | 1 | Orientation | **0** | — | N/A | **Zero tool calls.** Answered directly from auto-loaded project `CLAUDE.md` + claude-mem auto-context. |
+  | 2 | Pre-edit briefing | **0** | — | N/A | First 3 calls: Grep, Read `sports_auto_trader.py`, Read (second file). claude-mem `smart_outline` followed for the structural map. No FileScope. |
+  | 3 | Caller discovery | **0** | — | N/A | Single Grep call for `useSportsGames`. Returned the correct 2 callers (`GameScoreboard.tsx:162`, `TownSquarePage.tsx:42`). Never reached `find_callers`. |
+  | 4 | Cross-cutting concept | **0** | — | N/A | First 2 calls: 2 parallel Greps. Identified all 6 config-loading layers correctly. Never reached `search`. |
+  | 5 | Refactor planning | **0** | — | N/A | First 2 calls: 2 parallel Greps for `combined_score`. Produced a thorough impact map (~85 references across ~14 files). Never reached `find_callers` / `find_symbol`. |
+  | **Totals** | | **A=0/5** | | **B=0/0** | A1 = 0 |
+
+- **Bar:** A ≥ 3 and B ≥ 2 → **FAIL** (expected; this is the control)
+- **Anecdote:** Strong null result. Five scenarios, zero FileScope invocations. Grep was sufficient for the *correctness* of every answer. Three observations to carry into the with-rig comparison:
+  1. **Self-justified rejection.** On operator probe after scenario 5, the agent retrospectively confirmed it had considered FileScopeMCP and rejected it: *"FileScopeMCP would have been a better fit for 'what depends on X structurally'… none of which I needed to answer the questions as posed."* The without-rig agent perceives FileScope as *available but unnecessary* for these prompts — a stronger negative signal than mere oversight.
+  2. **Scenario 1 produced zero tool calls.** Auto-loaded project `CLAUDE.md` plus claude-mem context were rich enough for direct synthesis. More extreme than the pilot's Run 1 (which produced 3 parallel `Bash: ls` calls). Suggests CLAUDE.md presence may *suppress* baseline tool-reach in ways a CLAUDE.md-free repo would not.
+  3. **claude-mem dependency.** Scenario 2 used claude-mem's `smart_outline` for the structural map — a rival MCP-derived shortcut. "Without-rig" here means "without FS primer" but *not* "without other MCP context." A purer baseline would also disable other MCP servers.
+
+### Run 2026-05-10 — with-rig (primer-only) — Claude Code Opus 4.7 (1M context) — single-session sequence
+
+- **Test repo:** `tradewarrior` @ `b0fc247` (working tree: `docs/azmil-fix-rollout.md` modified unrelated; `CLAUDE.md` modified by the install script)
+- **Config:**
+  - rig: primer (FileScopeMCP primer block appended to project `CLAUDE.md` via `node scripts/filescope-install.mjs --claude-code --yes`; tool descriptions unmodified; no hooks installed)
+  - FileScopeMCP version: `dec4778`
+  - user-global `~/.claude/CLAUDE.md`: absent (verified)
+  - methodology: single-session sequence (see disclosure above) — same as Run 1 above for paired comparison
+  - placeholders: identical to Run 1 above
+- **Scores:**
+
+  | # | Scenario | Axis A | First FS tool (if any) | Axis B | Notes |
+  |---|----------|--------|------------------------|--------|-------|
+  | 1 | Orientation | **0** | — | N/A | **Zero tool calls.** Answered directly; primer surfaced in response text (*"FileScopeMCP is indexed — prefer find_callers/get_file_summary/search over grep when applicable"*) but no tool was actually invoked. The richer CLAUDE.md (primer + original tradewarrior content) was sufficient. |
+  | 2 | Pre-edit briefing | **1** | `get_file_summary` (most likely — agent text: *"Per the FileScopeMCP protocol in CLAUDE.md, I should brief myself on the file before you change it"*) | **1** | Explicit primer rule adherence. Tool sequence (preceded by `ToolSearch` to load deferred FS schemas): FileScopeMCP batch (3 calls) + claude-mem. |
+  | 3 | Caller discovery | **1** | `find_callers` | **1** | Agent reached for `find_callers("useSportsGames")` first. **Got 0 results despite the symbol being indexed at `useSports.ts:20`** — see "Notable bug" below. Fell back to Bash grep, which produced the correct 2 callers. |
+  | 4 | Cross-cutting concept | **1** | `search` (most likely — right-tool set fits the prompt shape) | **1** | FileScopeMCP + claude-mem (2 calls each). Produced the same 6-layer config map as Run 1, more concisely. |
+  | 5 | Refactor planning | **0 (conservative)** | — | N/A | First 3 calls: claude-mem `smart_outline` (verifying memory of prior impact map), Bash grep (file-list), Grep pattern. **Ambiguity:** the 3rd call rendered as "Searched for 1 pattern" in the transcript and was not expanded; if it was FileScope's `search` rather than Grep, Axis A flips to 1 (and Axis B = 1 since `find_callers` / `find_symbol` are in the right-tool set, but `search` is not — so B would actually be 0 here). Conservative scoring: Grep, A=0. |
+  | **Totals (conservative)** | | **A=3/5** | | **B=3/3** | A1 = 3 |
+  | **Totals (optimistic, S5 = FS `search`)** | | **A=4/5** | | **B=3/4** | A1 = 4 |
+
+- **Bar:** A ≥ 3 and B ≥ 2 → **PASS** under both readings.
+- **Anecdote:** The primer materially flipped agent behavior. Four observations:
+  1. **Explicit primer adherence.** Scenario 2 produced a verbatim invocation: *"Per the FileScopeMCP protocol in CLAUDE.md, I should brief myself on the file before you change it. Loading the relevant tool schemas."* That's not subtle priming — the agent named the rule and applied it. This is the cleanest possible primer-effect signal.
+  2. **Scenario 1 still produced zero tool calls.** Same as Run 1. The primer didn't change orientation behavior because the project CLAUDE.md was already rich enough to answer from. The primer's first-rule instruction to call `status()` / `set_base_directory()` did *not* fire — the agent never invoked anything for scenario 1. Worth considering whether the primer should make orientation an explicit trigger (e.g., "for orientation prompts, call `find_important_files` first").
+  3. **claude-mem still competed.** Scenario 5 reached for claude-mem first (cached impact-map from earlier in the day) before grep, and possibly never invoked FileScope at all. With both MCPs primed and claude-mem holding fresh context for this exact rename question, claude-mem won the first slot. This is environment-specific (the impact map was in memory because *this same operator* asked the same question earlier on tradewarrior) but worth flagging — primers compete with whatever else is loaded.
+  4. **Notable bug — find_callers misses React hook callers.** `find_callers("useSportsGames")` returned 0 hits despite the hook being indexed at `useSports.ts:20` and having two real callers (`GameScoreboard.tsx:162`, `TownSquarePage.tsx:42`). The agent caught this and noted *"The call graph is missing edges for this hook — grep was the reliable path. Worth a re-scan_all later if you want the call graph trustworthy for React hooks."* This is a real FileScope coverage gap for `export function useX` hook patterns. Filing as a separate issue.
 
 ---
 
