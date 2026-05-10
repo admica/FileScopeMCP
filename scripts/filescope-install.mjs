@@ -43,29 +43,118 @@ async function main() {
   printSummary();
 }
 
+const MARKER_REGEX = /<!-- BEGIN filescope -->[\s\S]*?<!-- END filescope -->/;
+
+async function promptYesNo(question, defaultYes = true) {
+  if (NON_INTERACTIVE) return defaultYes;
+  const rl = readline.createInterface({ input, output });
+  const suffix = defaultYes ? '[Y/n]' : '[y/N]';
+  const answer = (await rl.question(`${question} ${suffix} `)).trim().toLowerCase();
+  rl.close();
+  if (answer === '') return defaultYes;
+  return answer.startsWith('y');
+}
+
 async function stepRegister() {
-  // Stub — Task 15.
-  record('Register MCP server', false, 'TODO');
+  // Delegate to the existing scripts/register-mcp.mjs which already handles claude mcp add
+  // with idempotency and graceful fallback when claude CLI is missing.
+  const r = spawnSync(process.execPath, [REGISTER_MCP], { stdio: 'inherit' });
+  if (r.status === 0) {
+    record('Register MCP server (via claude mcp add)', true);
+  } else {
+    record('Register MCP server (via claude mcp add)', false, `register-mcp.mjs exited ${r.status}`);
+  }
 }
 
 async function stepPrimer() {
-  // Stub — Task 16.
-  record('CLAUDE.md primer', false, 'TODO');
+  if (!existsSync(PRIMER_PATH)) {
+    record('CLAUDE.md primer', false, `template not found at ${PRIMER_PATH}`);
+    return;
+  }
+  const primer = readFileSync(PRIMER_PATH, 'utf-8').trimEnd();
+  const claudeMdPath = path.join(process.cwd(), 'CLAUDE.md');
+
+  if (!existsSync(claudeMdPath)) {
+    const ok = await promptYesNo('Create CLAUDE.md with FileScope primer in current directory?');
+    if (!ok) {
+      record('CLAUDE.md primer', false, 'user declined to create CLAUDE.md');
+      return;
+    }
+    writeFileSync(claudeMdPath, `${primer}\n`, 'utf-8');
+    record('CLAUDE.md primer', true, 'created new CLAUDE.md with primer block');
+    return;
+  }
+
+  const existing = readFileSync(claudeMdPath, 'utf-8');
+  if (MARKER_REGEX.test(existing)) {
+    const ok = await promptYesNo('CLAUDE.md already has a FileScope primer block. Replace it?');
+    if (!ok) {
+      record('CLAUDE.md primer', true, 'existing block left unchanged');
+      return;
+    }
+    const updated = existing.replace(MARKER_REGEX, primer);
+    writeFileSync(claudeMdPath, updated, 'utf-8');
+    record('CLAUDE.md primer', true, 'replaced existing primer block');
+    return;
+  }
+
+  const ok = await promptYesNo('Append FileScope primer block to existing CLAUDE.md?');
+  if (!ok) {
+    record('CLAUDE.md primer', false, 'user declined to modify existing CLAUDE.md');
+    return;
+  }
+  const sep = existing.endsWith('\n') ? '\n' : '\n\n';
+  writeFileSync(claudeMdPath, `${existing}${sep}${primer}\n`, 'utf-8');
+  record('CLAUDE.md primer', true, 'appended primer block to CLAUDE.md');
 }
 
 function stepHooks() {
-  // Stub — Task 17.
-  record('Print hook templates', false, 'TODO');
+  const docPath = path.join(REPO_ROOT, HOOKS_DOC_REL);
+  console.log('');
+  console.log('  --- Hook templates (optional) ---');
+  console.log('');
+  console.log('  FileScopeMCP hooks are NOT auto-installed. Per the layering rule, your');
+  console.log('  .claude/settings.json is yours — we never write to it. To wire up hooks,');
+  console.log('  copy the snippets from:');
+  console.log('');
+  console.log(`    ${docPath}`);
+  console.log('');
+  console.log('  Disable any installed hooks at runtime with FILESCOPE_HOOKS=off.');
+  console.log('');
+  record('Print hook templates', true, `documented at ${HOOKS_DOC_REL}`);
 }
 
 async function stepVerify() {
-  // Stub — Task 18.
-  record('Verify registration', false, 'TODO');
+  const r = spawnSync('claude', ['mcp', 'list'], { encoding: 'utf-8' });
+  if (r.error && r.error.code === 'ENOENT') {
+    record('Verify with `claude mcp list`', false, 'claude CLI not found in PATH');
+    return;
+  }
+  if (r.status !== 0) {
+    record('Verify with `claude mcp list`', false, `claude mcp list exited ${r.status}`);
+    return;
+  }
+  const present = /(^|\s)FileScopeMCP(\s|:|$)/m.test(r.stdout ?? '');
+  if (present) {
+    record('Verify with `claude mcp list`', true, 'FileScopeMCP found in registered servers');
+  } else {
+    record('Verify with `claude mcp list`', false, 'FileScopeMCP not found in `claude mcp list` output');
+  }
 }
 
 function printSummary() {
-  // Stub — Task 19.
-  console.log('Summary placeholder');
+  console.log('');
+  console.log('  === filescope-install summary ===');
+  console.log('');
+  let allPassed = true;
+  for (const r of results) {
+    const mark = r.ok ? '✓' : '✗';
+    const note = r.note ? `  (${r.note})` : '';
+    console.log(`    ${mark}  ${r.step}${note}`);
+    if (!r.ok) allPassed = false;
+  }
+  console.log('');
+  process.exit(allPassed ? 0 : 1);
 }
 
 await main();
