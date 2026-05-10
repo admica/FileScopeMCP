@@ -340,6 +340,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
   server.registerTool("find_symbol", {
     title: "Find Symbol",
     description: [
+      "**When to call:** when you know a function/class/type name and need its file location. Try this before falling back to grep.",
       "Resolve a symbol name (function/class/interface/type/enum/const/module/struct) to its defining file + line range in a single call — no need to grep source.",
       "Exact case-sensitive match; trailing `*` switches to prefix match (e.g. `React*` matches `React`, `ReactDOM`, `Reactive`). Any other `*` in the name is treated as a literal character.",
       "`kind` accepts: \"function\" | \"class\" | \"interface\" | \"type\" | \"enum\" | \"const\" | \"module\" | \"struct\". Unknown kind returns an empty result, never an error.",
