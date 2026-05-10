@@ -431,6 +431,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
   server.registerTool("find_callees", {
     title: "Find Callees",
     description: [
+      "**When to call:** when you need to understand what a function depends on internally, before modifying its body. TS/JS only — for other languages, fall back to grep.",
       "Find all symbols that the named symbol calls.",
       "Exact case-sensitive name match. If multiple symbols share the name, callees of all matching symbols are returned.",
       "Call graph is TS/JS-only — symbols defined in Python, Go, Ruby, or other languages resolve by name but have no caller/callee edges (always returns `{items: [], total: 0}`).",
