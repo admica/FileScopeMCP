@@ -235,7 +235,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("find_important_files", {
     title: "Find Important Files",
-    description: "Find the highest-importance files in the project. Returns files sorted by importance descending with dependency counts and staleness flags. Use this over list_files when you need the top N files by importance with relationship metadata. Precondition: server must be initialized.",
+    description: "**When to call:** when orienting to a new codebase, or when the user asks 'what's important in this project'. Find the highest-importance files in the project. Returns files sorted by importance descending with dependency counts and staleness flags. Use this over list_files when you need the top N files by importance with relationship metadata. Precondition: server must be initialized.",
     inputSchema: {
       maxItems: z.coerce.number().optional().describe("Maximum number of files to return (default: 10)"),
       minImportance: z.coerce.number().optional().describe("Minimum importance score (0-10)"),
