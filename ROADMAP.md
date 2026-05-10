@@ -30,7 +30,7 @@ The honest baseline, from a first-person Claude Code session-reflex review:
 
 Two opinionated tracks, evidence-first, layered-not-monkeying:
 
-- **Track A — Claude Code:** a primary daily driver. Build an *experimental rig* (compound tools, tool-description rewrites, project priming, hook templates) and run real sessions to measure whether agent reflexes actually change. Productize what works.
+- **Track A — Claude Code:** a primary daily driver. Build an *experimental rig* (project priming, tool-description rewrites, hook templates) and run real sessions to measure whether agent reflexes actually change. Add compound tools as a contingent follow-up only if the simpler rig misses the bar. Productize what works.
 - **Track B — Hermes:** different mechanism (no harness-level hooks; lever is system-prompt priming via `SKILL.md` and `AGENTS.md`). Apply Track A's evidence to a Hermes-shaped install — not a copy of Track A.
 
 Phases 2 and beyond are deliberately under-specified. We will not pre-decide what productization looks like before Phase 1 runs. Roadmaps that pre-bake their answer don't survive contact with reality.
@@ -56,7 +56,20 @@ These rules apply to Track A, Track B, and anything we ship in the future. They 
 
 Before building, write down what we believe is true about agent invocation reflexes today (the table above) and commit it to the repo. This becomes the control group for Phase 2 measurements: with-rig invocation rates compared against without-rig baseline. Without this, we have no signal on whether the rig actually moved the needle.
 
-**Deliverable:** `docs/invocation-baseline.md` — five reference scenarios, the pre-rig invocation behavior in each, the criteria by which "the rig helped" will be judged, and a date stamp so future re-runs can show drift over time as base agents evolve.
+**Deliverable:** `docs/invocation-baseline.md` — a reproducible test protocol, not just a table of situations.
+
+**Protocol shape (must be concrete enough to score deterministically):**
+
+- **Fresh test repository** — a small public repo the agent has not seen in prior sessions, cloned locally for each run. Eliminates the "agent already has context" confound.
+- **Five scripted user prompts**, run on a cold session in this fresh repo. Each prompt targets one reference scenario:
+  1. *Orientation:* "Give me a quick orientation to this codebase."
+  2. *Pre-edit briefing:* "I want to modify the function `<name>` in `<file>`. Tell me what's involved before I start."
+  3. *Caller discovery:* "What calls `<function>`?"
+  4. *Cross-cutting concept:* "Where in this codebase is `<concept like authentication / config loading / error handling>` handled?"
+  5. *Refactor planning:* "I want to rename `<symbol>`. Show me what's affected."
+- **Deterministic scoring rubric** — for each scenario the transcript is scored on two binary axes: (a) Did the agent invoke any FileScopeMCP tool *unprompted* in its first 3 actions? (b) Was the invoked tool the *right* one for the scenario? "Right tool" is enumerated per-scenario in the protocol document.
+- **Without-rig baseline run** is recorded first and committed. With-rig runs in Phase 2 compare against this baseline at the same scenario index.
+- **Date stamp + agent version** — base agents drift; the baseline is timestamped and the agent identifier captured so future re-runs can detect drift independently from rig effect.
 
 ---
 
@@ -68,40 +81,58 @@ Before building, write down what we believe is true about agent invocation refle
 
 - **Project priming.** A short, imperative `CLAUDE.md` primer — trigger conditions ("call X before Y"), not capability descriptions. Installable into target projects with the marker convention from the layering rules. Lives in this repo as a template; gets generated into the user's project as a marked block.
 
-- **Tool descriptions rewritten as triggers.** Every tool's `description` field in `mcp-server.ts` gets a "**When to call:**" prefix and a concrete trigger condition. Counterweights ("skip if …") where appropriate. Done in our repo; no user-side changes.
-
-- **Two compound, ready-to-act MCP tools.** Their job is to *beat `Read` on cost* — to return enough context in one call that an agent under context pressure prefers them to chained primitives.
-  - `session_digest(since?)` — sub-1 KB project orientation: top files, recent changes, broker state, hints.
-  - `prepare_edit(filepath)` — pre-edit briefing: summary + dependents (with import lines) + exports + callers + cycle membership + community siblings, in one call.
-  - These do not replace primitives; they sit alongside them. They earn their place by being invoked, or they get cut in Phase 3.
+- **Tool descriptions rewritten as triggers.** Every tool's `description` field in `mcp-server.ts` gets a "**When to call:**" prefix and a concrete trigger condition. Counterweights ("skip if …") where appropriate. Done in our repo; no user-side changes. **Constraint: preserve the noun-match for primitives that already get reflexively invoked** (e.g., `find_important_files`, `detect_cycles`, `get_communities`) — adding a trigger prefix is fine, but the existing keywords that already drive invocation must remain in the description. Each tool's rewrite ships as a separate atomic commit so any single description change can be reverted without rolling back the whole pass.
 
 - **Hook templates as documentation, not auto-install.** `docs/claude-code-hooks.md` ships canonical hook snippets (PreToolUse on Read/Edit/Write, SessionStart) and a small `filescope-helper` CLI so the snippets are copy-paste-ready. The installer prints the doc URL and the snippet; users paste into their own `.claude/settings.json` if they want them. **No auto-write — see Layering Rules.**
+
+*(Compound MCP tools — `session_digest`, `prepare_edit` — were considered for Phase 1 but moved to a contingent Phase 1.5. Rationale: they are real engineering work with permanent maintenance cost. Building them before Phase 2 evidence is premature; Phase 1.5 below makes them a conditional follow-up.)*
 
 - **Install command.** `filescope install --claude-code` detects Claude Code, runs `claude mcp add` (idempotent, public API), opt-in `CLAUDE.md` primer with markers, prints hook snippets and the doc URL, verifies with `claude mcp list`. Output: per-step ✓/✗ table.
 
 ### What we are explicitly not deciding yet
 
-- Exact tool signatures and payload shape (will be designed in `.planning/phase-1/PLAN.md` when Phase 1 starts).
+- The exact phrasing of the trigger-condition prefixes for each tool description (will be designed in `.planning/phase-1/PLAN.md` when Phase 1 starts).
 - Whether the helper CLI talks to a long-running daemon or spawns short-lived MCP servers.
 - Whether hooks should fire on every Read or only the first Read of a file per session.
-- Whether `prepare_edit` includes test-file heuristics in v1.
 - Whether the install command itself ships as `filescope install ...` or as a flag on the existing `./build.sh` / `register-mcp.mjs` path.
+- Compound-tool signatures and payload shapes — deferred to Phase 1.5's plan if and when that phase triggers.
 
 ### Phase 1 success criteria (how Phase 2 will judge this rig)
 
-- Compound tools exist, are tested, and return target payloads under their size targets.
-- Tool description rewrite is complete and reviewed.
+- Tool description rewrite is complete, reviewed, and ships as one-tool-per-commit so any single rewrite is independently revertible.
+- Description rewrite preserves the existing noun-match keywords for already-invoked primitives.
 - Hook templates and helper CLI exist and are documented; layering rules are honored.
 - Installer detects Claude Code, registers MCP, and produces a clear ✓/✗ table — *without* writing to any user-owned hook config.
 - Rig is opt-in end-to-end. A user who installs FileScopeMCP without the new install command sees no behavior change.
 
 ---
 
+## Phase 1.5 — Compound Tools (Contingent)
+
+**Triggered only if Phase 2 evidence shows the Phase 1 rig (primer + description rewrite + hook templates) does not move agent invocation to the success bar on its own.** If Phase 2 hits the bar without compound tools, Phase 1.5 is skipped and the proposed tools are dropped from the plan.
+
+**If triggered, ships two compound, ready-to-act MCP tools** whose job is to *beat `Read` on cost* — return enough context in one call that an agent under context pressure prefers them to chained primitives:
+
+- `session_digest(since?)` — sub-1 KB project orientation: top files, recent changes, broker state, hints.
+- `prepare_edit(filepath)` — pre-edit briefing: summary + dependents (with import lines) + exports + callers + cycle membership + community siblings, in one call.
+
+These do not replace primitives; they sit alongside them. They re-enter Phase 2 measurement: a second with-rig run is scored against the same five scenarios. If they're invoked and move the bar, they ship to Phase 3. If they aren't invoked, they get cut without further iteration — no sunk-cost retention.
+
+This staging eliminates the worst-case "build two tools, ship two tools, then delete two tools" by gating the build on evidence the simpler rig isn't enough.
+
+---
+
 ## Phase 2 — Run, Observe, Measure
 
-Real Claude Code sessions on real codebases — this repo plus a fresh test repo where Claude has not been primed by prior sessions — across the five reference scenarios from Phase 0. With-rig versus without-rig invocation rates. Document anecdotes: what nudged the agent to invoke FileScopeMCP? What got in the way? Were the compound tools used? Did hooks (when wired up by the user) actually change behavior, or did the primer alone do the work?
+Real Claude Code sessions on real codebases — this repo plus the fresh test repo from the Phase 0 protocol — across the five reference scenarios. With-rig versus without-rig invocation rates, scored against the deterministic rubric from Phase 0. Document anecdotes: what nudged the agent to invoke FileScopeMCP? What got in the way? Did hooks (when wired up by the maintainer running the test) actually change behavior, or did the primer alone do the work?
 
-**Bar:** in a with-rig session, the agent invokes FileScopeMCP unprompted in ≥ 3 of 5 reference scenarios. If the bar is missed, Phase 1 iterates rather than Phase 3 starting.
+**Bar:** in a with-rig session, the agent invokes FileScopeMCP unprompted in ≥ 3 of 5 reference scenarios *and* picks the right tool for the scenario in ≥ 2 of those 3. If the bar is missed, Phase 1 iterates or Phase 1.5 triggers; Phase 3 does not start.
+
+**What Phase 2 can prove vs. what it can't:**
+
+- *Provable here:* Whether the **primer + tool description rewrite** moves invocation reflexes. These are testable in any session, including future user sessions, because they ship as part of the install path.
+- *Provable only by maintainers:* Whether **hooks** move behavior. Per the Layering Rules, hook configs are documentation/templates only — most users won't copy-paste them. So hook efficacy is measured exclusively by maintainer-driven runs where the hooks are wired up locally for the test. The product remains layered; the experiment uses a non-layered measurement rig.
+- *Not provable here:* Long-tail real-world invocation drift. Phase 2 is a controlled experiment; ongoing user-session invocation rates would require telemetry that does not exist. See Success Criteria for how this gap is bounded.
 
 This phase produces *evidence*, not a product. The evidence shapes Phase 3.
 
@@ -121,11 +152,15 @@ In all branches, the layering rules from this document remain non-negotiable.
 
 ## Phase 4 — Hermes Track
 
-Hermes has no harness-level hook layer. The lever is system-prompt priming. Apply Phase 2's "trigger condition" insight to:
+**Prerequisite (must pass before Phase 4 begins):** verify Hermes auto-discovery actually injects `SKILL.md` content into Hermes's system prompt at runtime. The README documents the mechanism (`~/.hermes/skills/<category>/<name>/SKILL.md`); we have not end-to-end-verified that the current FileScopeMCP `SKILL.md` is actually picked up and surfaced to the agent. If auto-discovery doesn't inject the content, Track B's main lever does not exist and the phase has to be re-shaped (likely toward an explicit user-side skill-injection mechanism with appropriate documentation, still respecting layering rules).
+
+Hermes has no harness-level hook layer. The lever is system-prompt priming. Once the prerequisite is verified, apply Phase 2's "trigger condition" insight to:
 
 - A `SKILL.md` rewrite that uses the same imperative voice and trigger-condition framing.
 - An `AGENTS.md` rewrite that surfaces the same priming concepts in the doc Hermes (and Codex) read.
 - A skill auto-install verifier — not an auto-installer that writes config; a tool that checks whether the skill is in `~/.hermes/skills/` and tells the user how to fix it if not.
+
+**Inter-track scheduling:** Track B does not block on Track A reaching final productized form. It blocks on Track A's *learnings* being stable — defined as "Phase 2 has produced its evidence and Phase 3 has chosen a productization shape." If Track A ends up iterating Phase 1 several times, Track B may begin in parallel from Phase 2 evidence alone rather than waiting for Phase 3 closure.
 
 Track B does not blindly copy Track A; it applies Track A's *learnings* to a different mechanism. Same layering rules apply.
 
@@ -135,9 +170,11 @@ Codex / OpenClaw / Cursor: out of scope for this roadmap. They share the `AGENTS
 
 ## Risks and Pivot Points
 
-- **Phase 2 may show hooks don't help.** Then Phase 3 is primer-only and the helper CLI is descoped. Compound tools are kept if they were used; cut if not. The roadmap survives.
-- **Compound tools may not get invoked.** Then they get cut in Phase 3 or merged back into existing primitives. We do not ship dead tool surface to look productive.
-- **Hermes constraints may invalidate Track A learnings.** Then Track B reverts to the existing `SKILL.md` + `AGENTS.md` approach with sharper writing, and we accept the two tracks diverging.
+- **Phase 2 may show hooks don't help.** Then Phase 3 is primer-only and the helper CLI is descoped. Phase 1.5 (compound tools) may still trigger if the primer alone misses the bar. The roadmap survives.
+- **Phase 1.5 compound tools may not get invoked.** Then they get cut without further iteration — atomic-commit revertibility makes the rollback clean. We do not ship dead tool surface to look productive.
+- **Description rewrite may worsen invocation of a previously-working primitive.** Mitigations: (a) the noun-match preservation constraint in Phase 1, (b) one-tool-per-commit so any single rewrite can be reverted without rolling back the whole pass, (c) the Phase 0 baseline includes runs against the unrewritten primitives so we can detect regressions in the diff.
+- **Hermes auto-discovery may not actually inject `SKILL.md` content.** Phase 4's prerequisite check exists for this. If it fails, Track B reshapes around an explicit user-side skill-injection path; we don't pretend the lever works when it doesn't.
+- **Hermes constraints may invalidate Track A learnings even with auto-discovery working.** Then Track B reverts to the existing `SKILL.md` + `AGENTS.md` approach with sharper writing, and we accept the two tracks diverging.
 - **Tool description rewrite may be the largest single lever.** If true, Phase 3 deprioritizes hooks and front-loads description quality across every tool — including the existing primitives.
 - **The honest baseline may shift over time** as base agents change. The Phase 0 baseline file is date-stamped; re-running it periodically is part of long-term maintenance.
 
@@ -145,10 +182,12 @@ Codex / OpenClaw / Cursor: out of scope for this roadmap. They share the `AGENTS
 
 ## Success Criteria (for the strategic bet, not just Phase 1)
 
-- A measurable increase in unprompted FileScopeMCP invocation in Claude Code sessions, attributable to the rig and not to the user prompting it.
+- **Phase 2's invocation bar (≥3/5 unprompted, ≥2/3 right-tool) holds in re-run sessions over time** — at minimum a re-run one calendar month after Phase 3 ships, on the same protocol against the same fresh test repo. Drift below the bar in a re-run triggers a Phase 3 revisit, not silent acceptance.
 - Layering rules upheld in every shipped artifact — no pull request that auto-writes to a user-owned config file gets merged.
 - A single, opinionated Hermes install path that does not regress what already works.
 - The roadmap pivots in response to Phase 2 evidence, rather than being defended against it.
+
+**On telemetry:** the strategic-bet criterion above is intentionally bounded to the controlled re-run because real-world invocation telemetry does not exist today. Lightweight invocation logging (e.g., an opt-in `~/.filescope/invocation-log.jsonl` that records tool calls per session) is plausible future work and would let us measure drift in actual user sessions instead of just controlled re-runs. It is a future Phase, not a precondition for closing this roadmap.
 
 ---
 
