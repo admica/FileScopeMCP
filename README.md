@@ -50,6 +50,16 @@ find_important_files(limit: 5)
 status()
 ```
 
+### Opinionated Claude Code install (recommended)
+
+For a richer install that adds a project priming `CLAUDE.md` and points to optional hook templates:
+
+```bash
+npm run install-claude-code   # or: npx filescope-install --claude-code
+```
+
+The command is layered, not invasive — it never auto-writes to your `.claude/settings.json`. Hook templates are documented at [docs/claude-code-hooks.md](docs/claude-code-hooks.md); paste them into your settings if and when you want them. The `CLAUDE.md` primer is wrapped in `<!-- BEGIN filescope -->` / `<!-- END filescope -->` markers so it can be cleanly added, replaced, or removed without touching surrounding content. See [ROADMAP.md](ROADMAP.md) Phase 1 for the design rationale.
+
 ### Agent Runtimes (Hermes, Codex, OpenClaw)
 
 Agent runtimes discover FileScopeMCP via the repo's `AGENTS.md`, which includes MCP registration config, broker/LLM setup, and a pointer to the portable skill file at `skills/filescope-mcp/SKILL.md`.
