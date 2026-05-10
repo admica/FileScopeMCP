@@ -1,8 +1,31 @@
-# Bug: `find_callers` misses React hook call sites
+# Bug: `find_callers` misses callers via tsconfig-aliased imports (originally surfaced as "missing React hook callers")
 
 **Surfaced:** 2026-05-10 during the with-rig invocation-baseline run on `tradewarrior` (see `docs/invocation-baseline.md` Run 2026-05-10 with-rig, Scenario 3).
 
 **FileScopeMCP version at time of report:** `dec4778`
+
+**Resolved:** 2026-05-10 — root cause was tsconfig path-alias resolution in `resolveTsJsImport`. The "React hook" framing in this doc's original title is misleading: the bug affected **every** TS/JS project using tsconfig `paths` (i.e., most modern Vite/Next/Webpack codebases). The "React hooks" symptom was an artifact of the test repo (tradewarrior's frontend imports hooks via the `@/` alias). See "Resolution" below; the root-cause analysis section is preserved as written for historical context.
+
+## Resolution
+
+Root cause: in `src/language-config.ts:resolveTsJsImport`, the package-vs-local heuristic was `(!importPath.startsWith('.') && !importPath.startsWith('/'))`. An import like `@/hooks/useSports` matches that condition and got classified as an npm scoped package (treated like `@anthropic-ai/sdk`), so the resolver:
+- Returned an `EdgeResult` with `isPackage: true` and a non-existent `node_modules` target.
+- Never populated the `specToTargetPath` map (which is gated on `!edge.isPackage`).
+- Therefore the consumer's `import { useSportsGames } from '@/hooks/useSports'` never produced an entry in `importedSymbolIndex`.
+- And the resolver's call-site pass silently discarded `useSportsGames(...)` candidates (D-12 step 3 — "unresolvable → silent discard").
+
+Fix: a new module `src/tsconfig-paths.ts` reads `compilerOptions.baseUrl` + `compilerOptions.paths` from `<projectRoot>/tsconfig.json` (with JSONC comment stripping and per-projectRoot caching). `resolveTsJsImport` now attempts alias resolution **before** the package heuristic; if the importPath matches a configured alias pattern (e.g., `@/*`), the alias-resolved absolute path is probed for `.ts`/`.tsx`/`.js`/`.jsx` and returned as a local edge (`isPackage: false`). The original heuristic is unchanged when no alias matches, preserving behavior for genuine npm-scoped imports.
+
+Tests:
+- `src/tsconfig-paths.test.ts` — 16 tests covering tsconfig parsing (missing file, malformed JSON, JSONC comments, default baseUrl, multiple replacements, caching) and alias resolution (wildcard, exact match, longer-prefix, npm-scoped negative control).
+- `src/language-config.tsconfig-paths-integration.test.ts` — 3 end-to-end tests reproducing the original tradewarrior symptom and verifying both the import edge and the call-site edge form correctly through the alias.
+
+Scope NOT covered (defer until needed):
+- `extends` chains in tsconfig.json.
+- `compilerOptions.baseUrl` other than `.`.
+- Multiple replacements per pattern (only the first is used).
+
+Stopgap shipped earlier in the same session (commit `d44ddfd`): `find_callers` / `find_callees` now return a `warning` field when the queried symbol IS indexed but has zero edges. This compensates for any *other* parser miss the alias fix doesn't cover, and remains useful as defense-in-depth even after the root-cause fix lands.
 
 ## Symptom
 

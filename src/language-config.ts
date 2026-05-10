@@ -24,6 +24,7 @@ import { EXTRACTED, INFERRED, CONFIDENCE_SOURCE_EXTRACTED, CONFIDENCE_SOURCE_INF
 import type { ConfidenceSource } from './confidence.js';
 import { extractRicherEdges } from './change-detector/ast-parser.js';
 import { relativizePath, absolutifyPath } from './file-utils.js';
+import { resolveTsConfigAlias } from './tsconfig-paths.js';
 import type { CallSiteEdge } from './change-detector/types.js';
 
 const _require = createRequire(import.meta.url);
@@ -528,6 +529,41 @@ async function resolveTsJsImport(
   edgeType: string
 ): Promise<EdgeResult | null> {
   if (isUnresolvedTemplateLiteral(importPath)) return null;
+
+  // tsconfig path-alias resolution. Runs BEFORE the package/local heuristic
+  // so an import like `@/hooks/useSports` (Vite/Next/Webpack alias) is not
+  // mis-classified as an npm scoped package. See docs/known-issues/
+  // find-callers-react-hooks.md for the symptom this fixes.
+  const aliasResolved = resolveTsConfigAlias(importPath, projectRoot);
+  if (aliasResolved !== null) {
+    const possibleExtensions = ['.ts', '.tsx', '.js', '.jsx'];
+    let resolvedTarget: string | null = null;
+    try {
+      await fsPromises.access(aliasResolved);
+      resolvedTarget = aliasResolved;
+    } catch {
+      for (const ext of possibleExtensions) {
+        const pathToCheck = aliasResolved + ext;
+        try {
+          await fsPromises.access(pathToCheck);
+          resolvedTarget = pathToCheck;
+          break;
+        } catch { /* try next */ }
+      }
+    }
+    if (resolvedTarget) {
+      return {
+        target: resolvedTarget,
+        edgeType,
+        confidence: EXTRACTED,
+        confidenceSource: CONFIDENCE_SOURCE_EXTRACTED,
+        weight: 1,
+        isPackage: false,
+      };
+    }
+    // Alias matched but file not found — fall through to the existing logic
+    // so behavior degrades gracefully (typically results in null/unresolved).
+  }
 
   try {
     const resolvedPath = resolveImportPath(importPath, filePath, projectRoot);
