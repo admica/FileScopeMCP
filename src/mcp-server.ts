@@ -760,7 +760,7 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
 
   server.registerTool("detect_cycles", {
     title: "Detect Cycles",
-    description: "Detect all circular dependency groups in the project's local import graph. Returns an array of cycle groups (each group is an array of file paths forming a cycle), total cycle count, and total files involved. Use to identify tightly-coupled modules that may need refactoring.",
+    description: "**When to call:** when the user asks about circular dependencies, tightly-coupled modules, or import cycles, before any large refactor. Detect all circular dependency groups in the project's local import graph. Returns an array of cycle groups (each group is an array of file paths forming a cycle), total cycle count, and total files involved. Use to identify tightly-coupled modules that may need refactoring.",
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
