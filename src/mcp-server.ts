@@ -392,9 +392,10 @@ export function registerTools(server: McpServer, coordinator: ServerCoordinator)
   server.registerTool("find_callers", {
     title: "Find Callers",
     description: [
+      "**When to call:** before renaming, deleting, or changing the signature of a TS/JS function. Try this before falling back to grep — it's structural, not text-based.",
       "Find all symbols that call the named symbol.",
       "Exact case-sensitive name match. If multiple symbols share the name, callers of all matching symbols are returned.",
-      "Call graph is TS/JS-only — symbols defined in Python, Go, Ruby, or other languages resolve by name but have no caller/callee edges (always returns `{items: [], total: 0}`).",
+      "Call graph is TS/JS-only — symbols defined in Python, Go, Ruby, or other languages resolve by name but have no caller/callee edges (always returns `{items: [], total: 0}`). For those languages, fall back to grep.",
       "`filePath` restricts which symbol definition is the target — use it when a name is defined in multiple files.",
       "`maxItems` defaults to 50, clamped to [1, 500].",
       "Response: `{items: [{path, name, kind, startLine, confidence}], total, truncated?: true, unresolvedCount}`.",
